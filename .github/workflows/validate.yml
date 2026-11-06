@@ -24,7 +24,7 @@ jobs:
           node <<'NODE'
           const fs = require('fs');
           const html = fs.readFileSync('dashboard.html', 'utf8');
-          const scripts = [...html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi)]
+          const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
             .map(match => match[1]).filter(source => source.trim());
           if (!scripts.length) throw new Error('No inline JavaScript found');
           scripts.forEach((source, index) => {
