@@ -283,6 +283,8 @@ def us_market_quote():
         if series.empty:
             continue
         last_time, last = series.index[-1], float(series.iloc[-1])
+        # 五日回補只用來找到最近交易時段；圖表只呈現該時段，避免休市時混入多日。
+        session = series[series.index.date == pd.Timestamp(last_time).date()]
         previous = None
         if symbol in daily_close.columns:
             d = daily_close[symbol].dropna()
@@ -299,7 +301,7 @@ def us_market_quote():
             "pct": round(pct, 3) if pct is not None else None,
             "time": pd.Timestamp(last_time).isoformat(),
             "points": [{"time": pd.Timestamp(i).isoformat(), "value": round(float(v), 4)}
-                       for i, v in series.tail(78).items()]
+                       for i, v in session.tail(78).items()]
         }
         rows.append(row)
         if symbol == "^GSPC":
