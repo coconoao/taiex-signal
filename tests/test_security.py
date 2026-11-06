@@ -7,19 +7,23 @@ import app as web_app
 
 class ProductionAuthConfigurationTests(unittest.TestCase):
     def test_public_deployment_requires_oauth_and_supabase(self):
-        with patch.object(web_app, "READONLY", True), \\
-             patch.object(web_app, "GOOGLE_ENABLED", False), \\
-             patch.object(web_app, "SUPABASE_URL", "https://example.supabase.co"), \\
-             patch.object(web_app, "SUPABASE_SERVICE_ROLE_KEY", "secret"), \\
-             patch.object(web_app, "ADMIN_EMAIL", "admin@example.com"):
+        with patch.multiple(
+            web_app,
+            GOOGLE_ENABLED=False,
+            SUPABASE_URL="https://example.supabase.co",
+            SUPABASE_SERVICE_ROLE_KEY="secret",
+            ADMIN_EMAIL="admin@example.com",
+        ):
             self.assertFalse(web_app.production_oauth_ready())
 
     def test_public_deployment_accepts_complete_oauth_configuration(self):
-        with patch.object(web_app, "READONLY", True), \\
-             patch.object(web_app, "GOOGLE_ENABLED", True), \\
-             patch.object(web_app, "SUPABASE_URL", "https://example.supabase.co"), \\
-             patch.object(web_app, "SUPABASE_SERVICE_ROLE_KEY", "secret"), \\
-             patch.object(web_app, "ADMIN_EMAIL", "admin@example.com"):
+        with patch.multiple(
+            web_app,
+            GOOGLE_ENABLED=True,
+            SUPABASE_URL="https://example.supabase.co",
+            SUPABASE_SERVICE_ROLE_KEY="secret",
+            ADMIN_EMAIL="admin@example.com",
+        ):
             self.assertTrue(web_app.production_oauth_ready())
 
 
