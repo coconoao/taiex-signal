@@ -320,7 +320,9 @@ button.secondary{background:white;color:#345b86}.actions{display:flex;gap:4px;fl
 <p class="muted">只有管理員能操作。核准後可使用網站；拒絕或撤銷後會立即失去存取權。</p>
 <div id="msg" class="muted">載入中…</div><div id="users"></div>
 <script>
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));\n// Encode apostrophes before inserting email values into single-quoted attributes.\nconst escAttr=s=>esc(s).replaceAll(String.fromCharCode(39),"&#39;");
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// Encode apostrophes before inserting email values into single-quoted attributes.
+const escAttr=s=>esc(s).replaceAll(String.fromCharCode(39),"&#39;");
 async function load(){
  const r=await fetch("/api/admin/users",{cache:"no-store"}),d=await r.json();
  if(!r.ok) throw Error(d.error||"載入失敗");
