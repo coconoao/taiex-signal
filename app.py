@@ -5,6 +5,7 @@ API 金鑰：使用者各自填在瀏覽器；分析時透過登入後的 /api/a
 對外部署（--host 0.0.0.0 或 READONLY=1）：自動唯讀，關閉手動更新與匯出到本機；排程照常執行。
 """
 import datetime as dt, json, os, subprocess, sys, threading, time, urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 import base64, hmac, secrets, urllib.request, urllib.error
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +31,7 @@ READONLY = os.environ.get("READONLY", "1" if HOST not in ("127.0.0.1", "localhos
 AUTO = "--no-auto" not in sys.argv and not DEMO and not os.environ.get("K_SERVICE")
 TZ = ZoneInfo("Asia/Taipei")
 JOB, LOCK, QUOTE = {"running": None, "log": ""}, threading.Lock(), {"t": 0, "v": None}
+US_MARKET_CACHE = {"t": 0, "v": None}
 AUTH_USER = os.environ.get("TAIEX_USER", "")
 AUTH_PASSWORD = os.environ.get("TAIEX_PASSWORD", "")
 
@@ -227,6 +229,94 @@ def quote():  # 加權指數即時報價（Yahoo，約有數分鐘延遲），�
          "time": dt.datetime.now(TZ).strftime("%H:%M:%S")}
     QUOTE.update(t=time.time(), v=v)
     return v
+
+def us_market_quote():
+    """美股最新可取得的 5 分鐘行情；Yahoo 非官方資料，可能延遲或缺漏，快取 60 秒。"""
+    if US_MARKET_CACHE["v"] and time.time() - US_MARKET_CACHE["t"] < 60:
+        return US_MARKET_CACHE["v"]
+    import pandas as pd
+    import yfinance as yf
+
+    tickers = {
+        "^GSPC": "S&P 500",
+        "^IXIC": "NASDAQ Composite",
+        "^DJI": "Dow Jones",
+        "^SOX": "PHLX Semiconductor",
+        "TSM": "TSMC ADR",
+        "^VIX": "VIX"
+    }
+    raw = yf.download(
+        list(tickers), period="1d", interval="5m", auto_adjust=True,
+        progress=False, threads=4, timeout=15, prepost=False
+    )
+    if raw is None or raw.empty:
+        raise RuntimeError("目前無法取得美股盤中資料")
+    if isinstance(raw.columns, pd.MultiIndex):
+        if "Close" in raw.columns.get_level_values(0):
+            close = raw.xs("Close", axis=1, level=0)
+        elif "Close" in raw.columns.get_level_values(1):
+            close = raw.xs("Close", axis=1, level=1)
+        else:
+            raise RuntimeError("美股行情缺少 Close 欄位")
+    else:
+        close = raw[["Close"]].rename(columns={"Close": "^GSPC"})
+    daily = yf.download(
+        list(tickers), period="5d", interval="1d", auto_adjust=True,
+        progress=False, threads=4, timeout=15
+    )
+    if isinstance(daily.columns, pd.MultiIndex):
+        if "Close" in daily.columns.get_level_values(0):
+            daily_close = daily.xs("Close", axis=1, level=0)
+        elif "Close" in daily.columns.get_level_values(1):
+            daily_close = daily.xs("Close", axis=1, level=1)
+        else:
+            daily_close = pd.DataFrame()
+    else:
+        daily_close = daily[["Close"]].rename(columns={"Close": "^GSPC"}) if not daily.empty else pd.DataFrame()
+
+    rows = []
+    chart = None
+    for symbol, name in tickers.items():
+        if symbol not in close.columns:
+            continue
+        series = close[symbol].dropna()
+        if series.empty:
+            continue
+        last_time, last = series.index[-1], float(series.iloc[-1])
+        previous = None
+        if symbol in daily_close.columns:
+            d = daily_close[symbol].dropna()
+            if len(d):
+                intraday_day = pd.Timestamp(last_time).date()
+                daily_day = pd.Timestamp(d.index[-1]).date()
+                previous = float(d.iloc[-2] if daily_day == intraday_day and len(d) > 1 else d.iloc[-1])
+        change = last - previous if previous else None
+        pct = (change / previous * 100) if previous else None
+        row = {
+            "symbol": symbol, "name": name, "last": round(last, 4),
+            "previous_close": round(previous, 4) if previous else None,
+            "change": round(change, 4) if change is not None else None,
+            "pct": round(pct, 3) if pct is not None else None,
+            "time": pd.Timestamp(last_time).isoformat(),
+            "points": [{"time": pd.Timestamp(i).isoformat(), "value": round(float(v), 4)}
+                       for i, v in series.tail(78).items()]
+        }
+        rows.append(row)
+        if symbol == "^GSPC":
+            chart = {"name": name, "symbol": symbol, "points": row["points"]}
+    result = {
+        "source": "Yahoo Finance（yfinance）",
+        "interval": "5m",
+        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "note": "顯示目前可取得的最新 5 分鐘資料；可能延遲、休市時會停留在最近一個交易時段，並非交易所保證即時報價。",
+        "items": rows,
+        "chart": chart
+    }
+    if not rows:
+        raise RuntimeError("美股資料暫時沒有可用報價")
+    US_MARKET_CACHE.update(t=time.time(), v=result)
+    return result
+
 
 def trigger_cloud_run_refresh():
     """透過 Cloud Run service identity 啟動持久化資料更新 Job。"""
@@ -559,6 +649,11 @@ class H(SimpleHTTPRequestHandler):
                 except Exception:
                     pass
             return self.send_json(state)
+        if u.path == "/api/us-market":
+            try:
+                return self.send_json(us_market_quote())
+            except Exception as e:
+                return self.send_json({"error": str(e)}, 503)
         if u.path in ("/api/quote", "/api/stock"):
             try:
                 if u.path == "/api/quote":
