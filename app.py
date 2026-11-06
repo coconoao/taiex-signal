@@ -303,7 +303,19 @@ class H(SimpleHTTPRequestHandler):
         if not self.authorized():
             return
         if u.path == "/api/status":
-            return self.send_json({**JOB, "readonly": READONLY, "auto": AUTO})
+            state = {**JOB, "readonly": READONLY, "auto": AUTO}
+            if os.environ.get("K_SERVICE"):
+                try:
+                    saved = json.load(open(os.path.join(DATA, "refresh_status.json"), encoding="utf-8"))
+                    state["running"] = saved.get("current") if saved.get("running") else None
+                    state["log"] = "\\n".join(
+                        f'{x.get("step")}: exit={x.get("exit_code")} {x.get("log", "")}'
+                        for x in saved.get("results", [])
+                    )[-3000:]
+                    state["exit_code"] = saved.get("exit_code")
+                except Exception:
+                    pass
+            return self.send_json(state)
         if u.path in ("/api/quote", "/api/stock"):
             try:
                 if u.path == "/api/quote":
