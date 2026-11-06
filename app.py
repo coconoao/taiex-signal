@@ -347,6 +347,8 @@ class H(SimpleHTTPRequestHandler):
                 try:
                     saved = json.load(open(os.path.join(DATA, "refresh_status.json"), encoding="utf-8"))
                     state["running"] = saved.get("current") if saved.get("running") else None
+                    if not saved.get("running"):
+                        JOB["running"] = None
                     state["log"] = "\\n".join(
                         f'{x.get("step")}: exit={x.get("exit_code")} {x.get("log", "")}'
                         for x in saved.get("results", [])
@@ -406,10 +408,14 @@ class H(SimpleHTTPRequestHandler):
                 return self.send_json({"error": str(e)}, 502)
         if self.path == "/api/run" and body.get("what") in ("pipeline", "news", "all"):
             if os.environ.get("K_SERVICE"):
+                if JOB.get("running"):
+                    return self.send_json({"error": "已有資料更新工作正在執行"}, 409)
+                JOB["running"] = "queued"
                 try:
                     operation = trigger_cloud_run_refresh()
                     return self.send_json({"ok": True, "operation": operation})
                 except Exception as e:
+                    JOB["running"] = None
                     return self.send_json({"error": f"無法啟動 Cloud Run 更新工作：{e}"}, 502)
             if JOB["running"]:
                 return self.send_json({"error": "已有工作進行中"}, 409)
