@@ -37,12 +37,20 @@ def load_settings():  # 儀表板「設定」頁存下的金鑰
 
 def collect(groups, per, kind, out, seen):
     for tag, q in groups:
-        url = "https://news.google.com/rss/search?q=" + urllib.parse.quote(q) + "&hl=en-US&gl=US&ceid=US:en"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            titles = [(i.findtext("title") or "").strip() for i in ET.fromstring(urllib.request.urlopen(req, timeout=20).read()).iter("item")]
-        except Exception as e:
-            print("新聞來源失敗", tag, e); continue
+        urls = [
+            "https://news.google.com/rss/search?q=" + urllib.parse.quote(q) + "&hl=en-US&gl=US&ceid=US:en",
+            "https://www.bing.com/news/search?q=" + urllib.parse.quote(q) + "&format=rss",
+        ]
+        titles = []
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; TAIEXSignal/1.0)"})
+                xml = urllib.request.urlopen(req, timeout=20).read()
+                titles = [(i.findtext("title") or "").strip() for i in ET.fromstring(xml).iter("item")]
+                if titles:
+                    break
+            except Exception as e:
+                print("新聞來源失敗", tag, type(e).__name__, str(e)[:160])
         n = 0
         for t in titles:
             if t and t not in seen and n < per:
@@ -109,7 +117,7 @@ def run(name, fn, p):
 def main():
     load_settings()
     hl = headlines()
-    if len(hl) < 5: raise SystemExit("抓到的標題太少，請檢查網路")
+    if len(hl) < 3: raise SystemExit(f"抓到的新聞標題只有 {len(hl)} 則；Google News 與 Bing News RSS 均不足，保留上一版資料。")
     sec = lambda k: "\n".join(f'{h["id"]}|{h["tag"]}|{h["title"]}' for h in hl if h["kind"] == k)
     p = PROMPT + "【市場新聞】\n" + sec("market") + "\n【機構觀點】\n" + sec("analyst")
     todo = {n: f for n, (f, keys) in MODELS.items() if all(os.environ.get(k) for k in keys)}
@@ -127,7 +135,7 @@ def main():
                 row = rows.setdefault(str(a.get("name", "?")), {"name": str(a.get("name", "?")), "id": a.get("id"), "stances": {}})
                 row["stances"][n] = a["stance"]
     vals = [sum(STANCE[s] for s in r["stances"].values()) / len(r["stances"]) for r in rows.values()]
-    out = {"asof": dt.date.today().isoformat(), "headlines": hl, "prompt": p, "models": res, "agg": agg,
+    out = {"asof": dt.date.today().isoformat(), "demo": False, "headlines": hl, "prompt": p, "models": res, "agg": agg,
            "missing": [n for n in MODELS if n not in todo],
            "analyst": {"rows": list(rows.values()), "score": round(sum(vals) / len(vals), 2) if vals else None}}
     json.dump(out, open("news.json", "w", encoding="utf-8"), ensure_ascii=False)
