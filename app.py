@@ -189,6 +189,14 @@ def run_jobs(*whats):
             except Exception as e:
                 code = 1
                 log += f"[{w}] {type(e).__name__}: {e}\n"
+            if code == 0 and os.environ.get("TAIEX_STORAGE", "").strip().lower() == "supabase":
+                try:
+                    import storage
+                    saved = storage.save_data(DATA)
+                    log += f"[storage] saved {saved} data files to Supabase\\n"
+                except Exception as e:
+                    code = 1
+                    log += f"[storage] persistence failed: {type(e).__name__}: {e}\\n"
             if code:
                 exit_code = code
                 break
@@ -760,6 +768,10 @@ class H(SimpleHTTPRequestHandler):
             return self.send_json({"path": path})
         return self.send_json({"error": "未知請求"}, 404)
 if __name__ == "__main__":
+    if os.environ.get("TAIEX_STORAGE", "").strip().lower() == "supabase":
+        import storage
+        restored = storage.restore_data(DATA)
+        print(f"Supabase 已還原 {restored} 個資料檔", flush=True)
     if AUTO: threading.Thread(target=scheduler, daemon=True).start()
     print(f"http://{HOST}:{PORT}  {'（唯讀）' if READONLY else ''}{'（自動更新已啟用）' if AUTO else ''}")
     ThreadingHTTPServer((HOST, PORT), H).serve_forever()
