@@ -77,6 +77,13 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 
+
+def production_oauth_ready():
+    """Public deployments must fail closed unless OAuth and its permission store are configured."""
+    return bool(
+        GOOGLE_ENABLED and SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and ADMIN_EMAIL
+    )
+
 def supabase_request(method, path, payload=None, prefer=None):
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise RuntimeError("Supabase 尚未設定完整")
@@ -458,6 +465,9 @@ load().catch(e=>document.getElementById("msg").textContent=e.message);
 class H(SimpleHTTPRequestHandler):
     def authorized(self):
         self.current_user = None
+        if READONLY and not production_oauth_ready():
+            self.send_error(503, "正式網站尚未完成 Google OAuth 與 Supabase 權限設定")
+            return False
         if GOOGLE_ENABLED:
             cookies = SimpleCookie()
             try:
