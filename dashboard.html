@@ -301,7 +301,7 @@ $("runAI").onclick = async () => {
   await Promise.all(jobs.map(([m, f]) => f(NEWS.prompt).then(t => { res[m] = parseAI(t); })
     .catch(e => { res[m] = {error: String(e.message || e).replace(/Failed to fetch/, "連線失敗（網路、金鑰或瀏覽器限制）")}; })));
   saveAI({asof: NEWS.asof, models: res}); renderNews(); $("runAI").disabled = false;
-  $("aiMsg").textContent = "完成：" + Object.entries(res).map(([m, r]) => m + (r.error ? " 失敗" : " 成功")).join("、");
+  $("aiMsg").textContent = "完成：" + Object.entries(res).map(([m, r]) => m + (r.error ? " 失敗：" + r.error : " 成功")).join("、");
 };
 
 /* ---- 伺服器功能（用 python app.py 啟動時才有）：報價、個股、手動更新、匯出 ---- */
