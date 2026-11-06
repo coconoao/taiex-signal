@@ -112,7 +112,7 @@ details[open]>summary{margin-bottom:12px}
 
   <div id="tab-settings" hidden>
     <section><h2>用你自己的 AI 金鑰分析新聞</h2>
-      <p>「內建規則」不需要金鑰，永遠可用。想讓 Claude、ChatGPT、Gemini 也一起分析，請填入你自己的金鑰。金鑰只存在這台裝置的瀏覽器，並直接送到該 AI 供應商，本站不會接收或儲存。OpenAI、Gemini 需同時填模型名稱；欄位輸入 - 可清除。</p>
+      <p>「內建規則」不需要金鑰，永遠可用。想讓 Claude、ChatGPT、Gemini 也一起分析，請填入 API 金鑰。金鑰只保存在這台裝置的瀏覽器；分析時會透過登入後的 HTTPS API 即時轉送至 AI 供應商，不會寫入伺服器資料檔或應用程式日誌。請只在可信任裝置上儲存金鑰。OpenAI 與 Gemini 可留空模型名稱使用預設模型；欄位輸入 - 可清除。</p>
       <div id="keys"></div>
       <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="remember" style="width:auto;margin:0">記住在這個瀏覽器（共用裝置請不要勾選）</label>
       <p><button class="btn" id="saveKeys">儲存</button> <button class="btn" id="runAI">用我的金鑰分析</button> <button class="btn ghost" id="clearAll">清除全部</button></p>
@@ -293,7 +293,7 @@ $("runAI").onclick = async () => {
   if (!NEWS || !NEWS.prompt) { $("aiMsg").textContent = "尚無可分析的新聞資料；請先更新新聞。"; return; }
   if (NEWS.demo) { $("aiMsg").textContent = "目前載入的是示範新聞，不會送交 AI 分析。請先更新真實新聞資料。"; return; }
   const k = getKeys(), jobs = Object.entries(CALLS).map(([m, f]) => [m, f(k)]).filter(([, f]) => f);
-  if (!jobs.length) { $("aiMsg").textContent = "請先填入至少一組金鑰（OpenAI、Gemini 需同時填模型名稱）。"; return; }
+  if (!jobs.length) { $("aiMsg").textContent = "請先填入至少一組 AI API 金鑰。"; return; }
   $("aiMsg").textContent = "分析中…"; $("runAI").disabled = true;
   const res = {};
   await Promise.all(jobs.map(([m, f]) => f(NEWS.prompt).then(t => { res[m] = parseAI(t); })
