@@ -58,7 +58,10 @@ def fetch_chips(days_back=1460, path="chips.csv"):
         else: print("欄位名稱與預期不同，請檢查", d.date(), list(diff))
     out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
     out = out[~out.index.duplicated()]
-    if len(out): out.to_csv(path, index_label="date")
+    if len(out):
+        tmp = path + ".tmp"
+        out.to_csv(tmp, index_label="date")
+        os.replace(tmp, path)
     return out
 
 def demo_chips(df, seed=3):  # 合成籌碼，僅供示範
@@ -198,15 +201,37 @@ def model():
 def walk_forward(X, y, start=500, step=20, h=1):
     valid = X.notna().all(axis=1)
     idx = X.index[valid & y.notna()]
+    if len(idx) < max(80, h + 20):
+        raise ValueError(f"有效訓練樣本不足：只有 {len(idx)} 筆；至少需要 {max(80, h + 20)} 筆。")
     prob = pd.Series(np.nan, index=X.index)
-    for i in range(min(start, len(idx) // 2), len(idx), step):
-        tr = idx[:i - h + 1]  # 剔除標籤尚未實現的樣本，避免資料洩漏
+    first_test = min(max(start, h + 30), max(h + 30, len(idx) // 2))
+    for i in range(first_test, len(idx), step):
+        tr = idx[:i - h + 1]  # purge：排除標籤區間尚未結束的樣本
+        if len(tr) < 30 or y.loc[tr].nunique() < 2:
+            continue
         m = model().fit(X.loc[tr], y.loc[tr])
         te = idx[i:i + step]
         prob.loc[te] = m.predict_proba(X.loc[te])[:, 1]
+    if y.loc[idx].nunique() < 2:
+        raise ValueError("訓練資料只有單一類別，無法估計上漲機率。")
     m = model().fit(X.loc[idx], y.loc[idx])
     latest = X.index[valid][-1]
-    prob.loc[latest] = m.predict_proba(X.loc[[latest]])[0, 1]
+    raw_latest = float(m.predict_proba(X.loc[[latest]])[0, 1])
+
+    # 只用歷史 walk-forward 樣本外預測及其已實現標籤校準最新機率。
+    # 歷史回測值維持當時產生的原始預測，避免把未來校準資訊倒灌進回測。
+    cal = prob.loc[idx].dropna()
+    cal = cal[y.loc[cal.index].notna()]
+    calibrated = raw_latest
+    if len(cal) >= 100 and y.loc[cal.index].nunique() == 2:
+        clipped = np.clip(cal.to_numpy(), 1e-5, 1 - 1e-5)
+        z = np.log(clipped / (1 - clipped)).reshape(-1, 1)
+        calibrator = LogisticRegression(C=1.0, max_iter=300)
+        calibrator.fit(z, y.loc[cal.index].astype(int))
+        z_latest = np.log(np.clip(raw_latest, 1e-5, 1 - 1e-5) /
+                          (1 - np.clip(raw_latest, 1e-5, 1 - 1e-5)))
+        calibrated = float(calibrator.predict_proba([[z_latest]])[0, 1])
+    prob.loc[latest] = calibrated
     contrib = m[-1].coef_[0] * m[0].transform(X.loc[[latest]])[0]
     return prob, latest, pd.Series(contrib, index=X.columns)
 
@@ -215,7 +240,9 @@ def backtest(prob, fwd):
     p = p[fwd.reindex(p.index).notna()]
     f = fwd.loc[p.index]
     pos = pd.Series(np.where(p > BUY, 1.0, np.where(p < SELL, 0.0, np.nan)), index=p.index).ffill().fillna(0)
-    strat = pos * f - COST * pos.diff().abs().fillna(0)
+    turnover = pos.diff().abs()
+    if len(turnover): turnover.iloc[0] = abs(float(pos.iloc[0]))  # 首筆進場也計入交易成本
+    strat = pos * f - COST * turnover.fillna(0)
     def stat(s):
         eq = (1 + s).cumprod()
         return round((eq.iloc[-1] ** (252 / len(s)) - 1) * 100, 1), round((eq / eq.cummax() - 1).min() * 100, 1)
@@ -237,6 +264,7 @@ def weekly_report(prob, fwd, latest, contrib):
     """未來 5 個交易日展望：目前訊號，加上歷史上同類訊號之後 5 日的實際分布。"""
     p = prob.dropna()
     p = p[fwd.reindex(p.index).notna()]
+    p = p.iloc[::5]  # 五日報酬區間重疊；每五個交易日取一筆，避免樣本數膨脹
     f = fwd.loc[p.index]
     name = lambda v: "偏多" if v > BUY else "偏空" if v < SELL else "中性"
     q = lambda s, a: round(float(s.quantile(a)) * 100, 2)
@@ -272,11 +300,19 @@ if __name__ == "__main__":
                      for k, v in contrib.reindex(contrib.abs().sort_values(ascending=False).index).items()],
         "backtest": backtest(prob, fwd),
     }
-    json.dump(out, open("signals.json", "w", encoding="utf-8"), ensure_ascii=False)
+    tmp = "signals.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False)
+        f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, "signals.json")
     print(f"{out['asof']}  隔日上漲機率 {pu:.1%}  訊號：{out['signal']}")
     X5, y5, f5 = build(df, chips, margin, h=5, futures=futures)
     p5, l5, c5 = walk_forward(X5, y5, h=5)
     p5.to_csv("weekly_prob.csv", header=["prob"], index_label="date")  # 供個股估計使用
     wk = weekly_report(p5, f5, l5, c5)
-    json.dump(wk, open("weekly.json", "w", encoding="utf-8"), ensure_ascii=False)
+    tmp = "weekly.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(wk, f, ensure_ascii=False)
+        f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, "weekly.json")
     print(f"{wk['asof']}  一週上漲機率 {wk['prob_up']:.1%}  傾向：{wk['bucket']}")
