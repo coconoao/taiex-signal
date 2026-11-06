@@ -192,12 +192,20 @@ def run_jobs(*whats):
                 break
     finally:
         JOB.update(running=None, log=log[-3000:], exit_code=exit_code, finished=int(time.time()))
+        if log: print(log[-3000:], flush=True)  # 讓 Render 執行紀錄可見 pipeline 的成功／失敗原因
         LOCK.release()
     return exit_code == 0
 
 def stale():
+    # 個股分析依賴 weekly.json 與 weekly_prob.csv；不能只看 signals.json。
+    required = ("signals.json", "weekly.json", "weekly_prob.csv")
     try:
-        return json.load(open("signals.json", encoding="utf-8")).get("demo") or time.time() - os.path.getmtime("signals.json") > 18 * 3600
+        if any(not os.path.exists(name) or os.path.getsize(name) == 0 for name in required):
+            return True
+        signals = json.load(open("signals.json", encoding="utf-8"))
+        if signals.get("demo"):
+            return True
+        return any(time.time() - os.path.getmtime(name) > 18 * 3600 for name in required)
     except Exception:
         return True
 
