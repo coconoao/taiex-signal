@@ -80,9 +80,11 @@ def supabase_request(method, path, payload=None, prefer=None):
         raise RuntimeError("Supabase 尚未設定完整")
     headers = {
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
         "Accept": "application/json"
     }
+    # 新版 sb_secret_* 不是 JWT，只能放在 apikey；舊版 service_role JWT 才使用 Bearer。
+    if not SUPABASE_SERVICE_ROLE_KEY.startswith("sb_secret_"):
+        headers["Authorization"] = "Bearer " + SUPABASE_SERVICE_ROLE_KEY
     data = None
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
