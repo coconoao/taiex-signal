@@ -25,7 +25,7 @@ arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
 HOST = arg("--host", os.environ.get("HOST", "127.0.0.1"))
 PORT = int(arg("--port", os.environ.get("PORT", "8000")))
 DEMO = "--demo" in sys.argv
-READONLY = os.environ.get("READONLY", "0").lower() in ("1", "true", "yes")
+READONLY = os.environ.get("READONLY", "1" if os.environ.get("K_SERVICE") else "0").lower() in ("1", "true", "yes")
 # Cloud Run 會水平擴充；排程應交給 Cloud Scheduler / Cloud Run Jobs，不可每個服務執行個體各跑一份。
 AUTO = "--no-auto" not in sys.argv and not DEMO and not os.environ.get("K_SERVICE")
 TZ = ZoneInfo("Asia/Taipei")
