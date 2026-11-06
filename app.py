@@ -114,6 +114,39 @@ def quote():  # 加權指數即時報價（Yahoo，約有數分鐘延遲），�
     QUOTE.update(t=time.time(), v=v)
     return v
 
+def trigger_cloud_run_refresh():
+    """透過 Cloud Run service identity 啟動持久化資料更新 Job。"""
+    job = os.environ.get("CLOUD_RUN_REFRESH_JOB", "taiex-refresh")
+    region = os.environ.get("CLOUD_RUN_REGION", "asia-east1")
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
+    headers = {"Metadata-Flavor": "Google"}
+    if not project:
+        req = urllib.request.Request(
+            "http://metadata.google.internal/computeMetadata/v1/project/project-id",
+            headers=headers
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            project = response.read().decode("utf-8").strip()
+    req = urllib.request.Request(
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+        headers=headers
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
+        access_token = json.loads(response.read().decode("utf-8"))["access_token"]
+    url = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/jobs/{job}:run"
+    req = urllib.request.Request(
+        url, data=b"{}", headers={"Authorization": "Bearer " + access_token, "Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=20) as response:
+        operation = json.loads(response.read().decode("utf-8"))
+    status_path = os.path.join(DATA, "refresh_status.json")
+    with open(status_path, "w", encoding="utf-8") as f:
+        json.dump({"running": True, "current": "queued", "results": [],
+                   "operation": operation.get("name"), "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()},
+                  f, ensure_ascii=False)
+    return operation.get("name", "started")
+
+
 def call_ai_provider(provider, api_key, model, prompt):
     """將瀏覽器提供的金鑰即時轉送至供應商；不寫入檔案、環境變數或日誌。"""
     if not isinstance(api_key, str) or not api_key.strip() or len(api_key) > 4096:
@@ -303,7 +336,7 @@ class H(SimpleHTTPRequestHandler):
         if not self.authorized():
             return
         if u.path == "/api/status":
-            state = {**JOB, "readonly": READONLY, "auto": AUTO}
+            state = {**JOB, "readonly": READONLY, "auto": AUTO, "cloud_run": bool(os.environ.get("K_SERVICE"))}
             if os.environ.get("K_SERVICE"):
                 try:
                     saved = json.load(open(os.path.join(DATA, "refresh_status.json"), encoding="utf-8"))
@@ -345,7 +378,8 @@ class H(SimpleHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized():
             return
-        if READONLY and self.path != "/api/ai":
+        cloud_job_request = bool(os.environ.get("K_SERVICE")) and self.path == "/api/run"
+        if READONLY and self.path != "/api/ai" and not cloud_job_request:
             return self.send_json({"error": "唯讀模式，已停用此功能"}, 403)
         if self.headers.get("X-Requested-With") != "dash":
             return self.send_json({"error": "拒絕"}, 403)
@@ -364,12 +398,17 @@ class H(SimpleHTTPRequestHandler):
                 return self.send_json({"text": result})
             except Exception as e:
                 return self.send_json({"error": str(e)}, 502)
-        if self.path == "/api/run" and body.get("what") in ("pipeline", "news"):
+        if self.path == "/api/run" and body.get("what") in ("pipeline", "news", "all"):
+            if os.environ.get("K_SERVICE"):
+                try:
+                    operation = trigger_cloud_run_refresh()
+                    return self.send_json({"ok": True, "operation": operation})
+                except Exception as e:
+                    return self.send_json({"error": f"無法啟動 Cloud Run 更新工作：{e}"}, 502)
             if JOB["running"]:
                 return self.send_json({"error": "已有工作進行中"}, 409)
-            threading.Thread(
-                target=run_jobs, args=(body["what"],), daemon=True
-            ).start()
+            whats = ("pipeline", "news") if body["what"] == "all" else (body["what"],)
+            threading.Thread(target=run_jobs, args=whats, daemon=True).start()
             return self.send_json({"ok": True})
         if self.path == "/api/export":
             import export_html
