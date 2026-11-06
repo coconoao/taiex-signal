@@ -43,7 +43,7 @@ class UserAdministrationTests(unittest.TestCase):
         web_app.set_site_user_status(" User@Example.com ", "approved", "admin@example.com")
         args, kwargs = request.call_args
         self.assertEqual(args[0], "PATCH")
-        self.assertIn("email=user%40example.com", args[1])
+        self.assertIn("email=eq.user%40example.com", args[1])
         self.assertIn("role=eq.user", args[1])
         self.assertEqual(args[2]["status"], "approved")
         self.assertEqual(args[2]["approved_by"], "admin@example.com")
