@@ -65,6 +65,7 @@ def analyze(code):
     mk = _hist(yf, "^TWII")
     wk = json.load(open("weekly.json", encoding="utf-8"))
     p = pd.read_csv("weekly_prob.csv", index_col=0, parse_dates=True)["prob"].dropna()
+    p = p.iloc[::5]  # 與大盤週報一致，降低五日重疊報酬造成的樣本膨脹
     f5 = (px.shift(-5) / px - 1).reindex(p.index)
     name = lambda v: "偏多" if v > BUY else "偏空" if v < SELL else "中性"
     d = pd.DataFrame({"b": p.map(name), "f": f5}).dropna()
