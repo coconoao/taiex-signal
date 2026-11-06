@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="台股訊號">
+<meta name="theme-color" content="#14202b">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>加權指數訊號</title>
+<style>
+:root{--bg:#f2f5f8;--panel:#fff;--ink:#14202b;--mute:#5d6b7a;--line:#d9e0e7;--up:#c8283d;--down:#0f8a66;--hold:#8795a3;--accent:#3d5a80;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#10171e;--panel:#18222c;--ink:#e6edf3;--mute:#93a1af;--line:#2a3745;--up:#ff6b7d;--down:#3fc79b;--hold:#6b7a89;--accent:#8fb0d9;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;font-variant-numeric:tabular-nums}
+main{max-width:760px;margin:0 auto;padding:calc(20px + env(safe-area-inset-top,0px)) 16px calc(88px + env(safe-area-inset-bottom,0px))}
+h1{font-size:1.25rem;margin:0}
+h2{font-size:1rem;margin:0 0 12px}
+.meta{color:var(--mute);font-size:.875rem;margin:2px 0 4px}
+.live{font-size:.9375rem;margin:6px 0 4px}
+.banner{background:var(--panel);border:1px solid var(--hold);border-radius:6px;padding:8px 12px;margin-bottom:16px;font-size:.875rem}
+section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px;margin-bottom:16px}
+.sig{font-size:2.5rem;font-weight:700;line-height:1.2;margin:0}
+.sig small{font-size:1rem;font-weight:400;color:var(--mute);margin-left:8px}
+.ruler{position:relative;height:14px;margin:28px 0 6px;border-radius:7px;display:flex}
+.ruler i{display:block;height:100%}
+.ruler .mark{position:absolute;top:-8px;width:3px;height:30px;background:var(--ink);border-radius:2px;transform:translateX(-1.5px)}
+.zones{display:flex;justify-content:space-between;color:var(--mute);font-size:.8125rem}
+.row{display:grid;grid-template-columns:8.5em 1fr 4em;align-items:center;gap:8px;margin:6px 0;font-size:.9375rem}
+.row b{font-weight:400;text-align:right}
+.div{position:relative;height:12px;background:var(--bg);border-radius:3px}
+.div::after{content:"";position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--hold)}
+.div span{position:absolute;top:0;height:100%;border-radius:3px}
+dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 16px}
+dt{color:var(--mute);font-size:.8125rem}
+dd{margin:0;font-size:1.25rem;font-weight:600}
+dd small{font-size:.8125rem;font-weight:400;color:var(--mute)}
+svg{width:100%;height:auto;display:block}
+.legend{font-size:.8125rem;color:var(--mute)}
+.legend span{display:inline-block;width:14px;height:3px;vertical-align:middle;margin:0 4px 0 12px}
+.note{color:var(--mute);font-size:.8125rem}
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.tabs button{flex:1;font:inherit;font-size:.8125rem;padding:10px 4px 8px;border:0;background:none;color:var(--mute);cursor:pointer;min-height:48px}
+.tabs button.on{color:var(--accent);font-weight:600;box-shadow:inset 0 3px 0 var(--accent)}
+.mcs{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px}
+.mc{border:1px solid var(--line);border-radius:6px;padding:12px}
+.mc p{margin:6px 0 0;font-size:.875rem}
+.mc .big{font-size:1.75rem;font-weight:700;line-height:1.3}
+table{width:100%;border-collapse:collapse;font-size:.9375rem}
+th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+.btn{font:inherit;padding:8px 14px;border:1px solid var(--accent);background:var(--accent);color:var(--bg);border-radius:6px;cursor:pointer}
+.btn.ghost{background:none;color:var(--accent)}
+.btn.sm{padding:2px 10px;font-size:.8125rem}
+.btn:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.f{display:block;margin:10px 0;font-size:.9375rem}
+.f input,input.inp{display:block;width:100%;margin-top:4px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+input.inp{display:inline-block;width:12em;margin:0 8px 0 0}
+summary{cursor:pointer;font-weight:600;padding:2px 0}
+details[open]>summary{margin-bottom:12px}
+</style>
+</head>
+<body>
+<main>
+  <h1>加權指數訊號</h1>
+  <div class="live" id="live" hidden></div>
+  <p class="meta" id="meta">載入中…</p>
+  <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
+  <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
+  <div class="banner" id="miss" hidden></div>
+  <div class="banner" id="err" hidden>讀不到 signals.json。請用 python app.py 啟動，或用匯出的單一 HTML 檔、已部署的網站開啟（直接雙擊 dashboard.html 讀不到資料檔）。</div>
+
+  <div id="tab-daily">
+    <section id="hero" hidden>
+      <p class="sig" id="sig"></p>
+      <div class="ruler" id="ruler"></div>
+      <div class="zones"><span>賣出／減碼</span><span>觀望</span><span>買進</span></div>
+      <p id="sumline" style="margin:14px 0 0;font-size:.9375rem"></p>
+    </section>
+    <section id="layers" hidden>
+      <h2>各層訊號推向哪一邊</h2>
+      <div id="layerRows"></div>
+      <h2 style="margin-top:20px">影響最大的變量</h2>
+      <div id="featRows"></div>
+      <p class="note">紅色推高上漲機率，綠色壓低（台股慣例）。長度為模型貢獻值，不是漲跌幅。</p>
+    </section>
+    <section id="bt" hidden>
+      <details><summary>歷史回測（滾動式、已扣成本）</summary>
+      <dl id="stats"></dl>
+      <svg id="curve" viewBox="0 0 600 200" role="img" aria-label="策略與買進持有的累積報酬曲線"></svg>
+      <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
+    </section>
+    <section><h2>新聞情緒（隔日）：內建規則與 AI 並排</h2><div id="newsD"></div></section>
+  </div>
+
+  <div id="tab-weekly" hidden>
+    <section><p class="sig" id="wsig">載入中…</p><p id="wexp"></p><p class="note" id="wacc"></p></section>
+    <section><h2>各層訊號推向哪一邊</h2><div id="wlayers"></div></section>
+    <section><h2>歷史上每種訊號之後 5 日的實際表現</h2>
+      <div style="overflow-x:auto"><table><thead><tr><th>訊號</th><th>樣本</th><th>勝率</th><th>平均</th><th>80% 區間</th></tr></thead><tbody id="wb"></tbody></table></div></section>
+    <section><h2>新聞情緒（一週）：內建規則與 AI 並排</h2><div id="newsW"></div></section>
+  </div>
+
+  <div id="tab-stock" hidden>
+    <section><h2>個股上漲幅度估計</h2>
+      <p><input class="inp" id="code" placeholder="股票代號，如 2330" inputmode="numeric" aria-label="股票代號"><button class="btn" id="go">查詢</button></p>
+      <div id="stockOut"><p class="note">結合大盤一週訊號、這檔股票的歷史表現與財報體檢。</p></div></section>
+  </div>
+
+  <div id="tab-settings" hidden>
+    <section><h2>用你自己的 AI 金鑰分析新聞</h2>
+      <p>「內建規則」不需要金鑰，永遠可用。想讓 Claude、ChatGPT、Gemini 也一起分析，請填入你自己的金鑰。金鑰只存在這台裝置的瀏覽器，並直接送到該 AI 供應商，本站不會接收或儲存。OpenAI、Gemini 需同時填模型名稱；欄位輸入 - 可清除。</p>
+      <div id="keys"></div>
+      <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="remember" style="width:auto;margin:0">記住在這個瀏覽器（共用裝置請不要勾選）</label>
+      <p><button class="btn" id="saveKeys">儲存</button> <button class="btn" id="runAI">用我的金鑰分析</button> <button class="btn ghost" id="clearAll">清除全部</button></p>
+      <p class="note" id="aiMsg"></p></section>
+    <section id="srv" hidden><h2>伺服器</h2>
+      <p class="note" id="autoMsg"></p>
+      <p><button class="btn" data-run="pipeline">立即更新行情與訊號</button> <button class="btn" data-run="news">立即更新新聞</button></p>
+      <p class="note" id="job"></p>
+      <p><button class="btn" id="exp">匯出單一 HTML 檔</button> <a href="/export" download>或直接下載</a></p>
+      <p class="note" id="expMsg">內嵌目前資料，可直接雙擊開啟或上傳到任何靜態空間，不含你的金鑰。</p></section>
+  </div>
+
+  <p class="note">研究用途，不構成投資建議。回測績效不代表未來，樣本外表現通常較差。新聞與 AI 分數目前只供參考，沒有納入上面的機率與回測。</p>
+</main>
+<nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">🗓<br>一週</button><button data-t="stock" hidden>🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const pct = v => (v * 100).toFixed(1) + "%", sc = v => (v > 0 ? "+" : "") + v.toFixed(2);
+const tone = v => v > 0.1 ? "var(--up)" : v < -0.1 ? "var(--down)" : "var(--hold)";
+const SNAP = window.__SNAPSHOT__ || null, seen = {};
+const getJSON = name => SNAP && name in SNAP ? Promise.resolve(SNAP[name])
+  : fetch(name + "?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.text() : Promise.reject(r.status)).then(t => { seen[name] = t; return JSON.parse(t); });
+const api = (p, body) => fetch(p, body ? {method: "POST", headers: {"X-Requested-With": "dash", "Content-Type": "application/json"}, body: JSON.stringify(body)} : {cache: "no-store"}).then(r => r.json());
+
+function divRow(name, v, max) {
+  const w = Math.min(Math.abs(v) / max, 1) * 50;
+  const side = v >= 0 ? "left:50%;background:var(--up)" : "right:50%;background:var(--down)";
+  return `<div class="row"><span>${name}</span><div class="div"><span style="${side};width:${w}%"></span></div><b>${v > 0 ? "+" : ""}${v.toFixed(2)}</b></div>`;
+}
+function drawCurve(c) {
+  const all = c.strategy.concat(c.buyhold), lo = Math.min(...all), hi = Math.max(...all);
+  const X = i => (i / (c.dates.length - 1)) * 600, Y = v => 190 - ((v - lo) / (hi - lo || 1)) * 180;
+  const line = (a, col) => `<polyline fill="none" stroke="${col}" stroke-width="2" points="${a.map((v, i) => X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ")}"/>`;
+  $("curve").innerHTML = line(c.buyhold, "var(--hold)") + line(c.strategy, "var(--accent)");
+}
+
+function renderDaily(d) {
+  $("meta").textContent = `資料日期 ${d.asof}，預測下一個交易日`;
+  $("demo").hidden = !d.demo;
+  const ml = d.missing_layers || [];
+  $("miss").hidden = !ml.length;
+  $("miss").textContent = ml.length ? `本次沒有取得這些資料來源：${ml.join("、")}。預測仍可使用，但少了這幾層訊號（來源可能擋了雲端 IP，或首次回補尚未完成）。` : "";
+  const color = d.signal === "買進" ? "var(--up)" : d.signal === "觀望" ? "var(--hold)" : "var(--down)";
+  $("sig").innerHTML = `<span style="color:${color}">${esc(d.signal)}</span><small>上漲機率 ${pct(d.prob_up)}</small>`;
+  const s = d.thresholds.sell * 100, b = d.thresholds.buy * 100;
+  $("ruler").innerHTML = `<i style="width:${s}%;background:var(--down);border-radius:7px 0 0 7px"></i><i style="width:${b - s}%;background:var(--hold)"></i><i style="width:${100 - b}%;background:var(--up);border-radius:0 7px 7px 0"></i><em class="mark" style="left:${d.prob_up * 100}%"></em>`;
+  const max = Math.max(...d.features.map(f => Math.abs(f.contrib)), 0.1);
+  $("layerRows").innerHTML = Object.entries(d.layers).map(([k, v]) => divRow(esc(k) + "層", v, max * 1.5)).join("");
+  $("featRows").innerHTML = d.features.slice(0, 6).map(f => divRow(esc(f.name.split(":")[1]) + `<small class="note"> ${esc(f.name.split(":")[0])}</small>`, f.contrib, max)).join("");
+  const t = d.backtest, st = t.strategy, bh = t.buyhold;
+  $("stats").innerHTML = [["方向命中率", pct(t.direction_acc / 100), `共 ${t.days} 個交易日`],
+    ["持有日勝率", t.hold_win_rate == null ? "—" : pct(t.hold_win_rate / 100), `換倉 ${t.trades} 次`],
+    ["年化報酬", st.annual + "%", `買進持有 ${bh.annual}%`], ["最大回撤", st.max_dd + "%", `買進持有 ${bh.max_dd}%`]]
+    .map(([k, v, n]) => `<div><dt>${k}</dt><dd>${v} <small>${n}</small></dd></div>`).join("");
+  drawCurve(t.curve);
+}
+function renderWeekly(w) {
+  const c = w.bucket === "偏多" ? "var(--up)" : w.bucket === "偏空" ? "var(--down)" : "var(--hold)", e = w.expected;
+  $("wsig").innerHTML = `<span style="color:${c}">${esc(w.bucket)}</span><small>未來 5 個交易日上漲機率 ${pct(w.prob_up)}</small>`;
+  $("wexp").textContent = e ? `歷史上模型給出「${w.bucket}」時（${e.n} 個樣本），之後 5 日平均 ${e.avg}%，勝率 ${e.win}%，八成情況落在 ${e.p10}% 到 ${e.p90}%。` : "";
+  $("wacc").textContent = `方向命中率 ${w.direction_acc}%（${w.days} 個交易日；5 日區間互相重疊，實際可信度比數字看起來低）`;
+  const max = Math.max(...w.features.map(f => Math.abs(f.contrib)), 0.1);
+  $("wlayers").innerHTML = Object.entries(w.layers).map(([k, v]) => divRow(esc(k) + "層", v, max * 1.5)).join("");
+  $("wb").innerHTML = ["偏多", "中性", "偏空"].filter(k => w.buckets[k]).map(k => { const b = w.buckets[k];
+    return `<tr><td>${k}</td><td>${b.n}</td><td>${b.win}%</td><td>${b.avg}%</td><td>${b.p10}% ~ ${b.p90}%</td></tr>`; }).join("");
+}
+
+/* ---- 新聞：伺服器產生的結果 + 使用者自己的金鑰分析結果（存在自己的瀏覽器） ---- */
+let NEWS = null, WK = null;
+const loadAI = () => { try { return JSON.parse(localStorage.getItem("ai") || "null"); } catch { return null; } };
+const saveAI = v => { try { localStorage.setItem("ai", JSON.stringify(v)); } catch {} };
+function mergedNews() {
+  if (!NEWS) return null;
+  const n = JSON.parse(JSON.stringify(NEWS)), ai = loadAI();
+  if (ai && ai.asof === n.asof) Object.assign(n.models, ai.models);
+  const ok = Object.entries(n.models).filter(([, r]) => !r.error), S = {"看多": 1, "看空": -1, "中性": 0}, avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  n.agg = {};
+  ["next_day", "next_week"].forEach(k => { const v = ok.map(([, r]) => r[k]); n.agg[k] = v.length ? {mean: +avg(v).toFixed(2), spread: +(Math.max(...v) - Math.min(...v)).toFixed(2), n: v.length} : {mean: 0, spread: 0, n: 0}; });
+  const rows = {};
+  ok.forEach(([m, r]) => (r.analysts || []).forEach(a => { if (a.stance in S) { const x = rows[a.name] = rows[a.name] || {name: a.name, id: a.id, stances: {}}; x.stances[m] = a.stance; } }));
+  const vals = Object.values(rows).map(r => avg(Object.values(r.stances).map(t => S[t])));
+  n.analyst = {rows: Object.values(rows), score: vals.length ? +avg(vals).toFixed(2) : null};
+  n.missing = ["Claude", "ChatGPT", "Gemini"].filter(m => !(m in n.models));
+  return n;
+}
+function analystHtml(n, title) {
+  const a = n.analyst, h = '<h2 style="margin-top:16px">機構觀點（近 7 日標題，僅計明確表態者）</h2>';
+  if (!a || !a.rows.length) return h + '<p class="note">這幾天的標題裡，沒有機構明確表達台股方向。</p>';
+  const col = s => s === "看多" ? "var(--up)" : s === "看空" ? "var(--down)" : "var(--hold)";
+  const ms = Object.keys(n.models).filter(m => !n.models[m].error);
+  return h + `<div style="overflow-x:auto"><table><thead><tr><th>機構</th>${ms.map(m => `<th>${esc(m)}</th>`).join("")}<th style="text-align:left">依據標題</th></tr></thead><tbody>` +
+    a.rows.map(r => `<tr><td>${esc(r.name)}</td>${ms.map(m => `<td style="color:${col(r.stances[m])}">${esc(r.stances[m] || "—")}</td>`).join("")}<td style="text-align:left">${esc(title(r.id))}</td></tr>`).join("") +
+    `</tbody></table></div><p class="note">平均 ${a.score == null ? "—" : sc(a.score)}。目前每家權重相同；累積紀錄後才能依命中率加權。</p>`;
+}
+function newsCard(n, key, el) {
+  if (!n) { el.innerHTML = '<p class="note">尚無新聞分析（news.json）。</p>'; return; }
+  const title = id => (n.headlines.find(h => h.id === id) || {}).title || "";
+  const cards = Object.entries(n.models).map(([name, r]) => r.error
+    ? `<div class="mc"><b>${esc(name)}</b><p class="note">失敗：${esc(r.error)}</p></div>`
+    : `<div class="mc"><b>${esc(name)}</b><div class="big" style="color:${tone(r[key])}">${sc(r[key])}</div><div class="note">信心 ${Math.round(r.confidence * 100)}%</div><p>${esc(r.summary)}</p>
+       <p class="note">${(r.drivers || []).map(d => esc(d.impact) + "：" + esc(title(d.id))).join("<br>")}</p></div>`).join("");
+  const a = n.agg[key];
+  el.innerHTML = (n.demo ? '<div class="banner">以下為示範新聞資料，不是真實新聞。</div>' : "") + `<div class="mcs">${cards}</div>` +
+    (a.n ? `<p>平均 <b>${sc(a.mean)}</b>（${a.n} 個來源）${a.spread > 0.6 ? "，<b>來源之間意見分歧大，請降低採信程度</b>" : ""}</p>` : "") +
+    (n.missing.length ? `<p class="note">尚未分析：${n.missing.join("、")}。到「設定」填入你自己的金鑰後按「用我的金鑰分析」。分數 -1 極偏空、+1 極偏多。</p>` : '<p class="note">分數 -1 極偏空、+1 極偏多。</p>') + analystHtml(n, title);
+}
+function renderSummary() {
+  const n = mergedNews(), p = [];
+  if (WK) p.push(`未來一週：<b>${esc(WK.bucket)}</b>（${pct(WK.prob_up)}）`);
+  if (n && n.agg.next_day.n) p.push(`新聞平均 <b>${sc(n.agg.next_day.mean)}</b>（${n.agg.next_day.n} 個來源）`);
+  $("sumline").innerHTML = p.join("　｜　");
+}
+function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); newsCard(n, "next_week", $("newsW")); renderSummary(); }
+
+/* ---- 載入（可重複執行）與自動更新 ---- */
+const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
+  .catch(() => { $("err").hidden = false; $("meta").textContent = ""; });
+const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); renderSummary(); }).catch(() => { $("wsig").textContent = "尚無 weekly.json"; });
+const loadNews = () => getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }).then(renderNews);
+let lastSig = null, busy = false;
+function loadAll() {
+  if (busy) return Promise.resolve();
+  busy = true;
+  return Promise.all([loadDaily(), loadWeekly(), loadNews()]).then(() => {
+    const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
+    $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
+  }).finally(() => { busy = false; });
+}
+$("reload").onclick = loadAll;
+if (SNAP) $("reload").hidden = true;
+else {
+  setInterval(() => { if (!document.hidden) loadAll(); }, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) loadAll(); });
+}
+
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  ["daily", "weekly", "stock", "settings"].forEach(t => $("tab-" + t).hidden = b.dataset.t !== t);
+});
+
+/* ---- 使用者自己的 AI 金鑰：只存在自己的瀏覽器，由瀏覽器直接呼叫各家 API ---- */
+const KEYF = [["claude", "Claude API 金鑰", 1], ["claudeModel", "Claude 模型名稱（留空用 claude-sonnet-5-5）"], ["openai", "OpenAI API 金鑰", 1],
+              ["openaiModel", "OpenAI 模型名稱（必填）"], ["gemini", "Gemini API 金鑰", 1], ["geminiModel", "Gemini 模型名稱（必填）"]];
+const mem = {}, rd = s => { try { return s.getItem("keys"); } catch { return null; } };
+function getKeys() { try { return JSON.parse(rd(localStorage) || rd(sessionStorage) || mem.keys || "{}"); } catch { return {}; } }
+function setKeys(k, remember) {
+  const s = JSON.stringify(k); mem.keys = s;
+  try { localStorage.removeItem("keys"); sessionStorage.removeItem("keys"); (remember ? localStorage : sessionStorage).setItem("keys", s); } catch {}
+}
+function renderKeyForm() {
+  const k = getKeys();
+  $("keys").innerHTML = KEYF.map(([f, l, pw]) => `<label class="f">${l}<input id="k_${f}" type="${pw ? "password" : "text"}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${k[f] ? "已設定（留空＝不變）" : "尚未設定"}"></label>`).join("");
+  $("remember").checked = rd(localStorage) !== null;
+}
+renderKeyForm();
+$("saveKeys").onclick = () => {
+  const k = getKeys();
+  KEYF.forEach(([f]) => { const v = $("k_" + f).value.trim(); if (v === "-") delete k[f]; else if (v) k[f] = v; });
+  setKeys(k, $("remember").checked); renderKeyForm(); $("aiMsg").textContent = "已儲存。按「用我的金鑰分析」開始。";
+};
+$("clearAll").onclick = () => { setKeys({}, false); saveAI(null); try { localStorage.removeItem("keys"); } catch {} renderKeyForm(); renderNews(); $("aiMsg").textContent = "已清除金鑰與分析結果。"; };
+
+const J = r => r.json().then(j => r.ok ? j : Promise.reject(new Error((j.error && (j.error.message || j.error)) || r.status)));
+const post = (url, headers, body) => fetch(url, {method: "POST", headers: {"content-type": "application/json", ...headers}, body: JSON.stringify(body)}).then(J);
+const CALLS = {
+  Claude: k => k.claude && (p => post("https://api.anthropic.com/v1/messages", {"x-api-key": k.claude, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
+    {model: k.claudeModel || "claude-sonnet-5-5", max_tokens: 2000, messages: [{role: "user", content: p}]}).then(r => r.content[0].text)),
+  ChatGPT: k => k.openai && k.openaiModel && (p => post("https://api.openai.com/v1/chat/completions", {Authorization: "Bearer " + k.openai},
+    {model: k.openaiModel, messages: [{role: "user", content: p}], response_format: {type: "json_object"}}).then(r => r.choices[0].message.content)),
+  Gemini: k => k.gemini && k.geminiModel && (p => post(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(k.geminiModel)}:generateContent`, {"x-goog-api-key": k.gemini},
+    {contents: [{parts: [{text: p}]}], generationConfig: {responseMimeType: "application/json"}}).then(r => r.candidates[0].content.parts.map(x => x.text || "").join("")))
+};
+const clip = x => Math.round(Math.max(-1, Math.min(1, +x)) * 100) / 100;
+function parseAI(t) {
+  const d = JSON.parse(t.match(/\{[\s\S]*\}/)[0]);
+  return {next_day: clip(d.next_day), next_week: clip(d.next_week), confidence: Math.min(1, Math.abs(+d.confidence || 0)), drivers: (d.drivers || []).slice(0, 4),
+          summary: String(d.summary || ""), analysts: (d.analysts || []).filter(a => a && typeof a === "object").slice(0, 15)};
+}
+$("runAI").onclick = async () => {
+  if (!NEWS || !NEWS.prompt) { $("aiMsg").textContent = "尚無可分析的新聞資料（news.json 需包含 prompt）。"; return; }
+  const k = getKeys(), jobs = Object.entries(CALLS).map(([m, f]) => [m, f(k)]).filter(([, f]) => f);
+  if (!jobs.length) { $("aiMsg").textContent = "請先填入至少一組金鑰（OpenAI、Gemini 需同時填模型名稱）。"; return; }
+  $("aiMsg").textContent = "分析中…"; $("runAI").disabled = true;
+  const res = {};
+  await Promise.all(jobs.map(([m, f]) => f(NEWS.prompt).then(t => { res[m] = parseAI(t); })
+    .catch(e => { res[m] = {error: String(e.message || e).replace(/Failed to fetch/, "連線失敗（網路、金鑰或瀏覽器限制）")}; })));
+  saveAI({asof: NEWS.asof, models: res}); renderNews(); $("runAI").disabled = false;
+  $("aiMsg").textContent = "完成：" + Object.entries(res).map(([m, r]) => m + (r.error ? " 失敗" : " 成功")).join("、");
+};
+
+/* ---- 伺服器功能（用 python app.py 啟動時才有）：報價、個股、手動更新、匯出 ---- */
+function startQuote() {
+  const tick = () => api("/api/quote").then(q => {
+    if (q.error) throw 0;
+    const c = q.change >= 0 ? "var(--up)" : "var(--down)";
+    $("live").hidden = false;
+    $("live").innerHTML = `加權指數 <b>${q.last.toLocaleString()}</b> <span style="color:${c}">${q.change >= 0 ? "▲" : "▼"} ${Math.abs(q.change).toFixed(2)}（${q.pct.toFixed(2)}%）</span> <span class="note">${esc(q.time)} 更新，約有數分鐘延遲</span>`;
+  }).catch(() => { $("live").hidden = true; });
+  tick(); setInterval(() => { if (!document.hidden) tick(); }, 30000);
+}
+const poll = () => api("/api/status").then(s => {
+  $("job").textContent = s.running ? `執行中：${s.running}…（首次回補資料需數十分鐘）` : "完成，已載入新資料。" + (s.log ? " " + s.log : "");
+  if (s.running) setTimeout(poll, 3000); else loadAll();
+});
+api("/api/status").then(s => {
+  $("srv").hidden = false; document.querySelector('[data-t="stock"]').hidden = false;
+  $("autoMsg").textContent = (s.auto ? "已啟用自動更新：台股交易日早上 8:30 自動抓資料；" : "自動更新未啟用；") + (s.running ? `目前正在執行 ${s.running}…` : "目前閒置。");
+  if (s.readonly) { document.querySelectorAll("#srv button").forEach(e => e.disabled = true); $("job").textContent = "唯讀模式：手動更新與本機匯出已停用（仍可用上方「直接下載」）。"; }
+  if (s.running) poll();
+  startQuote();
+}).catch(() => {});
+document.querySelectorAll("[data-run]").forEach(b => b.onclick = () => api("/api/run", {what: b.dataset.run})
+  .then(r => { if (r.error) $("job").textContent = r.error; else { $("job").textContent = "已開始…"; setTimeout(poll, 1500); } }).catch(() => {}));
+$("exp").onclick = () => api("/api/export", {}).then(r => { $("expMsg").textContent = r.path ? "已存到 " + r.path : (r.error || "失敗"); }).catch(() => {});
+
+$("go").onclick = () => {
+  const c = $("code").value.trim(); if (!c) return;
+  $("stockOut").innerHTML = '<p class="note">查詢中…（需連網抓行情與財報）</p>';
+  api("/api/stock?code=" + encodeURIComponent(c)).then(s => {
+    if (s.error) { $("stockOut").innerHTML = `<p>${esc(s.error)}</p>`; return; }
+    const e = s.stock_expected, fl = ["偏弱", "—", "較佳"];
+    $("stockOut").innerHTML = `<p class="sig" style="font-size:1.5rem">${esc(s.code)} ${s.last}<small>${s.asof}</small></p>
+      <p>大盤未來一週傾向：<b>${esc(s.market_bucket)}</b>（上漲機率 ${pct(s.market_prob)}）。此股 Beta ${s.beta}${s.beta_implied == null ? "" : `，依 Beta 推算的大盤聯動約 ${s.beta_implied}%`}。</p>
+      <p>${e ? `歷史上大盤出現同樣訊號時（${e.n} 個樣本），這檔股票之後 5 日平均 <b>${e.avg}%</b>，勝率 ${e.win}%，八成情況落在 <b>${e.p10}% 到 ${e.p90}%</b>。` : "這檔股票在同類訊號下的歷史樣本不足。"}</p>
+      <p class="note">20 日動能 ${s.mom20}%，年化波動 ${s.vol60}%。這是歷史分布，不是點預測；5 日區間互相重疊，實際可信度比數字看起來低。</p>
+      <h2 style="margin-top:16px">財報體檢（參考，未納入上面的區間）</h2>` +
+      (s.fundamentals.length ? `<table><thead><tr><th>項目</th><th>數值</th><th>判讀</th></tr></thead><tbody>${s.fundamentals.map(f => `<tr><td>${esc(f.item)}</td><td>${esc(f.value)}</td><td>${fl[f.flag + 1]}</td></tr>`).join("")}</tbody></table>` : '<p class="note">抓不到這檔的財報資料。</p>') +
+      '<p class="note">財報來自 Yahoo，台股欄位常不完整，請對照公開資訊觀測站。沒有「當時公布」的歷史財報可回測，因此只作參考，不調整區間。</p>';
+  }).catch(() => { $("stockOut").innerHTML = '<p class="note">個股功能需要伺服器（python app.py）。</p>'; });
+};
+$("code").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
+
+loadAll();
+</script>
+</body>
+</html>
