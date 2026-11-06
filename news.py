@@ -35,33 +35,56 @@ def load_settings():  # 儀表板「設定」頁存下的金鑰
     try: os.environ.update({k: v for k, v in json.load(open("settings.json", encoding="utf-8")).items() if v})
     except Exception: pass
 
-def collect(groups, per, kind, out, seen):
-    for tag, q in groups:
-        urls = [
-            "https://news.google.com/rss/search?q=" + urllib.parse.quote(q) + "&hl=en-US&gl=US&ceid=US:en",
-            "https://www.bing.com/news/search?q=" + urllib.parse.quote(q) + "&format=rss",
-        ]
-        titles, source_seen = [], set()
-        for url in urls:
+def _fetch_feed(url, provider):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; TAIEXSignal/1.0)"})
+    xml = urllib.request.urlopen(req, timeout=12).read()
+    items = []
+    for item in ET.fromstring(xml).iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        published = (item.findtext("pubDate") or "").strip()
+        source = (item.findtext("source") or provider).strip()
+        if title:
+            items.append({"title": title, "link": link, "published": published, "source": source})
+    return items
+
+def _collect_group(group, per):
+    tag, q = group
+    urls = [
+        ("Google News", "https://news.google.com/rss/search?q=" + urllib.parse.quote(q) + "&hl=en-US&gl=US&ceid=US:en"),
+        ("Bing News", "https://www.bing.com/news/search?q=" + urllib.parse.quote(q) + "&format=rss"),
+    ]
+    items = []
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        futures = [ex.submit(_fetch_feed, url, provider) for provider, url in urls]
+        for fut in futures:
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; TAIEXSignal/1.0)"})
-                xml = urllib.request.urlopen(req, timeout=20).read()
-                source_titles = [(i.findtext("title") or "").strip() for i in ET.fromstring(xml).iter("item")]
-                # 第一個來源不足時，使用第二個來源補足；相同標題只保留一次。
-                for title in source_titles:
-                    if title and title not in source_seen:
-                        source_seen.add(title)
-                        titles.append(title)
-                    if len(titles) >= per:
-                        break
-                if len(titles) >= per:
-                    break
+                items.extend(fut.result())
             except Exception as e:
                 print("新聞來源失敗", tag, type(e).__name__, str(e)[:160])
+    unique, seen_titles = [], set()
+    for item in items:
+        key = re.sub(r"\\W+", "", item["title"].lower())
+        if key and key not in seen_titles:
+            seen_titles.add(key)
+            unique.append(item)
+        if len(unique) >= per:
+            break
+    return tag, unique
+
+def collect(groups, per, kind, out, seen):
+    # 不同新聞主題彼此獨立；有限併發可縮短等待，同時避免一次打爆 RSS 來源。
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        results = list(ex.map(lambda g: _collect_group(g, per), groups))
+    for tag, items in results:
         n = 0
-        for t in titles:
-            if t and t not in seen and n < per:
-                seen.add(t); n += 1; out.append({"id": len(out), "kind": kind, "tag": tag, "title": t})
+        for item in items:
+            title = item["title"]
+            key = re.sub(r"\\W+", "", title.lower())
+            if key and key not in seen and n < per:
+                seen.add(key)
+                n += 1
+                out.append({"id": len(out), "kind": kind, "tag": tag, **item})
 
 def headlines():
     out, seen = [], set()
