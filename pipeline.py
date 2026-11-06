@@ -253,6 +253,8 @@ def backtest(prob, fwd):
     return {
         "days": int(len(p)), "trades": int(pos.diff().abs().sum()),
         "direction_acc": round(float(((p > 0.5) == (f > 0)).mean()) * 100, 1),
+        "brier": round(float(((p - (f > 0).astype(float)) ** 2).mean()), 4),
+        "log_loss": round(float(-((f > 0) * np.log(np.clip(p, 1e-6, 1 - 1e-6)) + (f <= 0) * np.log(1 - np.clip(p, 1e-6, 1 - 1e-6))).mean()), 4),
         "hold_win_rate": round(float((held > 0).mean()) * 100, 1) if len(held) else None,
         "strategy": {"annual": a, "max_dd": d}, "buyhold": {"annual": ba, "max_dd": bd},
         "curve": {"dates": [str(x.date()) for x in p.index[k]],
@@ -308,7 +310,9 @@ if __name__ == "__main__":
     print(f"{out['asof']}  隔日上漲機率 {pu:.1%}  訊號：{out['signal']}")
     X5, y5, f5 = build(df, chips, margin, h=5, futures=futures)
     p5, l5, c5 = walk_forward(X5, y5, h=5)
-    p5.to_csv("weekly_prob.csv", header=["prob"], index_label="date")  # 供個股估計使用
+    tmp = "weekly_prob.csv.tmp"
+    p5.to_csv(tmp, header=["prob"], index_label="date")  # 供個股估計使用
+    os.replace(tmp, "weekly_prob.csv")
     wk = weekly_report(p5, f5, l5, c5)
     tmp = "weekly.json.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
