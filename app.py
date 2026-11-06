@@ -231,9 +231,9 @@ class H(SimpleHTTPRequestHandler):
             return self.google_login()
         if GOOGLE_ENABLED and u.path == "/auth/google/callback":
             return self.google_callback(u.query)
-        if GOOGLE_ENABLED and u.path == "/auth/logout":
+        if u.path == "/auth/logout":
             self.send_response(302)
-            self.send_header("Location", "/auth/google")
+            self.send_header("Location", "/auth/google" if GOOGLE_ENABLED else "/")
             self.send_header("Set-Cookie", f"{SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", "0")
