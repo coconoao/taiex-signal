@@ -78,7 +78,7 @@ details[open]>summary{margin-bottom:12px}
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
   <div class="banner" id="miss" hidden></div>
-  <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><div class="usgrid" id="usMarketCards"></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
+  <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><p id="usMarketSummary" class="note"></p><div class="usgrid" id="usMarketCards"></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
   <div class="banner" id="err" hidden>讀不到 signals.json。請用 python app.py 啟動，或用匯出的單一 HTML 檔、已部署的網站開啟（直接雙擊 dashboard.html 讀不到資料檔）。</div>
 
   <div id="tab-daily">
@@ -388,6 +388,12 @@ $("runAI").onclick = async () => {
 /* ---- 伺服器功能（用 python app.py 啟動時才有）：報價、個股、手動更新、匯出 ---- */
 function renderUSMarket(data) {
   $("usMarketMeta").textContent = `來源：${data.source} · ${data.interval} 區間 · 更新時間 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
+  const valid = (data.items || []).filter(x => x.pct != null);
+  const up = valid.filter(x => x.pct > 0).length, down = valid.filter(x => x.pct < 0).length;
+  const flat = valid.length - up - down;
+  $("usMarketSummary").textContent = valid.length
+    ? `盤中概況：${up} 個指數／標的上漲、${down} 個下跌、${flat} 個持平；此為行情摘要，不是台股方向預測。`
+    : "目前缺少足夠的漲跌資料。";
   $("usMarketCards").innerHTML = (data.items || []).map(x => {
     const good = x.pct == null ? "" : x.pct >= 0;
     const color = x.pct == null ? "var(--mute)" : good ? "var(--up)" : "var(--down)";
