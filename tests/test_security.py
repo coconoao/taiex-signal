@@ -42,6 +42,62 @@ class SessionSecurityTests(unittest.TestCase):
         self.assertEqual(web_app.session_email(altered), "")
 
 
+
+class RequestAuthTests(unittest.TestCase):
+    def make_handler(self, cookie="session-token"):
+        handler = object.__new__(web_app.H)
+        handler.headers = {"Cookie": f"{web_app.SESSION_COOKIE}={cookie}"}
+        handler.responses = []
+        handler.headers_sent = []
+        handler.wfile = __import__("io").BytesIO()
+        handler.send_response = lambda code: handler.responses.append(("response", code))
+        handler.send_error = lambda code, message=None: handler.responses.append(("error", code, message))
+        handler.send_header = lambda key, value: handler.headers_sent.append((key, value))
+        handler.end_headers = lambda: None
+        return handler
+
+    def test_public_request_fails_closed_without_oauth_configuration(self):
+        handler = self.make_handler()
+        with patch.object(web_app, "READONLY", True), \\
+             patch.object(web_app, "production_oauth_ready", return_value=False):
+            self.assertFalse(handler.authorized())
+        self.assertEqual(handler.responses[0][0:2], ("error", 503))
+
+    def test_approved_user_is_allowed_and_pending_user_is_denied(self):
+        cases = [
+            ({"email": "user@example.com", "role": "user", "status": "approved"}, True),
+            ({"email": "user@example.com", "role": "user", "status": "pending"}, False),
+            ({"email": "user@example.com", "role": "user", "status": "rejected"}, False),
+            ({"email": "user@example.com", "role": "user", "status": "revoked"}, False),
+            ({"email": "user@example.com", "role": "admin", "status": "approved"}, False),
+        ]
+        for row, expected in cases:
+            with self.subTest(row=row):
+                handler = self.make_handler()
+                with patch.object(web_app, "READONLY", True), \\
+                     patch.object(web_app, "production_oauth_ready", return_value=True), \\
+                     patch.object(web_app, "GOOGLE_ENABLED", True), \\
+                     patch.object(web_app, "ADMIN_EMAIL", "admin@example.com"), \\
+                     patch.object(web_app, "session_email", return_value="user@example.com"), \\
+                     patch.object(web_app, "ensure_site_user", return_value=row):
+                    self.assertEqual(handler.authorized(), expected)
+
+    def test_configured_admin_requires_admin_role_and_approved_status(self):
+        for row, expected in [
+            ({"email": "admin@example.com", "role": "admin", "status": "approved"}, True),
+            ({"email": "admin@example.com", "role": "user", "status": "approved"}, False),
+            ({"email": "admin@example.com", "role": "admin", "status": "revoked"}, False),
+        ]:
+            with self.subTest(row=row):
+                handler = self.make_handler()
+                with patch.object(web_app, "READONLY", True), \\
+                     patch.object(web_app, "production_oauth_ready", return_value=True), \\
+                     patch.object(web_app, "GOOGLE_ENABLED", True), \\
+                     patch.object(web_app, "ADMIN_EMAIL", "admin@example.com"), \\
+                     patch.object(web_app, "session_email", return_value="admin@example.com"), \\
+                     patch.object(web_app, "ensure_site_user", return_value=row):
+                    self.assertEqual(handler.authorized(), expected)
+
 class UserAdministrationTests(unittest.TestCase):
     def setUp(self):
         self.admin_email = web_app.ADMIN_EMAIL
