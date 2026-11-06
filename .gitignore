@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+settings.json
+*.pem
+*.key
+
+# Generated market/news data (persisted separately)
+signals.json
+weekly.json
+weekly_prob.csv
+chips.csv
+margin.csv
+futures.csv
+news.json
+news_history.jsonl
+refresh_status.json
+*.tmp
+
+# Local exports and OS files
+.DS_Store
+Thumbs.db
