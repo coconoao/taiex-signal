@@ -11,6 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>加權指數訊號</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
 <style>
 :root{--bg:#f2f5f8;--panel:#fff;--ink:#14202b;--mute:#5d6b7a;--line:#d9e0e7;--up:#c8283d;--down:#0f8a66;--hold:#8795a3;--accent:#3d5a80;color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--bg:#10171e;--panel:#18222c;--ink:#e6edf3;--mute:#93a1af;--line:#2a3745;--up:#ff6b7d;--down:#3fc79b;--hold:#6b7a89;--accent:#8fb0d9;color-scheme:dark}}
@@ -38,6 +39,12 @@ dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12p
 dt{color:var(--mute);font-size:.8125rem}
 dd{margin:0;font-size:1.25rem;font-weight:600}
 dd small{font-size:.8125rem;font-weight:400;color:var(--mute)}
+.usgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;margin:10px 0}
+.usitem{border:1px solid var(--line);border-radius:6px;padding:10px;min-width:0}
+.usitem b{display:block;font-size:1.05rem;overflow-wrap:anywhere}
+.usitem small{color:var(--mute)}
+.chartbox{width:100%;min-height:300px}
+.charttools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
 svg{width:100%;height:auto;display:block}
 .legend{font-size:.8125rem;color:var(--mute)}
 .legend span{display:inline-block;width:14px;height:3px;vertical-align:middle;margin:0 4px 0 12px}
@@ -71,6 +78,7 @@ details[open]>summary{margin-bottom:12px}
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
   <div class="banner" id="miss" hidden></div>
+  <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><div class="usgrid" id="usMarketCards"></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
   <div class="banner" id="err" hidden>讀不到 signals.json。請用 python app.py 啟動，或用匯出的單一 HTML 檔、已部署的網站開啟（直接雙擊 dashboard.html 讀不到資料檔）。</div>
 
   <div id="tab-daily">
@@ -90,7 +98,7 @@ details[open]>summary{margin-bottom:12px}
     <section id="bt" hidden>
       <details><summary>歷史回測（滾動式、已扣成本）</summary>
       <dl id="stats"></dl>
-      <svg id="curve" viewBox="0 0 600 200" role="img" aria-label="策略與買進持有的累積報酬曲線"></svg>
+      <div class="charttools"><button class="btn sm ghost" id="curveReset" type="button">重設圖表</button><span class="note">可懸停查看數值、拖曳縮放、使用下方區間滑桿。</span></div><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
     <section><h2>新聞情緒（隔日）：內建規則與 AI 並排</h2><div id="newsD"></div></section>
@@ -145,14 +153,37 @@ function divRow(name, v, max) {
   return `<div class="row"><span>${name}</span><div class="div"><span style="${side};width:${w}%"></span></div><b>${v > 0 ? "+" : ""}${v.toFixed(2)}</b></div>`;
 }
 function drawCurve(c) {
+  const el = $("curve");
+  if (window.Plotly) {
+    Plotly.react(el, [
+      {x:c.dates,y:c.strategy,type:"scatter",mode:"lines",name:"模型歷史曲線",line:{width:2}},
+      {x:c.dates,y:c.buyhold,type:"scatter",mode:"lines",name:"市場基準曲線",line:{width:2}}
+    ], {
+      margin:{l:48,r:18,t:18,b:55}, autosize:true, hovermode:"x unified",
+      dragmode:"zoom", paper_bgcolor:"transparent",plot_bgcolor:"transparent",
+      font:{color:getComputedStyle(document.body).color},
+      xaxis:{type:"date",rangeslider:{visible:true},rangeselector:{buttons:[
+        {count:1,label:"1月",step:"month",stepmode:"backward"},
+        {count:3,label:"3月",step:"month",stepmode:"backward"},
+        {count:6,label:"6月",step:"month",stepmode:"backward"},
+        {count:1,label:"1年",step:"year",stepmode:"backward"},
+        {step:"all",label:"全部"}]}},
+      yaxis:{title:"累積資產（起始值 = 1）",fixedrange:false},
+      legend:{orientation:"h",y:-0.28}
+    }, {responsive:true,scrollZoom:true,displaylogo:false,
+        modeBarButtonsToRemove:["lasso2d","select2d"]});
+    $("curveReset").onclick = () => Plotly.relayout(el, { "xaxis.autorange":true, "yaxis.autorange":true });
+    return;
+  }
   const all = c.strategy.concat(c.buyhold), lo = Math.min(...all), hi = Math.max(...all);
-  const X = i => (i / (c.dates.length - 1)) * 600, Y = v => 190 - ((v - lo) / (hi - lo || 1)) * 180;
+  const X = i => (i / Math.max(1,c.dates.length - 1)) * 600, Y = v => 190 - ((v - lo) / (hi - lo || 1)) * 180;
   const line = (a, col) => `<polyline fill="none" stroke="${col}" stroke-width="2" points="${a.map((v, i) => X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ")}"/>`;
-  $("curve").innerHTML = line(c.buyhold, "var(--hold)") + line(c.strategy, "var(--accent)");
+  el.innerHTML = '<svg viewBox="0 0 600 200" role="img" aria-label="靜態備援線圖">' + line(c.buyhold, "var(--hold)") + line(c.strategy, "var(--accent)") + '</svg>';
+  $("curveReset").hidden = true;
 }
 
 function renderDaily(d) {
-  $("meta").textContent = `資料日期 ${d.asof}，預測下一個交易日`;
+  $("meta").textContent = `台股最近可用交易日：${d.asof}。休市或尚未取得新收盤資料時，沿用這個交易日的資料，不會把舊資料標成今天。`;
   $("demo").hidden = !d.demo;
   const ml = d.missing_layers || [];
   $("miss").hidden = !ml.length;
@@ -355,6 +386,40 @@ $("runAI").onclick = async () => {
 };
 
 /* ---- 伺服器功能（用 python app.py 啟動時才有）：報價、個股、手動更新、匯出 ---- */
+function renderUSMarket(data) {
+  $("usMarketMeta").textContent = `來源：${data.source} · ${data.interval} 區間 · 更新時間 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
+  $("usMarketCards").innerHTML = (data.items || []).map(x => {
+    const good = x.pct == null ? "" : x.pct >= 0;
+    const color = x.pct == null ? "var(--mute)" : good ? "var(--up)" : "var(--down)";
+    const change = x.pct == null ? "漲跌資料暫缺" : `${x.change >= 0 ? "+" : ""}${x.change}（${x.pct >= 0 ? "+" : ""}${x.pct}%）`;
+    return `<div class="usitem"><small>${esc(x.name)} · ${esc(x.symbol)}</small><b>${Number(x.last).toLocaleString("en-US",{maximumFractionDigits:2})}</b><span style="color:${color}">${esc(change)}</span><br><small>${esc(new Date(x.time).toLocaleTimeString("zh-TW"))}</small></div>`;
+  }).join("");
+  if (data.chart && data.chart.points && data.chart.points.length && window.Plotly) {
+    Plotly.react("usMarketChart", [{
+      x:data.chart.points.map(p=>p.time), y:data.chart.points.map(p=>p.value),
+      type:"scatter",mode:"lines",name:"S&P 500",line:{width:2}
+    }], {
+      title:{text:"S&P 500｜最近可取得的盤中走勢",font:{size:14}},
+      margin:{l:50,r:15,t:40,b:50},autosize:true,hovermode:"x unified",
+      paper_bgcolor:"transparent",plot_bgcolor:"transparent",
+      font:{color:getComputedStyle(document.body).color},
+      xaxis:{type:"date",rangeslider:{visible:true}},yaxis:{title:"指數"}
+    },{responsive:true,scrollZoom:true,displaylogo:false});
+  } else if (!window.Plotly) {
+    $("usMarketChart").textContent = "互動圖表載入失敗；上方仍顯示最新可取得的行情數值。";
+  }
+}
+function startUSMarket() {
+  const tick = () => api("/api/us-market").then(d => {
+    if (d.error) throw new Error(d.error);
+    renderUSMarket(d);
+  }).catch(e => {
+    $("usMarketMeta").textContent = "美股資料暫時無法取得：" + String(e.message || e);
+  });
+  tick();
+  setInterval(() => { if (!document.hidden) tick(); }, 60000);
+}
+
 function startQuote() {
   const tick = () => api("/api/quote").then(q => {
     if (q.error) throw 0;
@@ -382,6 +447,7 @@ api("/api/status").then(s => {
   }
   if (s.running) poll();
   startQuote();
+  startUSMarket();
 }).catch(() => {});
 document.querySelectorAll("[data-run]").forEach(b => b.onclick = () => api("/api/run", {what: b.dataset.run})
   .then(r => { if (r.error) $("job").textContent = r.error; else { $("job").textContent = "已開始…"; setTimeout(poll, 1500); } }).catch(() => {}));
