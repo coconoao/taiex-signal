@@ -41,13 +41,20 @@ def collect(groups, per, kind, out, seen):
             "https://news.google.com/rss/search?q=" + urllib.parse.quote(q) + "&hl=en-US&gl=US&ceid=US:en",
             "https://www.bing.com/news/search?q=" + urllib.parse.quote(q) + "&format=rss",
         ]
-        titles = []
+        titles, source_seen = [], set()
         for url in urls:
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; TAIEXSignal/1.0)"})
                 xml = urllib.request.urlopen(req, timeout=20).read()
-                titles = [(i.findtext("title") or "").strip() for i in ET.fromstring(xml).iter("item")]
-                if titles:
+                source_titles = [(i.findtext("title") or "").strip() for i in ET.fromstring(xml).iter("item")]
+                # 第一個來源不足時，使用第二個來源補足；相同標題只保留一次。
+                for title in source_titles:
+                    if title and title not in source_seen:
+                        source_seen.add(title)
+                        titles.append(title)
+                    if len(titles) >= per:
+                        break
+                if len(titles) >= per:
                     break
             except Exception as e:
                 print("新聞來源失敗", tag, type(e).__name__, str(e)[:160])
@@ -92,17 +99,17 @@ def ask_claude(p):
 
 def ask_openai(p):
     r = post("https://api.openai.com/v1/chat/completions", {"Authorization": "Bearer " + os.environ["OPENAI_API_KEY"]},
-             {"model": os.environ["OPENAI_MODEL"], "messages": [{"role": "user", "content": p}], "response_format": {"type": "json_object"}})
+             {"model": os.environ.get("OPENAI_MODEL", "gpt-6-luna"), "messages": [{"role": "user", "content": p}], "response_format": {"type": "json_object"}})
     return r["choices"][0]["message"]["content"]
 
 def ask_gemini(p):
-    r = post(f"https://generativelanguage.googleapis.com/v1beta/models/{os.environ['GEMINI_MODEL']}:generateContent",
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
              {"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
              {"contents": [{"parts": [{"text": p}]}], "generationConfig": {"responseMimeType": "application/json"}})
     return "".join(x.get("text", "") for x in r["candidates"][0]["content"]["parts"])
 
-MODELS = {"Claude": (ask_claude, ["ANTHROPIC_API_KEY"]), "ChatGPT": (ask_openai, ["OPENAI_API_KEY", "OPENAI_MODEL"]),
-          "Gemini": (ask_gemini, ["GEMINI_API_KEY", "GEMINI_MODEL"])}
+MODELS = {"Claude": (ask_claude, ["ANTHROPIC_API_KEY"]), "ChatGPT": (ask_openai, ["OPENAI_API_KEY"]),
+          "Gemini": (ask_gemini, ["GEMINI_API_KEY"])}
 clip = lambda x: round(max(-1.0, min(1.0, float(x))), 2)
 
 def run(name, fn, p):
