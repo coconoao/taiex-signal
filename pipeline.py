@@ -25,7 +25,7 @@ def load_live(years=6):
     for attempt in range(3):
         try:
             raw = yf.download(list(TICKERS.values()), period=f"{years}y",
-                              auto_adjust=True, progress=False, threads=False)
+                              auto_adjust=True, progress=False, threads=4, timeout=20)
             if raw is None or raw.empty:
                 raise ValueError("Yahoo Finance 沒有回傳行情資料")
             if isinstance(raw.columns, pd.MultiIndex):
@@ -70,13 +70,21 @@ def load_demo(n=1800, seed=7):
     r["TAIEX"] = 0.0003 + 0.3 * r["SOX"].shift(1).fillna(0) + 0.15 * r["KOSPI"].shift(1).fillna(0) + rng.normal(0, 0.008, n)
     return 100 * (1 + r).cumprod()
 
-def fetch_chips(days_back=1460, path="chips.csv"):
+def _pending_dates(old, today, days_back, trading_days=None):
+    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    if trading_days is None:
+        return pd.bdate_range(start, today)
+    dates = pd.DatetimeIndex(trading_days).tz_localize(None).normalize().unique().sort_values()
+    dates = dates[(dates >= start) & (dates <= today)]
+    return dates
+
+def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     """證交所三大法人買賣超（元），增量寫入 chips.csv（date, foreign_net, trust_net）。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
-    for d in pd.bdate_range(start, today):
+    for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -119,14 +127,14 @@ def _tx_foreign_oi_net(tabs):
                 return nums[10] if len(nums) >= 12 else None
     return None
 
-def fetch_futures(days_back=1095, path="futures.csv"):
+def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     """期交所三大法人「臺股期貨」外資未平倉淨口數，增量寫入 futures.csv（date, foreign_oi_net）。官方僅提供近三年。"""
     from io import StringIO
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
-    for d in pd.bdate_range(start, today):
+    for d in dates:
         time.sleep(0.7)
         body = urllib.parse.urlencode({"queryType": "1", "goDay": "", "doQuery": "1", "dateaddcnt": "",
                                        "queryDate": f"{d:%Y/%m/%d}", "commodityId": ""}).encode()
@@ -153,13 +161,13 @@ def demo_futures(df, seed=9):  # 合成期貨淨未平倉，僅供示範
     r = df["TAIEX"].pct_change().fillna(0)
     return pd.DataFrame({"foreign_oi_net": np.cumsum(r * 2e5 + rng.normal(0, 1500, len(df)))}, index=df.index)
 
-def fetch_margin(days_back=1460, path="margin.csv"):
+def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
     """證交所市場融資餘額（元），增量寫入 margin.csv（date, margin_bal）。資料約晚上 9 點後公布。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
-    for d in pd.bdate_range(start, today):
+    for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={d:%Y%m%d}&selectType=MS&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -323,11 +331,11 @@ def weekly_report(prob, fwd, latest, contrib):
 if __name__ == "__main__":
     demo = "--demo" in sys.argv
     df = load_demo() if demo else load_live()
-    chips = demo_chips(df) if demo else None if "--no-chips" in sys.argv else fetch_chips()
+    chips = demo_chips(df) if demo else None if "--no-chips" in sys.argv else fetch_chips(trading_days=df.index)
     if os.path.exists("margin.csv") and "short_units" not in pd.read_csv("margin.csv", nrows=1):
         print("舊版融資資料缺少融券欄位：保留既有歷史融資資料，融券欄位從本次開始累積。")
-    margin = demo_margin(df) if demo else None if "--no-margin" in sys.argv else fetch_margin()
-    futures = demo_futures(df) if demo else None if "--no-futures" in sys.argv else fetch_futures()
+    margin = demo_margin(df) if demo else None if "--no-margin" in sys.argv else fetch_margin(trading_days=df.index)
+    futures = demo_futures(df) if demo else None if "--no-futures" in sys.argv else fetch_futures(trading_days=df.index)
     X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])
