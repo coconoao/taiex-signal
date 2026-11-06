@@ -5,6 +5,24 @@ from unittest.mock import patch
 import app as web_app
 
 
+class ProductionAuthConfigurationTests(unittest.TestCase):
+    def test_public_deployment_requires_oauth_and_supabase(self):
+        with patch.object(web_app, "READONLY", True), \\
+             patch.object(web_app, "GOOGLE_ENABLED", False), \\
+             patch.object(web_app, "SUPABASE_URL", "https://example.supabase.co"), \\
+             patch.object(web_app, "SUPABASE_SERVICE_ROLE_KEY", "secret"), \\
+             patch.object(web_app, "ADMIN_EMAIL", "admin@example.com"):
+            self.assertFalse(web_app.production_oauth_ready())
+
+    def test_public_deployment_accepts_complete_oauth_configuration(self):
+        with patch.object(web_app, "READONLY", True), \\
+             patch.object(web_app, "GOOGLE_ENABLED", True), \\
+             patch.object(web_app, "SUPABASE_URL", "https://example.supabase.co"), \\
+             patch.object(web_app, "SUPABASE_SERVICE_ROLE_KEY", "secret"), \\
+             patch.object(web_app, "ADMIN_EMAIL", "admin@example.com"):
+            self.assertTrue(web_app.production_oauth_ready())
+
+
 class SessionSecurityTests(unittest.TestCase):
     def test_signed_session_round_trip_normalizes_email(self):
         token = web_app.sign_session("User@Example.com", int(time.time()) + 60)
