@@ -410,6 +410,12 @@ class H(SimpleHTTPRequestHandler):
             if os.environ.get("K_SERVICE"):
                 if JOB.get("running"):
                     return self.send_json({"error": "已有資料更新工作正在執行"}, 409)
+                try:
+                    saved = json.load(open(os.path.join(DATA, "refresh_status.json"), encoding="utf-8"))
+                    if saved.get("running"):
+                        return self.send_json({"error": "已有資料更新工作正在執行"}, 409)
+                except Exception:
+                    pass
                 JOB["running"] = "queued"
                 try:
                     operation = trigger_cloud_run_refresh()
