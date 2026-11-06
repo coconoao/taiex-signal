@@ -1,6 +1,6 @@
 """啟動：python app.py [--demo] [--port 8000] [--host 127.0.0.1] [--no-auto]
 自動更新：台股交易日（台北時間）早上 8:30 自動執行 pipeline.py、news.py；啟動時若資料是示範或超過 18 小時，也會補跑一次。
-API 金鑰：使用者各自填在自己的瀏覽器（儀表板「設定」頁），不經過、也不儲存在本伺服器。
+API 金鑰：使用者各自填在瀏覽器；分析時透過登入後的 /api/ai 即時轉送，不寫入伺服器資料檔或應用程式日誌。
   伺服器排程若也要跑 AI 分析，可用環境變數提供營運者自己的金鑰（見 news.py）。
 對外部署（--host 0.0.0.0 或 READONLY=1）：自動唯讀，關閉手動更新與匯出到本機；排程照常執行。
 """
@@ -25,7 +25,7 @@ arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
 HOST = arg("--host", os.environ.get("HOST", "127.0.0.1"))
 PORT = int(arg("--port", os.environ.get("PORT", "8000")))
 DEMO = "--demo" in sys.argv
-READONLY = os.environ.get("READONLY", "1" if os.environ.get("K_SERVICE") else "0").lower() in ("1", "true", "yes")
+READONLY = os.environ.get("READONLY", "1" if HOST not in ("127.0.0.1", "localhost") else "0").lower() in ("1", "true", "yes")
 # Cloud Run 會水平擴充；排程應交給 Cloud Scheduler / Cloud Run Jobs，不可每個服務執行個體各跑一份。
 AUTO = "--no-auto" not in sys.argv and not DEMO and not os.environ.get("K_SERVICE")
 TZ = ZoneInfo("Asia/Taipei")
