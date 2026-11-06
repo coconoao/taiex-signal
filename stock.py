@@ -8,9 +8,22 @@ import numpy as np, pandas as pd
 from pipeline import BUY, SELL
 
 def _hist(yf, sym):
-    h = yf.Ticker(sym).history(period="5y", auto_adjust=True)["Close"]
-    h.index = pd.to_datetime(h.index).tz_localize(None).normalize()
-    return h.dropna()
+    last_error = None
+    for attempt in range(3):
+        try:
+            raw = yf.Ticker(sym).history(period="5y", auto_adjust=True)
+            if raw is not None and not raw.empty and "Close" in raw:
+                h = raw["Close"].dropna()
+                h.index = pd.to_datetime(h.index).tz_localize(None).normalize()
+                if len(h):
+                    return h
+            last_error = ValueError("Yahoo Finance 回傳空行情")
+        except Exception as e:
+            last_error = e
+        if attempt < 2:
+            import time
+            time.sleep(3 * (attempt + 1))
+    raise RuntimeError(f"{sym} 行情下載失敗；可能遇到 Yahoo Finance 限流（HTTP 429）。最後錯誤：{last_error}")
 
 def fundamentals(t):
     out, info = [], {}
@@ -45,29 +58,69 @@ def analyze(code):
     code = code.strip().upper().replace(".TWO", "").replace(".TW", "")
     if not code.isalnum(): raise ValueError("請輸入股票代號，例如 2330")
     px = sym = None
-    for suf in (".TW", ".TWO"):  # 上市、上櫃
-        h = _hist(yf, code + suf)
-        if len(h) > 300: px, sym = h, code + suf; break
-    if px is None: raise ValueError(f"找不到 {code} 的行情，請確認代號")
+    errors = []
+    for suf in (".TW", ".TWO"):  # 上市、上櫃；其中一個市場代碼無資料時繼續嘗試另一個
+        try:
+            h = _hist(yf, code + suf)
+        except RuntimeError as e:
+            errors.append(str(e))
+            continue
+        if len(h) > 300:
+            px, sym = h, code + suf
+            break
+    if px is None:
+        detail = "；".join(errors)
+        raise ValueError(f"找不到 {code} 的足夠歷史行情，請確認代號或稍後重試。{detail}")
     import os
-    if not (os.path.exists("weekly.json") and os.path.exists("weekly_prob.csv")):
-        raise ValueError("請先到「設定」頁按「更新行情與訊號」（或執行 pipeline.py）")
+    if os.path.exists("signals.json"):
+        try:
+            if json.load(open("signals.json", encoding="utf-8")).get("demo"):
+                raise ValueError("目前仍是示範行情，請先更新真實行情與訊號，再使用個股分析。")
+        except json.JSONDecodeError:
+            raise ValueError("行情資料檔案格式錯誤，請重新更新行情與訊號。")
+    # 優先使用大盤 Pipeline 的週訊號分組；若尚未產生，仍可執行個股自身歷史分析。
+    wk, p = None, None
+    try:
+        if os.path.exists("weekly.json") and os.path.exists("weekly_prob.csv") and os.path.getsize("weekly_prob.csv") > 0:
+            wk = json.load(open("weekly.json", encoding="utf-8"))
+            p = pd.read_csv("weekly_prob.csv", index_col=0, parse_dates=True)["prob"].dropna()
+            p = p.iloc[::5]  # 與大盤週報一致，降低五日重疊造成的樣本膨脹
+    except (ValueError, KeyError, OSError, pd.errors.ParserError) as e:
+        print(f"大盤週資料不可用，改用個股自身歷史樣本：{e}")
+
     mk = _hist(yf, "^TWII")
-    wk = json.load(open("weekly.json", encoding="utf-8"))
-    p = pd.read_csv("weekly_prob.csv", index_col=0, parse_dates=True)["prob"].dropna()
-    f5 = (px.shift(-5) / px - 1).reindex(p.index)
-    name = lambda v: "偏多" if v > BUY else "偏空" if v < SELL else "中性"
-    d = pd.DataFrame({"b": p.map(name), "f": f5}).dropna()
-    q = lambda s, a: round(float(s.quantile(a)) * 100, 2)
-    buckets = {k: {"n": int(len(g)), "win": round(float((g > 0).mean()) * 100, 1), "avg": round(float(g.mean()) * 100, 2),
-                   "p10": q(g, .1), "p90": q(g, .9)} for k, g in d.groupby("b")["f"]}
+    f5 = (px.shift(-5) / px - 1)
+    q = lambda values, a: round(float(values.quantile(a)) * 100, 2)
+    def summarize(values):
+        values = values.dropna()
+        if values.empty: return None
+        return {"n": int(len(values)), "win": round(float((values > 0).mean()) * 100, 1),
+                "avg": round(float(values.mean()) * 100, 2),
+                "p10": q(values, .1), "p90": q(values, .9)}
+    buckets = {}
+    market_bucket = "未載入大盤條件"
+    market_prob = None
+    stock_expected = summarize(f5)
+    exp = None
+    if p is not None and wk is not None and wk.get("bucket"):
+        aligned = f5.reindex(p.index)
+        name = lambda v: "偏多" if v > BUY else "偏空" if v < SELL else "中性"
+        d = pd.DataFrame({"b": p.map(name), "f": aligned}).dropna()
+        buckets = {k: summarize(g["f"]) for k, g in d.groupby("b")}
+        market_bucket = wk["bucket"]
+        market_prob = wk.get("prob_up")
+        stock_expected = buckets.get(market_bucket)
+        exp = wk.get("expected")
     r = pd.concat([px.pct_change(), mk.pct_change()], axis=1, keys=["s", "m"]).dropna().tail(252)
-    beta = round(float(r["s"].cov(r["m"]) / r["m"].var()), 2)
-    exp = wk.get("expected")
+    market_var = float(r["m"].var())
+    if not np.isfinite(market_var) or market_var <= 0:
+        raise ValueError("無法計算 Beta：大盤報酬資料不足或變異數為零。")
+    beta = round(float(r["s"].cov(r["m"]) / market_var), 2)
+    exp = wk.get("expected") if wk else None
     return {"code": code, "symbol": sym, "last": round(float(px.iloc[-1]), 2), "asof": str(px.index[-1].date()),
-            "market_bucket": wk["bucket"], "market_prob": wk["prob_up"], "beta": beta,
-            "beta_implied": round(beta * exp["avg"], 2) if exp else None,
-            "stock_expected": buckets.get(wk["bucket"]), "buckets": buckets,
+            "market_bucket": market_bucket, "market_prob": market_prob, "beta": beta,
+            "beta_implied": round(beta * exp["avg"], 2) if exp and exp.get("avg") is not None else None,
+            "stock_expected": stock_expected, "buckets": buckets,
             "mom20": round(float(px.iloc[-1] / px.iloc[-21] - 1) * 100, 1),
             "vol60": round(float(px.pct_change().tail(60).std() * np.sqrt(252)) * 100, 1),
             "fundamentals": fundamentals(yf.Ticker(sym))}

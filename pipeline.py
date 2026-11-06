@@ -6,7 +6,7 @@
 執行時間：台股交易日早上 8:30 前後（美股已收盤、台股未開盤、前一日籌碼已公布）。
 輸出 signals.json，供 dashboard.html 讀取。僅供研究，非投資建議。
 """
-import os, sys, json, time, urllib.request, urllib.parse
+import os, sys, json, time, datetime as dt, urllib.request, urllib.parse
 import numpy as np, pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -20,13 +20,47 @@ BUY, SELL, COST = 0.55, 0.45, 0.002          # 買進/賣出門檻、單次換�
 
 def load_live(years=6):
     import yfinance as yf
-    df = yf.download(list(TICKERS.values()), period=f"{years}y", auto_adjust=True, progress=False)["Close"]
-    df = df.rename(columns={v: k for k, v in TICKERS.items()})
+    last_error = None
+    df = None
+    for attempt in range(3):
+        try:
+            raw = yf.download(list(TICKERS.values()), period=f"{years}y",
+                              auto_adjust=True, progress=False, threads=4, timeout=20)
+            if raw is None or raw.empty:
+                raise ValueError("Yahoo Finance 沒有回傳行情資料")
+            if isinstance(raw.columns, pd.MultiIndex):
+                if "Close" in raw.columns.get_level_values(0):
+                    close = raw.xs("Close", axis=1, level=0)
+                elif "Close" in raw.columns.get_level_values(1):
+                    close = raw.xs("Close", axis=1, level=1)
+                else:
+                    raise ValueError("Yahoo Finance 回傳欄位缺少 Close")
+            else:
+                close = raw["Close"]
+            if isinstance(close, pd.Series):
+                close = close.to_frame()
+            if isinstance(close.columns, pd.MultiIndex):
+                close.columns = close.columns.get_level_values(-1)
+            df = close.rename(columns={v: k for k, v in TICKERS.items()})
+            if "TAIEX" not in df or df["TAIEX"].dropna().empty:
+                raise ValueError("Yahoo Finance 回傳資料沒有台灣加權指數")
+            break
+        except Exception as e:
+            last_error = e
+            print(f"行情下載失敗（第 {attempt + 1}/3 次）：{type(e).__name__}: {e}", flush=True)
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+            df = None
+    if df is None:
+        raise RuntimeError(f"無法取得即時歷史行情；可能是 Yahoo Finance 限流（HTTP 429）。最後錯誤：{last_error}")
     df.index = pd.to_datetime(df.index).tz_localize(None)
-    df = df.dropna(subset=["TAIEX"]).ffill()
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    df = df.dropna(subset=["TAIEX"]).ffill(limit=3)
     now = pd.Timestamp.now(tz="Asia/Taipei")
     if now.hour < 14:  # 盤中或開盤前：排除今日尚未收盤的資料列
         df = df[df.index < now.tz_localize(None).normalize()]
+    if len(df) < 500:
+        raise ValueError(f"有效大盤歷史資料不足：只有 {len(df)} 個交易日")
     return df
 
 def load_demo(n=1800, seed=7):
@@ -36,13 +70,21 @@ def load_demo(n=1800, seed=7):
     r["TAIEX"] = 0.0003 + 0.3 * r["SOX"].shift(1).fillna(0) + 0.15 * r["KOSPI"].shift(1).fillna(0) + rng.normal(0, 0.008, n)
     return 100 * (1 + r).cumprod()
 
-def fetch_chips(days_back=1460, path="chips.csv"):
+def _pending_dates(old, today, days_back, trading_days=None):
+    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    if trading_days is None:
+        return pd.bdate_range(start, today)
+    dates = pd.DatetimeIndex(trading_days).tz_localize(None).normalize().unique().sort_values()
+    dates = dates[(dates >= start) & (dates <= today)]
+    return dates
+
+def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     """證交所三大法人買賣超（元），增量寫入 chips.csv（date, foreign_net, trust_net）。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
-    for d in pd.bdate_range(start, today):
+    for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -58,7 +100,10 @@ def fetch_chips(days_back=1460, path="chips.csv"):
         else: print("欄位名稱與預期不同，請檢查", d.date(), list(diff))
     out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
     out = out[~out.index.duplicated()]
-    if len(out): out.to_csv(path, index_label="date")
+    if len(out):
+        tmp = path + ".tmp"
+        out.to_csv(tmp, index_label="date")
+        os.replace(tmp, path)
     return out
 
 def demo_chips(df, seed=3):  # 合成籌碼，僅供示範
@@ -82,14 +127,14 @@ def _tx_foreign_oi_net(tabs):
                 return nums[10] if len(nums) >= 12 else None
     return None
 
-def fetch_futures(days_back=1095, path="futures.csv"):
+def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     """期交所三大法人「臺股期貨」外資未平倉淨口數，增量寫入 futures.csv（date, foreign_oi_net）。官方僅提供近三年。"""
     from io import StringIO
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
-    for d in pd.bdate_range(start, today):
+    for d in dates:
         time.sleep(0.7)
         body = urllib.parse.urlencode({"queryType": "1", "goDay": "", "doQuery": "1", "dateaddcnt": "",
                                        "queryDate": f"{d:%Y/%m/%d}", "commodityId": ""}).encode()
@@ -104,7 +149,10 @@ def fetch_futures(days_back=1095, path="futures.csv"):
         else: rows[d] = {"foreign_oi_net": net}
     out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
     out = out[~out.index.duplicated()]
-    if len(out): out.to_csv(path, index_label="date")
+    if len(out):
+        tmp = path + ".tmp"
+        out.to_csv(tmp, index_label="date")
+        os.replace(tmp, path)
     else: print("期貨：沒有取得任何資料，請確認網路與 lxml 是否安裝")
     return out
 
@@ -113,13 +161,13 @@ def demo_futures(df, seed=9):  # 合成期貨淨未平倉，僅供示範
     r = df["TAIEX"].pct_change().fillna(0)
     return pd.DataFrame({"foreign_oi_net": np.cumsum(r * 2e5 + rng.normal(0, 1500, len(df)))}, index=df.index)
 
-def fetch_margin(days_back=1460, path="margin.csv"):
+def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
     """證交所市場融資餘額（元），增量寫入 margin.csv（date, margin_bal）。資料約晚上 9 點後公布。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
-    for d in pd.bdate_range(start, today):
+    for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={d:%Y%m%d}&selectType=MS&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -136,7 +184,10 @@ def fetch_margin(days_back=1460, path="margin.csv"):
         else: print("找不到融資／融券欄位，請檢查", d.date(), list(last))
     out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
     out = out[~out.index.duplicated()]
-    if len(out): out.to_csv(path, index_label="date")
+    if len(out):
+        tmp = path + ".tmp"
+        out.to_csv(tmp, index_label="date")
+        os.replace(tmp, path)
     return out
 
 def demo_margin(df, seed=5):  # 合成融資餘額，僅供示範
@@ -198,15 +249,37 @@ def model():
 def walk_forward(X, y, start=500, step=20, h=1):
     valid = X.notna().all(axis=1)
     idx = X.index[valid & y.notna()]
+    if len(idx) < max(80, h + 20):
+        raise ValueError(f"有效訓練樣本不足：只有 {len(idx)} 筆；至少需要 {max(80, h + 20)} 筆。")
     prob = pd.Series(np.nan, index=X.index)
-    for i in range(min(start, len(idx) // 2), len(idx), step):
-        tr = idx[:i - h + 1]  # 剔除標籤尚未實現的樣本，避免資料洩漏
+    first_test = min(max(start, h + 30), max(h + 30, len(idx) // 2))
+    for i in range(first_test, len(idx), step):
+        tr = idx[:i - h + 1]  # purge：排除標籤區間尚未結束的樣本
+        if len(tr) < 30 or y.loc[tr].nunique() < 2:
+            continue
         m = model().fit(X.loc[tr], y.loc[tr])
         te = idx[i:i + step]
         prob.loc[te] = m.predict_proba(X.loc[te])[:, 1]
+    if y.loc[idx].nunique() < 2:
+        raise ValueError("訓練資料只有單一類別，無法估計上漲機率。")
     m = model().fit(X.loc[idx], y.loc[idx])
     latest = X.index[valid][-1]
-    prob.loc[latest] = m.predict_proba(X.loc[[latest]])[0, 1]
+    raw_latest = float(m.predict_proba(X.loc[[latest]])[0, 1])
+
+    # 只用歷史 walk-forward 樣本外預測及其已實現標籤校準最新機率。
+    # 歷史回測值維持當時產生的原始預測，避免把未來校準資訊倒灌進回測。
+    cal = prob.loc[idx].dropna()
+    cal = cal[y.loc[cal.index].notna()]
+    calibrated = raw_latest
+    if len(cal) >= 100 and y.loc[cal.index].nunique() == 2:
+        clipped = np.clip(cal.to_numpy(), 1e-5, 1 - 1e-5)
+        z = np.log(clipped / (1 - clipped)).reshape(-1, 1)
+        calibrator = LogisticRegression(C=1.0, max_iter=300)
+        calibrator.fit(z, y.loc[cal.index].astype(int))
+        z_latest = np.log(np.clip(raw_latest, 1e-5, 1 - 1e-5) /
+                          (1 - np.clip(raw_latest, 1e-5, 1 - 1e-5)))
+        calibrated = float(calibrator.predict_proba([[z_latest]])[0, 1])
+    prob.loc[latest] = calibrated
     contrib = m[-1].coef_[0] * m[0].transform(X.loc[[latest]])[0]
     return prob, latest, pd.Series(contrib, index=X.columns)
 
@@ -215,7 +288,9 @@ def backtest(prob, fwd):
     p = p[fwd.reindex(p.index).notna()]
     f = fwd.loc[p.index]
     pos = pd.Series(np.where(p > BUY, 1.0, np.where(p < SELL, 0.0, np.nan)), index=p.index).ffill().fillna(0)
-    strat = pos * f - COST * pos.diff().abs().fillna(0)
+    turnover = pos.diff().abs()
+    if len(turnover): turnover.iloc[0] = abs(float(pos.iloc[0]))  # 首筆進場也計入交易成本
+    strat = pos * f - COST * turnover.fillna(0)
     def stat(s):
         eq = (1 + s).cumprod()
         return round((eq.iloc[-1] ** (252 / len(s)) - 1) * 100, 1), round((eq / eq.cummax() - 1).min() * 100, 1)
@@ -224,8 +299,10 @@ def backtest(prob, fwd):
     eq_s, eq_b = (1 + strat).cumprod(), (1 + f).cumprod()
     k = slice(None, None, 5)
     return {
-        "days": int(len(p)), "trades": int(pos.diff().abs().sum()),
+        "days": int(len(p)), "trades": int(turnover.fillna(0).sum()),
         "direction_acc": round(float(((p > 0.5) == (f > 0)).mean()) * 100, 1),
+        "brier": round(float(((p - (f > 0).astype(float)) ** 2).mean()), 4),
+        "log_loss": round(float(-((f > 0) * np.log(np.clip(p, 1e-6, 1 - 1e-6)) + (f <= 0) * np.log(1 - np.clip(p, 1e-6, 1 - 1e-6))).mean()), 4),
         "hold_win_rate": round(float((held > 0).mean()) * 100, 1) if len(held) else None,
         "strategy": {"annual": a, "max_dd": d}, "buyhold": {"annual": ba, "max_dd": bd},
         "curve": {"dates": [str(x.date()) for x in p.index[k]],
@@ -237,6 +314,7 @@ def weekly_report(prob, fwd, latest, contrib):
     """未來 5 個交易日展望：目前訊號，加上歷史上同類訊號之後 5 日的實際分布。"""
     p = prob.dropna()
     p = p[fwd.reindex(p.index).notna()]
+    p = p.iloc[::5]  # 五日報酬區間重疊；每五個交易日取一筆，避免樣本數膨脹
     f = fwd.loc[p.index]
     name = lambda v: "偏多" if v > BUY else "偏空" if v < SELL else "中性"
     q = lambda s, a: round(float(s.quantile(a)) * 100, 2)
@@ -253,17 +331,18 @@ def weekly_report(prob, fwd, latest, contrib):
 if __name__ == "__main__":
     demo = "--demo" in sys.argv
     df = load_demo() if demo else load_live()
-    chips = demo_chips(df) if demo else None if "--no-chips" in sys.argv else fetch_chips()
+    chips = demo_chips(df) if demo else None if "--no-chips" in sys.argv else fetch_chips(trading_days=df.index)
     if os.path.exists("margin.csv") and "short_units" not in pd.read_csv("margin.csv", nrows=1):
-        os.remove("margin.csv")  # 舊版檔案缺融券欄位，重新回補
-    margin = demo_margin(df) if demo else None if "--no-margin" in sys.argv else fetch_margin()
-    futures = demo_futures(df) if demo else None if "--no-futures" in sys.argv else fetch_futures()
+        print("舊版融資資料缺少融券欄位：保留既有歷史融資資料，融券欄位從本次開始累積。")
+    margin = demo_margin(df) if demo else None if "--no-margin" in sys.argv else fetch_margin(trading_days=df.index)
+    futures = demo_futures(df) if demo else None if "--no-futures" in sys.argv else fetch_futures(trading_days=df.index)
     X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])
     layers = contrib.groupby(lambda c: c.split(":")[0]).sum()
     out = {
-        "asof": str(latest.date()), "demo": demo, "prob_up": round(pu, 3),
+        "asof": str(latest.date()), "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "data_basis": "latest_available_taiwan_trading_day", "demo": demo, "prob_up": round(pu, 3),
         "signal": "買進" if pu > BUY else "賣出／減碼" if pu < SELL else "觀望",
         "thresholds": {"buy": BUY, "sell": SELL},
         "missing_layers": [k for k in ("籌碼", "信用", "期貨") if k not in layers.index],
@@ -272,11 +351,21 @@ if __name__ == "__main__":
                      for k, v in contrib.reindex(contrib.abs().sort_values(ascending=False).index).items()],
         "backtest": backtest(prob, fwd),
     }
-    json.dump(out, open("signals.json", "w", encoding="utf-8"), ensure_ascii=False)
+    tmp = "signals.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False)
+        f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, "signals.json")
     print(f"{out['asof']}  隔日上漲機率 {pu:.1%}  訊號：{out['signal']}")
     X5, y5, f5 = build(df, chips, margin, h=5, futures=futures)
     p5, l5, c5 = walk_forward(X5, y5, h=5)
-    p5.to_csv("weekly_prob.csv", header=["prob"], index_label="date")  # 供個股估計使用
+    tmp = "weekly_prob.csv.tmp"
+    p5.to_csv(tmp, header=["prob"], index_label="date")  # 供個股估計使用
+    os.replace(tmp, "weekly_prob.csv")
     wk = weekly_report(p5, f5, l5, c5)
-    json.dump(wk, open("weekly.json", "w", encoding="utf-8"), ensure_ascii=False)
+    tmp = "weekly.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(wk, f, ensure_ascii=False)
+        f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, "weekly.json")
     print(f"{wk['asof']}  一週上漲機率 {wk['prob_up']:.1%}  傾向：{wk['bucket']}")
