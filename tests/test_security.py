@@ -55,6 +55,19 @@ class RequestAuthTests(unittest.TestCase):
         handler.end_headers = lambda: None
         return handler
 
+    def test_oauth_callback_rejects_missing_or_mismatched_state(self):
+        for query, cookie in [
+            ("code=authorization-code", "expected-state"),
+            ("state=wrong-state&code=authorization-code", "expected-state"),
+            ("state=expected-state", "expected-state"),
+        ]:
+            with self.subTest(query=query):
+                handler = self.make_handler()
+                handler.headers = {"Cookie": f"{web_app.STATE_COOKIE}={cookie}"}
+                with patch.object(web_app, "GOOGLE_ENABLED", True):
+                    handler.google_callback(query)
+                self.assertEqual(handler.responses[0][0:2], ("error", 400))
+
     def test_public_request_fails_closed_without_oauth_configuration(self):
         handler = self.make_handler()
         with patch.multiple(
