@@ -31,7 +31,8 @@ Google OAuth Client ID 可作為 Cloud Run 環境變數；Client Secret 使用 S
 ```bash
 gcloud run deploy taiex-signal \
   --source . \
-  --region asia-east1 \
+  --region asia-east1 \\
+  --execution-environment gen2 \\
   --allow-unauthenticated \
   --max 1 \
   --min 0 \
