@@ -5,7 +5,7 @@ API 金鑰：使用者各自填在自己的瀏覽器（儀表板「設定」頁�
 對外部署（--host 0.0.0.0 或 READONLY=1）：自動唯讀，關閉手動更新與匯出到本機；排程照常執行。
 """
 import datetime as dt, json, os, subprocess, sys, threading, time, urllib.parse
-import base64, hmac, secrets, urllib.request
+import base64, hmac, secrets, urllib.request, urllib.error
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
@@ -22,9 +22,12 @@ if DATA != CODE:
         if not os.path.exists(f): shutil.copy(os.path.join(CODE, f), DATA)
 
 arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
-HOST, PORT, DEMO = arg("--host", "127.0.0.1"), int(arg("--port", 8000)), "--demo" in sys.argv
-READONLY = bool(os.environ.get("READONLY")) or HOST not in ("127.0.0.1", "localhost")
-AUTO = "--no-auto" not in sys.argv and not DEMO
+HOST = arg("--host", os.environ.get("HOST", "127.0.0.1"))
+PORT = int(arg("--port", os.environ.get("PORT", "8000")))
+DEMO = "--demo" in sys.argv
+READONLY = os.environ.get("READONLY", "0").lower() in ("1", "true", "yes")
+# Cloud Run 會水平擴充；排程應交給 Cloud Scheduler / Cloud Run Jobs，不可每個服務執行個體各跑一份。
+AUTO = "--no-auto" not in sys.argv and not DEMO and not os.environ.get("K_SERVICE")
 TZ = ZoneInfo("Asia/Taipei")
 JOB, LOCK, QUOTE = {"running": None, "log": ""}, threading.Lock(), {"t": 0, "v": None}
 AUTH_USER = os.environ.get("TAIEX_USER", "")
@@ -66,16 +69,25 @@ def valid_session(token):
 
 def run_jobs(*whats):
     if not LOCK.acquire(blocking=False): return False
-    log = ""
+    log, exit_code = "", 0
     try:
         for w in whats:
             JOB["running"] = w
             cmd = [sys.executable, os.path.join(CODE, w + ".py")] + (["--demo"] if DEMO and w == "pipeline" else [])
-            p = subprocess.run(cmd, capture_output=True, text=True)
-            log += f"[{w}] " + (p.stdout + p.stderr)[-600:] + "\n"
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=6 * 3600)
+                code = p.returncode
+                log += f"[{w}] exit={code} " + (p.stdout + p.stderr)[-1200:] + "\n"
+            except Exception as e:
+                code = 1
+                log += f"[{w}] {type(e).__name__}: {e}\n"
+            if code:
+                exit_code = code
+                break
     finally:
-        JOB.update(running=None, log=log[-1500:]); LOCK.release()
-    return True
+        JOB.update(running=None, log=log[-3000:], exit_code=exit_code, finished=int(time.time()))
+        LOCK.release()
+    return exit_code == 0
 
 def stale():
     try:
@@ -101,6 +113,53 @@ def quote():  # 加權指數即時報價（Yahoo，約有數分鐘延遲），�
          "time": dt.datetime.now(TZ).strftime("%H:%M:%S")}
     QUOTE.update(t=time.time(), v=v)
     return v
+
+def call_ai_provider(provider, api_key, model, prompt):
+    """將瀏覽器提供的金鑰即時轉送至供應商；不寫入檔案、環境變數或日誌。"""
+    if not isinstance(api_key, str) or not api_key.strip() or len(api_key) > 4096:
+        raise ValueError("API 金鑰格式不正確")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 30000:
+        raise ValueError("分析內容為空或超過長度限制")
+    if provider == "Claude":
+        body = {"model": model or "claude-sonnet-4-5", "max_tokens": 2000,
+                "messages": [{"role": "user", "content": prompt}]}
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+        url = "https://api.anthropic.com/v1/messages"
+    elif provider == "ChatGPT":
+        body = {"model": model or "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"}}
+        headers = {"Authorization": "Bearer " + api_key}
+        url = "https://api.openai.com/v1/chat/completions"
+    elif provider == "Gemini":
+        model = model or "gemini-2.5-flash"
+        body = {"contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json"}}
+        headers = {"x-goog-api-key": api_key}
+        url = "https://generativelanguage.googleapis.com/v1beta/models/" + urllib.parse.quote(model, safe="") + ":generateContent"
+    else:
+        raise ValueError("不支援的 AI 服務")
+    data = json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", **headers})
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:1200]
+        try:
+            detail = json.loads(detail).get("error", {}).get("message", detail)
+        except Exception:
+            pass
+        raise RuntimeError(f"{provider} API 回應 {e.code}: {detail}")
+    if provider == "Claude":
+        return "".join(x.get("text", "") for x in result.get("content", []) if x.get("type") == "text")
+    if provider == "ChatGPT":
+        choices = result.get("choices") or []
+        return choices[0].get("message", {}).get("content", "") if choices else ""
+    candidates = result.get("candidates") or []
+    if not candidates:
+        raise RuntimeError("Gemini 沒有回傳可用內容；請檢查模型名稱、金鑰與配額")
+    return "".join(x.get("text", "") for x in candidates[0].get("content", {}).get("parts", []))
+
 
 class H(SimpleHTTPRequestHandler):
     def authorized(self):
@@ -227,6 +286,8 @@ class H(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path == "/healthz":
+            return self.send_json({"ok": True})
         if GOOGLE_ENABLED and u.path == "/auth/google":
             return self.google_login()
         if GOOGLE_ENABLED and u.path == "/auth/google/callback":
@@ -272,13 +333,25 @@ class H(SimpleHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized():
             return
-        if READONLY:
+        if READONLY and self.path != "/api/ai":
             return self.send_json({"error": "唯讀模式，已停用此功能"}, 403)
         if self.headers.get("X-Requested-With") != "dash":
             return self.send_json({"error": "拒絕"}, 403)
-        body = json.loads(
-            self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}"
-        )
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            if length > 40000:
+                return self.send_json({"error": "請求內容過大"}, 413)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception:
+            return self.send_json({"error": "請求格式錯誤"}, 400)
+        if self.path == "/api/ai":
+            try:
+                result = call_ai_provider(
+                    body.get("provider"), body.get("key"), body.get("model", ""), body.get("prompt", "")
+                )
+                return self.send_json({"text": result})
+            except Exception as e:
+                return self.send_json({"error": str(e)}, 502)
         if self.path == "/api/run" and body.get("what") in ("pipeline", "news"):
             if JOB["running"]:
                 return self.send_json({"error": "已有工作進行中"}, 409)
