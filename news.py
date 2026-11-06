@@ -64,7 +64,7 @@ def _collect_group(group, per):
                 print("新聞來源失敗", tag, type(e).__name__, str(e)[:160])
     unique, seen_titles = [], set()
     for item in items:
-        key = re.sub(r"\\W+", "", item["title"].lower())
+        key = re.sub(r"\W+", "", item["title"].lower())
         if key and key not in seen_titles:
             seen_titles.add(key)
             unique.append(item)
@@ -80,7 +80,7 @@ def collect(groups, per, kind, out, seen):
         n = 0
         for item in items:
             title = item["title"]
-            key = re.sub(r"\\W+", "", title.lower())
+            key = re.sub(r"\W+", "", title.lower())
             if key and key not in seen and n < per:
                 seen.add(key)
                 n += 1
