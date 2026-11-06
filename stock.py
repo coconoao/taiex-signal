@@ -8,9 +8,22 @@ import numpy as np, pandas as pd
 from pipeline import BUY, SELL
 
 def _hist(yf, sym):
-    h = yf.Ticker(sym).history(period="5y", auto_adjust=True)["Close"]
-    h.index = pd.to_datetime(h.index).tz_localize(None).normalize()
-    return h.dropna()
+    last_error = None
+    for attempt in range(3):
+        try:
+            raw = yf.Ticker(sym).history(period="5y", auto_adjust=True)
+            if raw is not None and not raw.empty and "Close" in raw:
+                h = raw["Close"].dropna()
+                h.index = pd.to_datetime(h.index).tz_localize(None).normalize()
+                if len(h):
+                    return h
+            last_error = ValueError("Yahoo Finance 回傳空行情")
+        except Exception as e:
+            last_error = e
+        if attempt < 2:
+            import time
+            time.sleep(3 * (attempt + 1))
+    raise RuntimeError(f"{sym} 行情下載失敗；可能遇到 Yahoo Finance 限流（HTTP 429）。最後錯誤：{last_error}")
 
 def fundamentals(t):
     out, info = [], {}
@@ -73,7 +86,10 @@ def analyze(code):
     buckets = {k: {"n": int(len(g)), "win": round(float((g > 0).mean()) * 100, 1), "avg": round(float(g.mean()) * 100, 2),
                    "p10": q(g, .1), "p90": q(g, .9)} for k, g in d.groupby("b")["f"]}
     r = pd.concat([px.pct_change(), mk.pct_change()], axis=1, keys=["s", "m"]).dropna().tail(252)
-    beta = round(float(r["s"].cov(r["m"]) / r["m"].var()), 2)
+    market_var = float(r["m"].var())
+    if not np.isfinite(market_var) or market_var <= 0:
+        raise ValueError("無法計算 Beta：大盤報酬資料不足或變異數為零。")
+    beta = round(float(r["s"].cov(r["m"]) / market_var), 2)
     exp = wk.get("expected")
     return {"code": code, "symbol": sym, "last": round(float(px.iloc[-1]), 2), "asof": str(px.index[-1].date()),
             "market_bucket": wk["bucket"], "market_prob": wk["prob_up"], "beta": beta,
