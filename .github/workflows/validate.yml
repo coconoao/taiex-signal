@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - name: Run isolated security unit tests
+        run: python -m unittest discover -s tests -v
       - name: Check inline dashboard JavaScript
         run: |
           node <<'NODE'
