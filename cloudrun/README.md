@@ -103,4 +103,4 @@ Job 完成後，網站會從同一個 bucket 讀取新資料。確認首頁不�
 
 ## 注意
 
-目前更新 Job 是手動執行；確認穩定後，再另外設定 Cloud Scheduler 的每日排程。不要讓 Cloud Run service 的每個執行個體各自啟動排程。
+目前可由網站的「立即更新行情與新聞」按鈕手動啟動 Job；確認穩定後，再另外設定 Cloud Scheduler 的每日排程。不要讓 Cloud Run service 的每個執行個體各自啟動排程。
