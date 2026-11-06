@@ -6,7 +6,7 @@
 執行時間：台股交易日早上 8:30 前後（美股已收盤、台股未開盤、前一日籌碼已公布）。
 輸出 signals.json，供 dashboard.html 讀取。僅供研究，非投資建議。
 """
-import os, sys, json, time, urllib.request, urllib.parse
+import os, sys, json, time, datetime as dt, urllib.request, urllib.parse
 import numpy as np, pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -341,7 +341,8 @@ if __name__ == "__main__":
     pu = float(prob.loc[latest])
     layers = contrib.groupby(lambda c: c.split(":")[0]).sum()
     out = {
-        "asof": str(latest.date()), "demo": demo, "prob_up": round(pu, 3),
+        "asof": str(latest.date()), "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "data_basis": "latest_available_taiwan_trading_day", "demo": demo, "prob_up": round(pu, 3),
         "signal": "買進" if pu > BUY else "賣出／減碼" if pu < SELL else "觀望",
         "thresholds": {"buy": BUY, "sell": SELL},
         "missing_layers": [k for k in ("籌碼", "信用", "期貨") if k not in layers.index],
