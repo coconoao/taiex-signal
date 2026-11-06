@@ -421,8 +421,8 @@ function renderStock(s, cached=false) {
   const e = s.stock_expected, fl = ["偏弱", "—", "較佳"];
   $("stockOut").innerHTML = (cached ? '<p class="note">瀏覽器保存的結果 · ' + esc(s.savedAt || "") + '（資料日期 ' + esc(s.asof || "") + '）</p>' : "") +
     `<p class="sig" style="font-size:1.5rem">${esc(s.code)} ${s.last}<small>${esc(s.asof)}</small></p>
-      <p>大盤未來一週傾向：<b>${esc(s.market_bucket)}</b>（上漲機率 ${pct(s.market_prob)}）。此股 Beta ${s.beta}${s.beta_implied == null ? "" : `，依 Beta 推算的大盤聯動約 ${s.beta_implied}%`}。</p>
-      <p>${e ? `歷史上大盤出現同樣訊號時（${e.n} 個樣本），這檔股票之後 5 日平均 <b>${e.avg}%</b>，勝率 ${e.win}%，八成情況落在 <b>${e.p10}% 到 ${e.p90}%</b>。` : "這檔股票在同類訊號下的歷史樣本不足。"}</p>
+      <p>${Number.isFinite(Number(s.market_prob)) ? `大盤未來一週傾向：<b>${esc(s.market_bucket)}</b>（上漲機率 ${pct(s.market_prob)}）。` : "尚無大盤週訊號，以下先使用此股自身的歷史資料。"}此股 Beta ${s.beta}${s.beta_implied == null ? "" : `，依 Beta 推算的大盤聯動約 ${s.beta_implied}%`}。</p>
+      <p>${e ? `${Number.isFinite(Number(s.market_prob)) ? "大盤出現相同訊號時" : "此股全部可用歷史樣本"}（${e.n} 個樣本），這檔股票之後 5 日平均 <b>${e.avg}%</b>，勝率 ${e.win}%，八成情況落在 <b>${e.p10}% 到 ${e.p90}%</b>。` : "這檔股票在同類訊號下的歷史樣本不足。"}</p>
       <p class="note">20 日動能 ${s.mom20}%，年化波動 ${s.vol60}%。這是歷史分布，不是點預測；樣本已降低五日重疊造成的重複計數。</p>
       <h2 style="margin-top:16px">財報體檢（參考，未納入上面的區間）</h2>` +
     (s.fundamentals.length ? `<table><thead><tr><th>項目</th><th>數值</th><th>判讀</th></tr></thead><tbody>${s.fundamentals.map(f => `<tr><td>${esc(f.item)}</td><td>${esc(f.value)}</td><td>${fl[f.flag + 1]}</td></tr>`).join("")}</tbody></table>` : '<p class="note">抓不到這檔的財報資料。</p>') +
