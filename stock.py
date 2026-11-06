@@ -107,7 +107,7 @@ def analyze(code):
     if not np.isfinite(market_var) or market_var <= 0:
         raise ValueError("無法計算 Beta：大盤報酬資料不足或變異數為零。")
     beta = round(float(r["s"].cov(r["m"]) / market_var), 2)
-    exp = wk.get("expected")
+    exp = wk.get("expected") if wk else None
     return {"code": code, "symbol": sym, "last": round(float(px.iloc[-1]), 2), "asof": str(px.index[-1].date()),
             "market_bucket": market_bucket, "market_prob": market_prob, "beta": beta,
             "beta_implied": round(beta * exp["avg"], 2) if exp and exp.get("avg") is not None else None,
