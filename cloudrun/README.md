@@ -82,9 +82,9 @@ gcloud run jobs create taiex-refresh \
   --add-volume mount-path=/mnt/data,type=cloud-storage,bucket=YOUR_BUCKET
 ```
 
-確認 Job 使用的服務帳戶也有該 bucket 的 Storage Object User 權限。首次更新可能需要較長時間，因為程式會建立歷史資料。
+確認 Job 使用的服務帳戶也有該 bucket 的 Storage Object User 權限。並在該 Job 的 IAM 權限中，將 Cloud Run service 的服務帳戶加入 **Cloud Run Invoker（roles/run.invoker）**，讓網站按鈕能啟動更新工作。首次更新可能需要較長時間，因為程式會建立歷史資料。
 
-手動執行一次：
+也可從命令列手動執行一次：
 
 ```bash
 gcloud run jobs execute taiex-refresh --region asia-east1 --wait
