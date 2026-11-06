@@ -97,52 +97,72 @@ class H(SimpleHTTPRequestHandler):
             return False
 
         return True
+
     def send_json(self, obj, code=200):
         b = json.dumps(obj, ensure_ascii=False).encode()
-        self.send_response(code); self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
 
     def do_GET(self):
-              if not self.authorized():
+        if not self.authorized():
             return
         u = urllib.parse.urlparse(self.path)
-        if u.path == "/api/status": return self.send_json({**JOB, "readonly": READONLY, "auto": AUTO})
+        if u.path == "/api/status":
+            return self.send_json({**JOB, "readonly": READONLY, "auto": AUTO})
         if u.path in ("/api/quote", "/api/stock"):
             try:
-                if u.path == "/api/quote": return self.send_json(quote())
+                if u.path == "/api/quote":
+                    return self.send_json(quote())
                 import stock
-                return self.send_json(stock.analyze(urllib.parse.parse_qs(u.query).get("code", [""])[0]))
+                return self.send_json(stock.analyze(
+                    urllib.parse.parse_qs(u.query).get("code", [""])[0]
+                ))
             except Exception as e:
                 return self.send_json({"error": str(e)}, 400)
         if u.path == "/export":
             import export_html
             b = export_html.build().encode()
-            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Disposition", f'attachment; filename="{export_html.default_name()}"')
-            self.send_header("Content-Length", str(len(b))); self.end_headers(); return self.wfile.write(b)
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            return self.wfile.write(b)
         name = os.path.basename(u.path)
-        if name.endswith(".py") or name == "settings.json": return self.send_error(404)
-        if u.path == "/": self.path = "/dashboard.html"
+        if name.endswith(".py") or name == "settings.json":
+            return self.send_error(404)
+        if u.path == "/":
+            self.path = "/dashboard.html"
         return super().do_GET()
 
     def do_POST(self):
-              if not self.authorized():
+        if not self.authorized():
             return
-        if READONLY: return self.send_json({"error": "唯讀模式，已停用此功能"}, 403)
-        if self.headers.get("X-Requested-With") != "dash": return self.send_json({"error": "拒絕"}, 403)  # 擋跨站請求
-        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        if READONLY:
+            return self.send_json({"error": "唯讀模式，已停用此功能"}, 403)
+        if self.headers.get("X-Requested-With") != "dash":
+            return self.send_json({"error": "拒絕"}, 403)
+        body = json.loads(
+            self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}"
+        )
         if self.path == "/api/run" and body.get("what") in ("pipeline", "news"):
-            if JOB["running"]: return self.send_json({"error": "已有工作進行中"}, 409)
-            threading.Thread(target=run_jobs, args=(body["what"],), daemon=True).start()
+            if JOB["running"]:
+                return self.send_json({"error": "已有工作進行中"}, 409)
+            threading.Thread(
+                target=run_jobs, args=(body["what"],), daemon=True
+            ).start()
             return self.send_json({"ok": True})
         if self.path == "/api/export":
             import export_html
-            d = os.path.expanduser("~/Downloads"); os.makedirs(d, exist_ok=True)
+            d = os.path.expanduser("~/Downloads")
+            os.makedirs(d, exist_ok=True)
             path = os.path.join(d, export_html.default_name())
             open(path, "w", encoding="utf-8").write(export_html.build())
             return self.send_json({"path": path})
         return self.send_json({"error": "未知請求"}, 404)
-
 if __name__ == "__main__":
     if AUTO: threading.Thread(target=scheduler, daemon=True).start()
     print(f"http://{HOST}:{PORT}  {'（唯讀）' if READONLY else ''}{'（自動更新已啟用）' if AUTO else ''}")
