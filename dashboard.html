@@ -255,7 +255,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 });
 
 /* ---- 使用者自己的 AI 金鑰：只存在自己的瀏覽器，由瀏覽器直接呼叫各家 API ---- */
-const KEYF = [["claude", "Claude API 金鑰", 1], ["claudeModel", "Claude 模型名稱（留空用 claude-sonnet-5-5）"], ["openai", "OpenAI API 金鑰", 1],
+const KEYF = [["claude", "Claude API 金鑰", 1], ["claudeModel", "Claude 模型名稱（預設 claude-sonnet-4-5）"], ["openai", "OpenAI API 金鑰", 1],
               ["openaiModel", "OpenAI 模型名稱（預設 gpt-4o-mini）"], ["gemini", "Gemini API 金鑰", 1], ["geminiModel", "Gemini 模型名稱（預設 gemini-2.5-flash）"]];
 const mem = {}, rd = s => { try { return s.getItem("keys"); } catch { return null; } };
 function getKeys() { try { return JSON.parse(rd(localStorage) || rd(sessionStorage) || mem.keys || "{}"); } catch { return {}; } }
