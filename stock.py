@@ -58,10 +58,19 @@ def analyze(code):
     code = code.strip().upper().replace(".TWO", "").replace(".TW", "")
     if not code.isalnum(): raise ValueError("請輸入股票代號，例如 2330")
     px = sym = None
-    for suf in (".TW", ".TWO"):  # 上市、上櫃
-        h = _hist(yf, code + suf)
-        if len(h) > 300: px, sym = h, code + suf; break
-    if px is None: raise ValueError(f"找不到 {code} 的行情，請確認代號")
+    errors = []
+    for suf in (".TW", ".TWO"):  # 上市、上櫃；其中一個市場代碼無資料時繼續嘗試另一個
+        try:
+            h = _hist(yf, code + suf)
+        except RuntimeError as e:
+            errors.append(str(e))
+            continue
+        if len(h) > 300:
+            px, sym = h, code + suf
+            break
+    if px is None:
+        detail = "；".join(errors)
+        raise ValueError(f"找不到 {code} 的足夠歷史行情，請確認代號或稍後重試。{detail}")
     import os
     if os.path.exists("signals.json"):
         try:
