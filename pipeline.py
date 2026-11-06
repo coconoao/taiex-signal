@@ -319,7 +319,7 @@ if __name__ == "__main__":
     df = load_demo() if demo else load_live()
     chips = demo_chips(df) if demo else None if "--no-chips" in sys.argv else fetch_chips()
     if os.path.exists("margin.csv") and "short_units" not in pd.read_csv("margin.csv", nrows=1):
-        os.remove("margin.csv")  # 舊版檔案缺融券欄位，重新回補
+        print("舊版融資資料缺少融券欄位：保留既有歷史融資資料，融券欄位從本次開始累積。")
     margin = demo_margin(df) if demo else None if "--no-margin" in sys.argv else fetch_margin()
     futures = demo_futures(df) if demo else None if "--no-futures" in sys.argv else fetch_futures()
     X, y, fwd = build(df, chips, margin, futures=futures)
