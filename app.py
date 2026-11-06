@@ -5,7 +5,8 @@ API 金鑰：使用者各自填在自己的瀏覽器（儀表板「設定」頁�
 對外部署（--host 0.0.0.0 或 READONLY=1）：自動唯讀，關閉手動更新與匯出到本機；排程照常執行。
 """
 import datetime as dt, json, os, subprocess, sys, threading, time, urllib.parse
-import base64, hmac
+import base64, hmac, secrets, urllib.request
+from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,40 @@ TZ = ZoneInfo("Asia/Taipei")
 JOB, LOCK, QUOTE = {"running": None, "log": ""}, threading.Lock(), {"t": 0, "v": None}
 AUTH_USER = os.environ.get("TAIEX_USER", "")
 AUTH_PASSWORD = os.environ.get("TAIEX_PASSWORD", "")
+
+# Google OAuth：設定 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 後啟用。
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get(
+    "GOOGLE_REDIRECT_URI",
+    "https://taiex-signal.onrender.com/auth/google/callback"
+)
+GOOGLE_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+SESSION_SIGNING_KEY = (
+    os.environ.get("SESSION_SECRET") or GOOGLE_CLIENT_SECRET
+).encode("utf-8")
+SESSION_COOKIE = "taiex_session"
+STATE_COOKIE = "taiex_oauth_state"
+SESSION_TTL = 7 * 24 * 3600
+
+def sign_session(email, expires):
+    payload = base64.urlsafe_b64encode(
+        f"{email}|{expires}".encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    signature = hmac.new(SESSION_SIGNING_KEY, payload.encode("ascii"), "sha256").hexdigest()
+    return payload + "." + signature
+
+def valid_session(token):
+    try:
+        payload, signature = token.rsplit(".", 1)
+        expected = hmac.new(SESSION_SIGNING_KEY, payload.encode("ascii"), "sha256").hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return False
+        raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode("utf-8")
+        email, expires = raw.rsplit("|", 1)
+        return bool(email) and int(expires) > int(time.time())
+    except Exception:
+        return False
 
 def run_jobs(*whats):
     if not LOCK.acquire(blocking=False): return False
@@ -69,6 +104,22 @@ def quote():  # 加權指數即時報價（Yahoo，約有數分鐘延遲），�
 
 class H(SimpleHTTPRequestHandler):
     def authorized(self):
+        if GOOGLE_ENABLED:
+            cookies = SimpleCookie()
+            try:
+                cookies.load(self.headers.get("Cookie", ""))
+                token = cookies[SESSION_COOKIE].value
+            except Exception:
+                token = ""
+            if valid_session(token):
+                return True
+            self.send_response(302)
+            self.send_header("Location", "/auth/google")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
         if not AUTH_USER or not AUTH_PASSWORD:
             self.send_error(503, "Authentication not configured")
             return False
@@ -88,15 +139,83 @@ class H(SimpleHTTPRequestHandler):
             hmac.compare_digest(user, AUTH_USER)
             and hmac.compare_digest(password, AUTH_PASSWORD)
         )
-
         if not valid:
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="TAIEX Signal"')
             self.send_header("Content-Length", "0")
             self.end_headers()
             return False
-
         return True
+
+    def google_login(self):
+        state = secrets.token_urlsafe(32)
+        params = urllib.parse.urlencode({
+            "client_id": GOOGLE_CLIENT_ID,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "prompt": "select_account"
+        })
+        self.send_response(302)
+        self.send_header("Location", "https://accounts.google.com/o/oauth2/v2/auth?" + params)
+        self.send_header("Set-Cookie", f"{STATE_COOKIE}={state}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Lax")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def google_callback(self, query):
+        values = urllib.parse.parse_qs(query)
+        state = values.get("state", [""])[0]
+        code = values.get("code", [""])[0]
+        cookies = SimpleCookie()
+        try:
+            cookies.load(self.headers.get("Cookie", ""))
+            saved_state = cookies[STATE_COOKIE].value
+        except Exception:
+            saved_state = ""
+        if not state or not saved_state or not hmac.compare_digest(state, saved_state) or not code:
+            return self.send_error(400, "Google sign-in state validation failed")
+
+        try:
+            token_data = urllib.parse.urlencode({
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code"
+            }).encode("utf-8")
+            request = urllib.request.Request(
+                "https://oauth2.googleapis.com/token",
+                data=token_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                tokens = json.loads(response.read().decode("utf-8"))
+            access_token = tokens.get("access_token")
+            if not access_token:
+                raise ValueError("Missing access token")
+            request = urllib.request.Request(
+                "https://openidconnect.googleapis.com/v1/userinfo",
+                headers={"Authorization": "Bearer " + access_token}
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                profile = json.loads(response.read().decode("utf-8"))
+            email = profile.get("email", "")
+            if not email or profile.get("email_verified") is not True:
+                raise ValueError("Google email is not verified")
+            expires = int(time.time()) + SESSION_TTL
+            session = sign_session(email, expires)
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", f"{SESSION_COOKIE}={session}; Path=/; Max-Age={SESSION_TTL}; HttpOnly; Secure; SameSite=Lax")
+            self.send_header("Set-Cookie", f"{STATE_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        except Exception:
+            self.send_error(502, "Google sign-in failed. Check OAuth configuration and redirect URI.")
+
 
     def send_json(self, obj, code=200):
         b = json.dumps(obj, ensure_ascii=False).encode()
@@ -107,9 +226,21 @@ class H(SimpleHTTPRequestHandler):
         self.wfile.write(b)
 
     def do_GET(self):
+        u = urllib.parse.urlparse(self.path)
+        if GOOGLE_ENABLED and u.path == "/auth/google":
+            return self.google_login()
+        if GOOGLE_ENABLED and u.path == "/auth/google/callback":
+            return self.google_callback(u.query)
+        if GOOGLE_ENABLED and u.path == "/auth/logout":
+            self.send_response(302)
+            self.send_header("Location", "/auth/google")
+            self.send_header("Set-Cookie", f"{SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if not self.authorized():
             return
-        u = urllib.parse.urlparse(self.path)
         if u.path == "/api/status":
             return self.send_json({**JOB, "readonly": READONLY, "auto": AUTO})
         if u.path in ("/api/quote", "/api/stock"):
