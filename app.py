@@ -68,7 +68,7 @@ def quote():  # 加權指數即時報價（Yahoo，約有數分鐘延遲），�
     return v
 
 class H(SimpleHTTPRequestHandler):
-      def authorized(self):
+    def authorized(self):
         if not AUTH_USER or not AUTH_PASSWORD:
             self.send_error(503, "Authentication not configured")
             return False
