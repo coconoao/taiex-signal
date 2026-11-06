@@ -320,7 +320,7 @@ button.secondary{background:white;color:#345b86}.actions{display:flex;gap:4px;fl
 <p class="muted">只有管理員能操作。核准後可使用網站；拒絕或撤銷後會立即失去存取權。</p>
 <div id="msg" class="muted">載入中…</div><div id="users"></div>
 <script>
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));\n// Encode apostrophes before inserting email values into single-quoted attributes.\nconst escAttr=s=>esc(s).replaceAll(String.fromCharCode(39),"&#39;");
 async function load(){
  const r=await fetch("/api/admin/users",{cache:"no-store"}),d=await r.json();
  if(!r.ok) throw Error(d.error||"載入失敗");
@@ -328,11 +328,11 @@ async function load(){
  document.getElementById("users").innerHTML=rows.map(u=>{
   const status={pending:"等待核准",approved:"已核准",rejected:"已拒絕",revoked:"已撤銷"}[u.status]||u.status;
   const isAdmin=u.role==="admin";
-  return '<div class="user"><div><b>'+esc(u.email)+'</b><div class="muted">'+esc(u.role)+' · '+esc(status)+'</div></div>'+
+  return '<div class="user"><div><b>'+escAttr(u.email)+'</b><div class="muted">'+esc(u.role)+' · '+esc(status)+'</div></div>'+
    (isAdmin?'<span>管理員</span>':'<div class="actions">'+
-   '<button data-email="'+esc(u.email)+'" data-status="approved">核准</button>'+
-   '<button class="secondary" data-email="'+esc(u.email)+'" data-status="rejected">拒絕</button>'+
-   '<button class="secondary" data-email="'+esc(u.email)+'" data-status="revoked">撤銷</button></div>')+'</div>';
+   '<button data-email="'+escAttr(u.email)+'" data-status="approved">核准</button>'+
+   '<button class="secondary" data-email="'+escAttr(u.email)+'" data-status="rejected">拒絕</button>'+
+   '<button class="secondary" data-email="'+escAttr(u.email)+'" data-status="revoked">撤銷</button></div>')+'</div>';
  }).join("")||"<p>目前沒有使用者。</p>";
  document.querySelectorAll("button[data-email]").forEach(b=>b.onclick=()=>change(b.dataset.email,b.dataset.status));
 }
