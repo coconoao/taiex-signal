@@ -246,7 +246,7 @@ def us_market_quote():
         "^VIX": "VIX"
     }
     raw = yf.download(
-        list(tickers), period="1d", interval="5m", auto_adjust=True,
+        list(tickers), period="5d", interval="5m", auto_adjust=True,
         progress=False, threads=4, timeout=15, prepost=False
     )
     if raw is None or raw.empty:
@@ -653,6 +653,12 @@ class H(SimpleHTTPRequestHandler):
             try:
                 return self.send_json(us_market_quote())
             except Exception as e:
+                # Yahoo 暫時失敗時保留最後成功資料，但明確標記為舊快取。
+                if US_MARKET_CACHE["v"]:
+                    stale = dict(US_MARKET_CACHE["v"])
+                    stale["stale"] = True
+                    stale["note"] = "即時來源暫時無法更新，以下為伺服器最後一次成功取得的行情；請留意報價時間。"
+                    return self.send_json(stale)
                 return self.send_json({"error": str(e)}, 503)
         if u.path in ("/api/quote", "/api/stock"):
             try:
