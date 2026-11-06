@@ -50,8 +50,18 @@ def analyze(code):
         if len(h) > 300: px, sym = h, code + suf; break
     if px is None: raise ValueError(f"找不到 {code} 的行情，請確認代號")
     import os
-    if not (os.path.exists("weekly.json") and os.path.exists("weekly_prob.csv")):
-        raise ValueError("請先到「設定」頁按「更新行情與訊號」（或執行 pipeline.py）")
+    if os.path.exists("signals.json"):
+        try:
+            if json.load(open("signals.json", encoding="utf-8")).get("demo"):
+                raise ValueError("目前仍是示範行情，請先更新真實行情與訊號，再使用個股分析。")
+        except json.JSONDecodeError:
+            raise ValueError("行情資料檔案格式錯誤，請重新更新行情與訊號。")
+    if not os.path.exists("weekly.json"):
+        raise ValueError("缺少 weekly.json：請先完成一次行情與訊號更新。")
+    if not os.path.exists("weekly_prob.csv"):
+        raise ValueError("缺少 weekly_prob.csv：一週歷史機率資料尚未產生，請重新執行完整行情更新。")
+    if os.path.getsize("weekly_prob.csv") == 0:
+        raise ValueError("weekly_prob.csv 是空檔案，請重新執行完整行情更新。")
     mk = _hist(yf, "^TWII")
     wk = json.load(open("weekly.json", encoding="utf-8"))
     p = pd.read_csv("weekly_prob.csv", index_col=0, parse_dates=True)["prob"].dropna()
