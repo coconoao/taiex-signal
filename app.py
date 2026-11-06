@@ -55,17 +55,120 @@ def sign_session(email, expires):
     signature = hmac.new(SESSION_SIGNING_KEY, payload.encode("ascii"), "sha256").hexdigest()
     return payload + "." + signature
 
-def valid_session(token):
+def session_email(token):
     try:
         payload, signature = token.rsplit(".", 1)
         expected = hmac.new(SESSION_SIGNING_KEY, payload.encode("ascii"), "sha256").hexdigest()
         if not hmac.compare_digest(signature, expected):
-            return False
+            return ""
         raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode("utf-8")
         email, expires = raw.rsplit("|", 1)
-        return bool(email) and int(expires) > int(time.time())
+        email = email.strip().lower()
+        return email if email and int(expires) > int(time.time()) else ""
     except Exception:
-        return False
+        return ""
+
+def valid_session(token):
+    return bool(session_email(token))
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+
+def supabase_request(method, path, payload=None, prefer=None):
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError("Supabase 尚未設定完整")
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
+        "Accept": "application/json"
+    }
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if prefer:
+        headers["Prefer"] = prefer
+    req = urllib.request.Request(
+        SUPABASE_URL + "/rest/v1/" + path,
+        data=data, headers=headers, method=method
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as response:
+            raw = response.read()
+            return json.loads(raw.decode("utf-8")) if raw else []
+    except urllib.error.HTTPError as e:
+        # 不回傳 request headers，避免任何金鑰意外進入錯誤訊息。
+        detail = e.read().decode("utf-8", "replace")[:500]
+        raise RuntimeError("Supabase 資料庫請求失敗（HTTP %s）：%s" % (e.code, detail))
+
+def site_user_by_email(email):
+    q = urllib.parse.urlencode({
+        "email": "eq." + email,
+        "select": "email,role,status,created_at,updated_at,approved_by"
+    })
+    rows = supabase_request("GET", "site_users?" + q)
+    return rows[0] if rows else None
+
+def ensure_site_user(email):
+    email = email.strip().lower()
+    if not email:
+        raise RuntimeError("Google 帳號沒有有效 Email")
+    if not ADMIN_EMAIL:
+        raise RuntimeError("尚未設定 ADMIN_EMAIL")
+    if email == ADMIN_EMAIL:
+        row = site_user_by_email(email)
+        if row:
+            q = urllib.parse.urlencode({"email": "eq." + email})
+            supabase_request("PATCH", "site_users?" + q, {
+                "role": "admin", "status": "approved", "approved_by": email
+            }, "return=minimal")
+        else:
+            supabase_request("POST", "site_users", {
+                "email": email, "role": "admin", "status": "approved",
+                "approved_by": email
+            }, "return=minimal")
+        return site_user_by_email(email)
+    row = site_user_by_email(email)
+    if not row:
+        # 忽略併發登入造成的唯一鍵衝突；隨後重新讀取資料列。
+        supabase_request("POST", "site_users", {"email": email},
+                         "resolution=ignore-duplicates,return=minimal")
+    return site_user_by_email(email)
+
+def list_site_users():
+    return supabase_request(
+        "GET",
+        "site_users?select=email,role,status,created_at,updated_at,approved_by&order=created_at.desc"
+    )
+
+def set_site_user_status(email, status, actor):
+    email = email.strip().lower()
+    if not email or email == ADMIN_EMAIL:
+        raise ValueError("不能變更設定中的管理員帳號")
+    if status not in ("approved", "rejected", "revoked"):
+        raise ValueError("不支援的權限狀態")
+    q = urllib.parse.urlencode({"email": "eq." + email, "role": "eq.user"})
+    rows = supabase_request("PATCH", "site_users?" + q, {
+        "status": status, "approved_by": actor
+    }, "return=representation")
+    if not rows:
+        raise ValueError("找不到可管理的使用者")
+    return rows[0]
+
+def access_message(status):
+    messages = {
+        "pending": ("等待管理員核准", "你的 Google 帳號已完成登入，請等待網站管理員核准使用權限。"),
+        "rejected": ("目前未獲核准", "此 Google 帳號目前未獲網站使用權限。如有疑問，請聯絡網站管理員。"),
+        "revoked": ("使用權限已撤銷", "此 Google 帳號的網站使用權限已被撤銷。")
+    }
+    title, message = messages.get(status, ("無法使用", "目前無法授權此帳號。"))
+    return ("<!doctype html><html lang='zh-Hant'><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<title>%s</title><body style='font:16px sans-serif;max-width:560px;margin:12vh auto;padding:24px;line-height:1.7'>"
+            "<h2>%s</h2><p>%s</p><p><a href='/auth/logout'>登出 Google 帳號</a></p></body></html>"
+            % (title, title, message))
+
 
 def run_jobs(*whats):
     if not LOCK.acquire(blocking=False): return False
@@ -200,8 +303,48 @@ def call_ai_provider(provider, api_key, model, prompt):
     return "".join(x.get("text", "") for x in candidates[0].get("content", {}).get("parts", []))
 
 
+
+ADMIN_PAGE = """<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>使用者管理｜TAIEX Signal</title>
+<style>
+body{font:16px/1.6 system-ui,-apple-system,sans-serif;max-width:900px;margin:32px auto;padding:0 16px;color:#14202b}
+a{color:#345b86}.muted{color:#657383}.user{border:1px solid #d9e0e7;border-radius:8px;padding:12px;margin:10px 0;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+button{padding:6px 12px;margin:3px;border:1px solid #345b86;border-radius:5px;background:#345b86;color:white;cursor:pointer}
+button.secondary{background:white;color:#345b86}.actions{display:flex;gap:4px;flex-wrap:wrap}
+</style>
+<h1>網站使用者管理</h1><p><a href="/">返回網站</a>　<a href="/auth/logout">Google 登出</a></p>
+<p class="muted">只有管理員能操作。核准後可使用網站；拒絕或撤銷後會立即失去存取權。</p>
+<div id="msg" class="muted">載入中…</div><div id="users"></div>
+<script>
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function load(){
+ const r=await fetch("/api/admin/users",{cache:"no-store"}),d=await r.json();
+ if(!r.ok) throw Error(d.error||"載入失敗");
+ const rows=d.users||[];document.getElementById("msg").textContent="使用者數量："+rows.length;
+ document.getElementById("users").innerHTML=rows.map(u=>{
+  const status={pending:"等待核准",approved:"已核准",rejected:"已拒絕",revoked:"已撤銷"}[u.status]||u.status;
+  const isAdmin=u.role==="admin";
+  return '<div class="user"><div><b>'+esc(u.email)+'</b><div class="muted">'+esc(u.role)+' · '+esc(status)+'</div></div>'+
+   (isAdmin?'<span>管理員</span>':'<div class="actions">'+
+   '<button data-email="'+esc(u.email)+'" data-status="approved">核准</button>'+
+   '<button class="secondary" data-email="'+esc(u.email)+'" data-status="rejected">拒絕</button>'+
+   '<button class="secondary" data-email="'+esc(u.email)+'" data-status="revoked">撤銷</button></div>')+'</div>';
+ }).join("")||"<p>目前沒有使用者。</p>";
+ document.querySelectorAll("button[data-email]").forEach(b=>b.onclick=()=>change(b.dataset.email,b.dataset.status));
+}
+async function change(email,status){
+ if(!confirm("確定將 "+email+" 設為 "+status+"？"))return;
+ const r=await fetch("/api/admin/users",{method:"POST",headers:{"Content-Type":"application/json","X-Requested-With":"dash"},body:JSON.stringify({email,status})});
+ const d=await r.json();if(!r.ok){alert(d.error||"更新失敗");return;}await load();
+}
+load().catch(e=>document.getElementById("msg").textContent=e.message);
+</script></html>"""
+
+
 class H(SimpleHTTPRequestHandler):
     def authorized(self):
+        self.current_user = None
         if GOOGLE_ENABLED:
             cookies = SimpleCookie()
             try:
@@ -209,13 +352,32 @@ class H(SimpleHTTPRequestHandler):
                 token = cookies[SESSION_COOKIE].value
             except Exception:
                 token = ""
-            if valid_session(token):
+            email = session_email(token)
+            if not email:
+                self.send_response(302)
+                self.send_header("Location", "/auth/google")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return False
+            try:
+                row = ensure_site_user(email)
+            except Exception:
+                self.send_error(503, "使用者權限資料庫暫時無法使用，請稍後再試")
+                return False
+            if not row:
+                self.send_error(503, "無法讀取使用者權限")
+                return False
+            self.current_user = row
+            if row.get("role") == "admin" or row.get("status") == "approved":
                 return True
-            self.send_response(302)
-            self.send_header("Location", "/auth/google")
+            page = access_message(row.get("status", "pending")).encode("utf-8")
+            self.send_response(200 if row.get("status") == "pending" else 403)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", "0")
+            self.send_header("Content-Length", str(len(page)))
             self.end_headers()
+            self.wfile.write(page)
             return False
 
         if not AUTH_USER or not AUTH_PASSWORD:
@@ -341,6 +503,29 @@ class H(SimpleHTTPRequestHandler):
             return
         if not self.authorized():
             return
+        if GOOGLE_ENABLED and u.path == "/api/me":
+            return self.send_json({
+                "email": self.current_user.get("email"),
+                "role": self.current_user.get("role"),
+                "status": self.current_user.get("status")
+            })
+        if GOOGLE_ENABLED and u.path == "/admin":
+            if self.current_user.get("role") != "admin":
+                return self.send_error(403, "管理員限定")
+            page = ADMIN_PAGE.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            return self.wfile.write(page)
+        if GOOGLE_ENABLED and u.path == "/api/admin/users":
+            if self.current_user.get("role") != "admin":
+                return self.send_json({"error": "管理員限定"}, 403)
+            try:
+                return self.send_json({"users": list_site_users()})
+            except Exception:
+                return self.send_json({"error": "無法讀取使用者清單"}, 503)
         if u.path == "/api/status":
             state = {**JOB, "readonly": READONLY, "auto": AUTO, "cloud_run": bool(os.environ.get("K_SERVICE"))}
             if os.environ.get("K_SERVICE"):
@@ -387,7 +572,8 @@ class H(SimpleHTTPRequestHandler):
         if not self.authorized():
             return
         cloud_job_request = bool(os.environ.get("K_SERVICE")) and self.path == "/api/run"
-        if READONLY and self.path != "/api/ai" and not cloud_job_request:
+        admin_request = GOOGLE_ENABLED and self.path == "/api/admin/users"
+        if READONLY and self.path != "/api/ai" and not cloud_job_request and not admin_request:
             return self.send_json({"error": "唯讀模式，已停用此功能"}, 403)
         if self.headers.get("X-Requested-With") != "dash":
             return self.send_json({"error": "拒絕"}, 403)
@@ -398,6 +584,18 @@ class H(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
         except Exception:
             return self.send_json({"error": "請求格式錯誤"}, 400)
+        if self.path == "/api/admin/users":
+            if not GOOGLE_ENABLED or not self.current_user or self.current_user.get("role") != "admin":
+                return self.send_json({"error": "管理員限定"}, 403)
+            try:
+                user = set_site_user_status(
+                    body.get("email", ""), body.get("status", ""), self.current_user.get("email", "")
+                )
+                return self.send_json({"ok": True, "user": user})
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+            except Exception:
+                return self.send_json({"error": "更新使用者權限失敗"}, 503)
         if self.path == "/api/ai":
             try:
                 result = call_ai_provider(
