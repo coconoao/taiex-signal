@@ -65,7 +65,7 @@ details[open]>summary{margin-bottom:12px}
 </head>
 <body>
 <main>
-  <h1>加權指數訊號<a class="logout" href="/auth/logout">Google 登出</a></h1>
+  <h1>加權指數訊號<a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
@@ -137,6 +137,7 @@ const SNAP = window.__SNAPSHOT__ || null, seen = {};
 const getJSON = name => SNAP && name in SNAP ? Promise.resolve(SNAP[name])
   : fetch(name + "?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.text() : Promise.reject(r.status)).then(t => { seen[name] = t; return JSON.parse(t); });
 const api = (p, body) => fetch(p, body ? {method: "POST", headers: {"X-Requested-With": "dash", "Content-Type": "application/json"}, body: JSON.stringify(body)} : {cache: "no-store"}).then(r => r.json());
+if (!SNAP) api("/api/me").then(u => { if (u.role === "admin") $("adminLink").hidden = false; }).catch(() => {});
 
 function divRow(name, v, max) {
   const w = Math.min(Math.abs(v) / max, 1) * 50;
