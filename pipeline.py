@@ -141,7 +141,10 @@ def fetch_futures(days_back=1095, path="futures.csv"):
         else: rows[d] = {"foreign_oi_net": net}
     out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
     out = out[~out.index.duplicated()]
-    if len(out): out.to_csv(path, index_label="date")
+    if len(out):
+        tmp = path + ".tmp"
+        out.to_csv(tmp, index_label="date")
+        os.replace(tmp, path)
     else: print("期貨：沒有取得任何資料，請確認網路與 lxml 是否安裝")
     return out
 
@@ -173,7 +176,10 @@ def fetch_margin(days_back=1460, path="margin.csv"):
         else: print("找不到融資／融券欄位，請檢查", d.date(), list(last))
     out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
     out = out[~out.index.duplicated()]
-    if len(out): out.to_csv(path, index_label="date")
+    if len(out):
+        tmp = path + ".tmp"
+        out.to_csv(tmp, index_label="date")
+        os.replace(tmp, path)
     return out
 
 def demo_margin(df, seed=5):  # 合成融資餘額，僅供示範
