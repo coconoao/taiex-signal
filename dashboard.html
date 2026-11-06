@@ -227,7 +227,7 @@ function newsCard(n, key, el) {
   const a = n.agg[key];
   el.innerHTML = (n.demo ? '<div class="banner">以下為示範新聞資料，不是真實新聞。</div>' : "") + `<div class="mcs">${cards}</div>` +
     (a.n ? `<p>平均 <b>${sc(a.mean)}</b>（${a.n} 個來源）${a.spread > 0.6 ? "，<b>來源之間意見分歧大，請降低採信程度</b>" : ""}</p>` : "") +
-    (n.missing.length ? `<p class="note">尚未分析：${n.missing.join("、")}。到「設定」填入你自己的金鑰後按「用我的金鑰分析」。分數 -1 極偏空、+1 極偏多。</p>` : '<p class="note">分數 -1 極偏空、+1 極偏多。</p>') + `<h3>新聞原文（最多 15 則）</h3><ul>${(n.headlines || []).slice(0,15).map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + '</small></li>'; }).join("")}</ul>` + analystHtml(n, title);
+    (n.missing.length ? `<p class="note">尚未分析：${n.missing.join("、")}。到「設定」填入你自己的金鑰後按「用我的金鑰分析」。分數 -1 極偏空、+1 極偏多。</p>` : '<p class="note">分數 -1 極偏空、+1 極偏多。</p>') + `<h3>新聞原文（市場 12 則＋機構 5 則）</h3><ul>${[...(n.headlines || []).filter(h => h.kind === "market").slice(0,12), ...(n.headlines || []).filter(h => h.kind === "analyst").slice(0,5)].map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + '</small></li>'; }).join("")}</ul>` + analystHtml(n, title);
 }
 function renderSummary() {
   const n = mergedNews(), p = [];
