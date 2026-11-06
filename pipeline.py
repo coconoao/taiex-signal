@@ -20,13 +20,47 @@ BUY, SELL, COST = 0.55, 0.45, 0.002          # 買進/賣出門檻、單次換�
 
 def load_live(years=6):
     import yfinance as yf
-    df = yf.download(list(TICKERS.values()), period=f"{years}y", auto_adjust=True, progress=False)["Close"]
-    df = df.rename(columns={v: k for k, v in TICKERS.items()})
+    last_error = None
+    df = None
+    for attempt in range(3):
+        try:
+            raw = yf.download(list(TICKERS.values()), period=f"{years}y",
+                              auto_adjust=True, progress=False, threads=False)
+            if raw is None or raw.empty:
+                raise ValueError("Yahoo Finance 沒有回傳行情資料")
+            if isinstance(raw.columns, pd.MultiIndex):
+                if "Close" in raw.columns.get_level_values(0):
+                    close = raw.xs("Close", axis=1, level=0)
+                elif "Close" in raw.columns.get_level_values(1):
+                    close = raw.xs("Close", axis=1, level=1)
+                else:
+                    raise ValueError("Yahoo Finance 回傳欄位缺少 Close")
+            else:
+                close = raw["Close"]
+            if isinstance(close, pd.Series):
+                close = close.to_frame()
+            if isinstance(close.columns, pd.MultiIndex):
+                close.columns = close.columns.get_level_values(-1)
+            df = close.rename(columns={v: k for k, v in TICKERS.items()})
+            if "TAIEX" not in df or df["TAIEX"].dropna().empty:
+                raise ValueError("Yahoo Finance 回傳資料沒有台灣加權指數")
+            break
+        except Exception as e:
+            last_error = e
+            print(f"行情下載失敗（第 {attempt + 1}/3 次）：{type(e).__name__}: {e}", flush=True)
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+            df = None
+    if df is None:
+        raise RuntimeError(f"無法取得即時歷史行情；可能是 Yahoo Finance 限流（HTTP 429）。最後錯誤：{last_error}")
     df.index = pd.to_datetime(df.index).tz_localize(None)
-    df = df.dropna(subset=["TAIEX"]).ffill()
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    df = df.dropna(subset=["TAIEX"]).ffill(limit=3)
     now = pd.Timestamp.now(tz="Asia/Taipei")
     if now.hour < 14:  # 盤中或開盤前：排除今日尚未收盤的資料列
         df = df[df.index < now.tz_localize(None).normalize()]
+    if len(df) < 500:
+        raise ValueError(f"有效大盤歷史資料不足：只有 {len(df)} 個交易日")
     return df
 
 def load_demo(n=1800, seed=7):
@@ -251,7 +285,7 @@ def backtest(prob, fwd):
     eq_s, eq_b = (1 + strat).cumprod(), (1 + f).cumprod()
     k = slice(None, None, 5)
     return {
-        "days": int(len(p)), "trades": int(pos.diff().abs().sum()),
+        "days": int(len(p)), "trades": int(turnover.fillna(0).sum()),
         "direction_acc": round(float(((p > 0.5) == (f > 0)).mean()) * 100, 1),
         "brier": round(float(((p - (f > 0).astype(float)) ** 2).mean()), 4),
         "log_loss": round(float(-((f > 0) * np.log(np.clip(p, 1e-6, 1 - 1e-6)) + (f <= 0) * np.log(1 - np.clip(p, 1e-6, 1 - 1e-6))).mean()), 4),
