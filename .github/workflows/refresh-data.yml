@@ -1,0 +1,39 @@
+name: Refresh market data
+
+on:
+  schedule:
+    - cron: "30 0 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: taiex-data-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAIEX_STORAGE: supabase
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Restore previous data
+        run: python storage.py restore
+      - name: Refresh Taiwan market pipeline
+        run: python pipeline.py
+      - name: Persist Taiwan market data
+        run: python storage.py save
+      - name: Refresh news
+        run: python news.py
+      - name: Persist news data
+        run: python storage.py save
