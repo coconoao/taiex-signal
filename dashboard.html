@@ -17,7 +17,7 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;font-variant-numeric:tabular-nums}
 main{max-width:760px;margin:0 auto;padding:calc(20px + env(safe-area-inset-top,0px)) 16px calc(88px + env(safe-area-inset-bottom,0px))}
-h1{font-size:1.25rem;margin:0}
+h1{font-size:1.25rem;margin:0}.logout{float:right;color:var(--accent);font-size:.875rem;text-decoration:none;padding:2px 0}
 h2{font-size:1rem;margin:0 0 12px}
 .meta{color:var(--mute);font-size:.875rem;margin:2px 0 4px}
 .live{font-size:.9375rem;margin:6px 0 4px}
@@ -65,7 +65,7 @@ details[open]>summary{margin-bottom:12px}
 </head>
 <body>
 <main>
-  <h1>加權指數訊號</h1>
+  <h1>加權指數訊號<a class="logout" href="/auth/logout">Google 登出</a></h1>
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
