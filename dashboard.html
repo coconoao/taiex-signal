@@ -256,7 +256,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 
 /* ---- 使用者自己的 AI 金鑰：只存在自己的瀏覽器，由瀏覽器直接呼叫各家 API ---- */
 const KEYF = [["claude", "Claude API 金鑰", 1], ["claudeModel", "Claude 模型名稱（留空用 claude-sonnet-5-5）"], ["openai", "OpenAI API 金鑰", 1],
-              ["openaiModel", "OpenAI 模型名稱（必填）"], ["gemini", "Gemini API 金鑰", 1], ["geminiModel", "Gemini 模型名稱（必填）"]];
+              ["openaiModel", "OpenAI 模型名稱（預設 gpt-4o-mini）"], ["gemini", "Gemini API 金鑰", 1], ["geminiModel", "Gemini 模型名稱（預設 gemini-2.5-flash）"]];
 const mem = {}, rd = s => { try { return s.getItem("keys"); } catch { return null; } };
 function getKeys() { try { return JSON.parse(rd(localStorage) || rd(sessionStorage) || mem.keys || "{}"); } catch { return {}; } }
 function setKeys(k, remember) {
@@ -277,14 +277,11 @@ $("saveKeys").onclick = () => {
 $("clearAll").onclick = () => { setKeys({}, false); saveAI(null); try { localStorage.removeItem("keys"); } catch {} renderKeyForm(); renderNews(); $("aiMsg").textContent = "已清除金鑰與分析結果。"; };
 
 const J = r => r.json().then(j => r.ok ? j : Promise.reject(new Error((j.error && (j.error.message || j.error)) || r.status)));
-const post = (url, headers, body) => fetch(url, {method: "POST", headers: {"content-type": "application/json", ...headers}, body: JSON.stringify(body)}).then(J);
+const post = (url, headers, body) => fetch(url, {method: "POST", headers: {"content-type": "application/json", "X-Requested-With": "dash", ...headers}, body: JSON.stringify(body)}).then(J);
 const CALLS = {
-  Claude: k => k.claude && (p => post("https://api.anthropic.com/v1/messages", {"x-api-key": k.claude, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
-    {model: k.claudeModel || "claude-sonnet-5-5", max_tokens: 2000, messages: [{role: "user", content: p}]}).then(r => r.content[0].text)),
-  ChatGPT: k => k.openai && k.openaiModel && (p => post("https://api.openai.com/v1/chat/completions", {Authorization: "Bearer " + k.openai},
-    {model: k.openaiModel, messages: [{role: "user", content: p}], response_format: {type: "json_object"}}).then(r => r.choices[0].message.content)),
-  Gemini: k => k.gemini && k.geminiModel && (p => post(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(k.geminiModel)}:generateContent`, {"x-goog-api-key": k.gemini},
-    {contents: [{parts: [{text: p}]}], generationConfig: {responseMimeType: "application/json"}}).then(r => r.candidates[0].content.parts.map(x => x.text || "").join("")))
+  Claude: k => k.claude && (p => post("/api/ai", {}, {provider: "Claude", key: k.claude, model: k.claudeModel || "claude-sonnet-4-5", prompt: p}).then(r => r.text)),
+  ChatGPT: k => k.openai && (p => post("/api/ai", {}, {provider: "ChatGPT", key: k.openai, model: k.openaiModel || "gpt-4o-mini", prompt: p}).then(r => r.text)),
+  Gemini: k => k.gemini && (p => post("/api/ai", {}, {provider: "Gemini", key: k.gemini, model: k.geminiModel || "gemini-2.5-flash", prompt: p}).then(r => r.text))
 };
 const clip = x => Math.round(Math.max(-1, Math.min(1, +x)) * 100) / 100;
 function parseAI(t) {
@@ -293,7 +290,8 @@ function parseAI(t) {
           summary: String(d.summary || ""), analysts: (d.analysts || []).filter(a => a && typeof a === "object").slice(0, 15)};
 }
 $("runAI").onclick = async () => {
-  if (!NEWS || !NEWS.prompt) { $("aiMsg").textContent = "尚無可分析的新聞資料（news.json 需包含 prompt）。"; return; }
+  if (!NEWS || !NEWS.prompt) { $("aiMsg").textContent = "尚無可分析的新聞資料；請先更新新聞。"; return; }
+  if (NEWS.demo) { $("aiMsg").textContent = "目前載入的是示範新聞，不會送交 AI 分析。請先更新真實新聞資料。"; return; }
   const k = getKeys(), jobs = Object.entries(CALLS).map(([m, f]) => [m, f(k)]).filter(([, f]) => f);
   if (!jobs.length) { $("aiMsg").textContent = "請先填入至少一組金鑰（OpenAI、Gemini 需同時填模型名稱）。"; return; }
   $("aiMsg").textContent = "分析中…"; $("runAI").disabled = true;
