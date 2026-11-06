@@ -112,7 +112,7 @@ details[open]>summary{margin-bottom:12px}
 
   <div id="tab-settings" hidden>
     <section><h2>用你自己的 AI 金鑰分析新聞</h2>
-      <p>「內建規則」不需要金鑰，永遠可用。想讓 Claude、ChatGPT、Gemini 也一起分析，請填入 API 金鑰。金鑰只保存在這台裝置的瀏覽器；分析時會透過登入後的 HTTPS API 即時轉送至 AI 供應商，不會寫入伺服器資料檔或應用程式日誌。請只在可信任裝置上儲存金鑰。OpenAI 與 Gemini 可留空模型名稱使用預設模型；欄位輸入 - 可清除。</p>
+      <p>「內建規則」不需要金鑰，永遠可用。想讓 Claude、ChatGPT、Gemini 也一起分析，請填入 API 金鑰，並從模型選單選擇模型。模型清單會提供常用選項；也可以選「自訂模型 ID」自行輸入。金鑰只保存在這台裝置的瀏覽器，分析時透過登入後的 HTTPS API 即時轉送，不會寫入伺服器資料檔或應用程式日誌。請只在可信任裝置上儲存金鑰。</p>
       <div id="keys"></div>
       <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="remember" style="width:auto;margin:0">記住在這個瀏覽器（共用裝置請不要勾選）</label>
       <p><button class="btn" id="saveKeys">儲存</button> <button class="btn" id="runAI">用我的金鑰分析</button> <button class="btn ghost" id="clearAll">清除全部</button></p>
@@ -256,8 +256,31 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 });
 
 /* ---- 使用者自己的 AI 金鑰：只存在自己的瀏覽器，由瀏覽器直接呼叫各家 API ---- */
-const KEYF = [["claude", "Claude API 金鑰", 1], ["claudeModel", "Claude 模型名稱（預設 claude-sonnet-4-5）"], ["openai", "OpenAI API 金鑰", 1],
-              ["openaiModel", "OpenAI 模型名稱（預設 gpt-4o-mini）"], ["gemini", "Gemini API 金鑰", 1], ["geminiModel", "Gemini 模型名稱（預設 gemini-2.5-flash）"]];
+const KEY_FIELDS = [["claude", "Claude API 金鑰"], ["openai", "OpenAI API 金鑰"], ["gemini", "Gemini API 金鑰"]];
+const MODEL_OPTIONS = {
+  claudeModel: [
+    ["claude-sonnet-5-5", "Claude Sonnet 5.5（均衡）"],
+    ["claude-opus-5-5", "Claude Opus 5.5（高能力）"],
+    ["claude-haiku-5-5", "Claude Haiku 5.5（快速）"],
+    ["claude-sonnet-4-6", "Claude Sonnet 4.6"],
+    ["claude-haiku-4-5", "Claude Haiku 4.5"]
+  ],
+  openaiModel: [
+    ["gpt-6-luna", "GPT-6 Luna"],
+    ["gpt-6.1-sol", "GPT-6.1 Sol"],
+    ["gpt-6-astra", "GPT-6 Astra"],
+    ["gpt-5.5", "GPT-5.5"],
+    ["gpt-5.4-mini", "GPT-5.4 mini"]
+  ],
+  geminiModel: [
+    ["gemini-3.8-flash", "Gemini 3.8 Flash"],
+    ["gemini-3.1-pro-preview", "Gemini 3.1 Pro（預覽）"],
+    ["gemini-3.7-flash", "Gemini 3.7 Flash"],
+    ["gemini-3.5-flash", "Gemini 3.5 Flash"],
+    ["gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"]
+  ]
+};
+const MODEL_LABELS = {claudeModel:"Claude 模型",openaiModel:"OpenAI 模型",geminiModel:"Gemini 模型"};
 const mem = {}, rd = s => { try { return s.getItem("keys"); } catch { return null; } };
 function getKeys() { try { return JSON.parse(rd(localStorage) || rd(sessionStorage) || mem.keys || "{}"); } catch { return {}; } }
 function setKeys(k, remember) {
@@ -266,13 +289,33 @@ function setKeys(k, remember) {
 }
 function renderKeyForm() {
   const k = getKeys();
-  $("keys").innerHTML = KEYF.map(([f, l, pw]) => `<label class="f">${l}<input id="k_${f}" type="${pw ? "password" : "text"}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${k[f] ? "已設定（留空＝不變）" : "尚未設定"}"></label>`).join("");
+  const keyHtml = KEY_FIELDS.map(([f, label]) =>
+    `<label class="f">${label}<input id="k_${f}" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${k[f] ? "已設定（留空＝不變）" : "尚未設定"}"></label>`
+  ).join("");
+  const modelHtml = Object.entries(MODEL_OPTIONS).map(([f, options]) => {
+    const current = k[f] || options[0][0];
+    const known = options.some(([id]) => id === current);
+    const selected = known ? current : "__custom__";
+    const choices = options.map(([id, label]) => `<option value="${id}" ${id === selected ? "selected" : ""}>${label}</option>`).join("");
+    return `<label class="f">${MODEL_LABELS[f]}<select id="k_${f}" style="display:block;width:100%;margin-top:4px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)"><option value="${options[0][0]}" ${selected === options[0][0] ? "selected" : ""}>${options[0][1]}（預設）</option>${options.slice(1).map(([id,label]) => `<option value="${id}" ${id === selected ? "selected" : ""}>${label}</option>`).join("")}<option value="__custom__" ${selected === "__custom__" ? "selected" : ""}>自訂模型 ID…</option></select><input id="k_${f}_custom" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="輸入模型 ID" value="${known ? "" : esc(current)}" style="display:${known ? "none" : "block"};width:100%;margin-top:6px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)"></label>`;
+  }).join("");
+  $("keys").innerHTML = keyHtml + modelHtml;
+  Object.keys(MODEL_OPTIONS).forEach(f => {
+    $("k_" + f).onchange = () => {
+      $("k_" + f + "_custom").style.display = $("k_" + f).value === "__custom__" ? "block" : "none";
+    };
+  });
   $("remember").checked = rd(localStorage) !== null;
 }
 renderKeyForm();
 $("saveKeys").onclick = () => {
   const k = getKeys();
-  KEYF.forEach(([f]) => { const v = $("k_" + f).value.trim(); if (v === "-") delete k[f]; else if (v) k[f] = v; });
+  KEY_FIELDS.forEach(([f]) => { const v = $("k_" + f).value.trim(); if (v === "-") delete k[f]; else if (v) k[f] = v; });
+  Object.keys(MODEL_OPTIONS).forEach(f => {
+    const selected = $("k_" + f).value;
+    const v = selected === "__custom__" ? $("k_" + f + "_custom").value.trim() : selected;
+    if (v === "-") delete k[f]; else if (v) k[f] = v; else delete k[f];
+  });
   setKeys(k, $("remember").checked); renderKeyForm(); $("aiMsg").textContent = "已儲存。按「用我的金鑰分析」開始。";
 };
 $("clearAll").onclick = () => { setKeys({}, false); saveAI(null); try { localStorage.removeItem("keys"); } catch {} renderKeyForm(); renderNews(); $("aiMsg").textContent = "已清除金鑰與分析結果。"; };
@@ -280,9 +323,9 @@ $("clearAll").onclick = () => { setKeys({}, false); saveAI(null); try { localSto
 const J = r => r.json().then(j => r.ok ? j : Promise.reject(new Error((j.error && (j.error.message || j.error)) || r.status)));
 const post = (url, headers, body) => fetch(url, {method: "POST", headers: {"content-type": "application/json", "X-Requested-With": "dash", ...headers}, body: JSON.stringify(body)}).then(J);
 const CALLS = {
-  Claude: k => k.claude && (p => post("/api/ai", {}, {provider: "Claude", key: k.claude, model: k.claudeModel || "claude-sonnet-4-5", prompt: p}).then(r => r.text)),
-  ChatGPT: k => k.openai && (p => post("/api/ai", {}, {provider: "ChatGPT", key: k.openai, model: k.openaiModel || "gpt-4o-mini", prompt: p}).then(r => r.text)),
-  Gemini: k => k.gemini && (p => post("/api/ai", {}, {provider: "Gemini", key: k.gemini, model: k.geminiModel || "gemini-2.5-flash", prompt: p}).then(r => r.text))
+  Claude: k => k.claude && (p => post("/api/ai", {}, {provider: "Claude", key: k.claude, model: k.claudeModel || "claude-sonnet-5-5", prompt: p}).then(r => r.text)),
+  ChatGPT: k => k.openai && (p => post("/api/ai", {}, {provider: "ChatGPT", key: k.openai, model: k.openaiModel || "gpt-6-luna", prompt: p}).then(r => r.text)),
+  Gemini: k => k.gemini && (p => post("/api/ai", {}, {provider: "Gemini", key: k.gemini, model: k.geminiModel || "gemini-3.8-flash", prompt: p}).then(r => r.text))
 };
 const clip = x => Math.round(Math.max(-1, Math.min(1, +x)) * 100) / 100;
 function parseAI(t) {
