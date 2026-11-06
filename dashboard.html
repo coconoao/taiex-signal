@@ -167,7 +167,7 @@ function renderDaily(d) {
   const t = d.backtest, st = t.strategy, bh = t.buyhold;
   $("stats").innerHTML = [["方向命中率", pct(t.direction_acc / 100), `共 ${t.days} 個交易日`],
     ["持有日勝率", t.hold_win_rate == null ? "—" : pct(t.hold_win_rate / 100), `換倉 ${t.trades} 次`],
-    ["年化報酬", st.annual + "%", `買進持有 ${bh.annual}%`], ["最大回撤", st.max_dd + "%", `買進持有 ${bh.max_dd}%`]]
+    ["年化報酬", st.annual + "%", `買進持有 ${bh.annual}%`], ["最大回撤", st.max_dd + "%", `買進持有 ${bh.max_dd}%`], ["Brier 分數（越低越好）", t.brier == null ? "—" : t.brier, "樣本外機率誤差"], ["Log loss（越低越好）", t.log_loss == null ? "—" : t.log_loss, "樣本外機率品質"]]
     .map(([k, v, n]) => `<div><dt>${k}</dt><dd>${v} <small>${n}</small></dd></div>`).join("");
   drawCurve(t.curve);
 }
