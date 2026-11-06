@@ -119,10 +119,11 @@ def ensure_site_user(email):
     if email == ADMIN_EMAIL:
         row = site_user_by_email(email)
         if row:
-            q = urllib.parse.urlencode({"email": "eq." + email})
-            supabase_request("PATCH", "site_users?" + q, {
-                "role": "admin", "status": "approved", "approved_by": email
-            }, "return=minimal")
+            if row.get("role") != "admin" or row.get("status") != "approved":
+                q = urllib.parse.urlencode({"email": "eq." + email})
+                supabase_request("PATCH", "site_users?" + q, {
+                    "role": "admin", "status": "approved", "approved_by": email
+                }, "return=minimal")
         else:
             supabase_request("POST", "site_users", {
                 "email": email, "role": "admin", "status": "approved",
