@@ -133,18 +133,24 @@ def trigger_cloud_run_refresh():
     )
     with urllib.request.urlopen(req, timeout=5) as response:
         access_token = json.loads(response.read().decode("utf-8"))["access_token"]
+    status_path = os.path.join(DATA, "refresh_status.json")
+    with open(status_path, "w", encoding="utf-8") as f:
+        json.dump({"running": True, "current": "queued", "results": [],
+                   "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()}, f, ensure_ascii=False)
     url = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/jobs/{job}:run"
     req = urllib.request.Request(
         url, data=b"{}", headers={"Authorization": "Bearer " + access_token, "Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=20) as response:
-        operation = json.loads(response.read().decode("utf-8"))
-    status_path = os.path.join(DATA, "refresh_status.json")
-    with open(status_path, "w", encoding="utf-8") as f:
-        json.dump({"running": True, "current": "queued", "results": [],
-                   "operation": operation.get("name"), "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()},
-                  f, ensure_ascii=False)
-    return operation.get("name", "started")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            operation = json.loads(response.read().decode("utf-8"))
+        return operation.get("name", "started")
+    except Exception as e:
+        with open(status_path, "w", encoding="utf-8") as f:
+            json.dump({"running": False, "current": None, "exit_code": 1,
+                       "results": [{"step": "trigger", "exit_code": 1, "log": str(e)}],
+                       "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()}, f, ensure_ascii=False)
+        raise
 
 
 def call_ai_provider(provider, api_key, model, prompt):
