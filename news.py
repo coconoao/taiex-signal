@@ -104,7 +104,8 @@ def ask_openai(p):
 
 def ask_gemini(p):
     model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-             {"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
+    url = "https://generativelanguage.googleapis.com/v1beta/models/" + urllib.parse.quote(model, safe="") + ":generateContent"
+    r = post(url, {"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
              {"contents": [{"parts": [{"text": p}]}], "generationConfig": {"responseMimeType": "application/json"}})
     return "".join(x.get("text", "") for x in r["candidates"][0]["content"]["parts"])
 
