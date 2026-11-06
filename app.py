@@ -5,6 +5,7 @@ API 金鑰：使用者各自填在自己的瀏覽器（儀表板「設定」頁�
 對外部署（--host 0.0.0.0 或 READONLY=1）：自動唯讀，關閉手動更新與匯出到本機；排程照常執行。
 """
 import datetime as dt, json, os, subprocess, sys, threading, time, urllib.parse
+import base64, hmac
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
@@ -25,6 +26,8 @@ READONLY = bool(os.environ.get("READONLY")) or HOST not in ("127.0.0.1", "localh
 AUTO = "--no-auto" not in sys.argv and not DEMO
 TZ = ZoneInfo("Asia/Taipei")
 JOB, LOCK, QUOTE = {"running": None, "log": ""}, threading.Lock(), {"t": 0, "v": None}
+AUTH_USER = os.environ.get("TAIEX_USER", "")
+AUTH_PASSWORD = os.environ.get("TAIEX_PASSWORD", "")
 
 def run_jobs(*whats):
     if not LOCK.acquire(blocking=False): return False
@@ -65,12 +68,43 @@ def quote():  # 加權指數即時報價（Yahoo，約有數分鐘延遲），�
     return v
 
 class H(SimpleHTTPRequestHandler):
+      def authorized(self):
+        if not AUTH_USER or not AUTH_PASSWORD:
+            self.send_error(503, "Authentication not configured")
+            return False
+
+        user, password = "", ""
+        try:
+            header = self.headers.get("Authorization", "")
+            scheme, token = header.split(" ", 1)
+            if scheme.lower() != "basic":
+                raise ValueError()
+            decoded = base64.b64decode(token, validate=True).decode("utf-8")
+            user, password = decoded.split(":", 1)
+        except Exception:
+            pass
+
+        valid = (
+            hmac.compare_digest(user, AUTH_USER)
+            and hmac.compare_digest(password, AUTH_PASSWORD)
+        )
+
+        if not valid:
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="TAIEX Signal"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
+        return True
     def send_json(self, obj, code=200):
         b = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code); self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 
     def do_GET(self):
+              if not self.authorized():
+            return
         u = urllib.parse.urlparse(self.path)
         if u.path == "/api/status": return self.send_json({**JOB, "readonly": READONLY, "auto": AUTO})
         if u.path in ("/api/quote", "/api/stock"):
@@ -92,6 +126,8 @@ class H(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+              if not self.authorized():
+            return
         if READONLY: return self.send_json({"error": "唯讀模式，已停用此功能"}, 403)
         if self.headers.get("X-Requested-With") != "dash": return self.send_json({"error": "拒絕"}, 403)  # 擋跨站請求
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
