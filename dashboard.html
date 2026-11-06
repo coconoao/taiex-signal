@@ -107,7 +107,7 @@ details[open]>summary{margin-bottom:12px}
   <div id="tab-stock" hidden>
     <section><h2>個股上漲幅度估計</h2>
       <p><input class="inp" id="code" placeholder="股票代號，如 2330" inputmode="numeric" aria-label="股票代號"><button class="btn" id="go">查詢</button></p>
-      <div id="stockOut"><p class="note">結合大盤一週訊號、這檔股票的歷史表現與財報體檢。</p></div></section>
+      <div id="stockOut"><p class="note">結合大盤一週訊號、這檔股票的歷史表現與財報體檢。</p></div><div id="stockHistory" class="note" style="margin-top:12px"></div></section>
   </div>
 
   <div id="tab-settings" hidden>
@@ -379,23 +379,58 @@ document.querySelectorAll("[data-run]").forEach(b => b.onclick = () => api("/api
   .then(r => { if (r.error) $("job").textContent = r.error; else { $("job").textContent = "已開始…"; setTimeout(poll, 1500); } }).catch(() => {}));
 $("exp").onclick = () => api("/api/export", {}).then(r => { $("expMsg").textContent = r.path ? "已存到 " + r.path : (r.error || "失敗"); }).catch(() => {});
 
+const STOCK_CACHE_KEY = "taiex_stock_history_v1";
+function readStockHistory() {
+  try { const v = JSON.parse(localStorage.getItem(STOCK_CACHE_KEY) || "[]"); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+}
+function saveStockHistory(item) {
+  try {
+    const rows = readStockHistory().filter(x => x.code !== item.code);
+    rows.unshift({...item, savedAt: new Date().toISOString()});
+    localStorage.setItem(STOCK_CACHE_KEY, JSON.stringify(rows.slice(0, 20)));
+  } catch {}
+  renderStockHistory();
+}
+function renderStockHistory() {
+  const rows = readStockHistory(), el = $("stockHistory");
+  if (!el) return;
+  el.innerHTML = rows.length
+    ? '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>此瀏覽器的個股查詢紀錄（最多 20 檔）</b><button class="btn sm ghost" id="clearStockHistory">清除紀錄</button></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' +
+      rows.map(x => '<button class="btn sm ghost" data-stock-code="' + esc(x.code) + '">' + esc(x.code) + ' · ' + esc(x.asof || "") + '</button>').join("") + '</div>'
+    : '<p class="note">查詢成功後，結果會保存在這個瀏覽器中。</p>';
+  el.querySelectorAll("[data-stock-code]").forEach(b => b.onclick = () => {
+    const item = rows.find(x => x.code === b.dataset.stockCode);
+    if (item) { $("code").value = item.code; renderStock(item, true); }
+  });
+  const clear = $("clearStockHistory");
+  if (clear) clear.onclick = () => {
+    try { localStorage.removeItem(STOCK_CACHE_KEY); } catch {}
+    renderStockHistory();
+  };
+}
+function renderStock(s, cached=false) {
+  const e = s.stock_expected, fl = ["偏弱", "—", "較佳"];
+  $("stockOut").innerHTML = (cached ? '<p class="note">瀏覽器保存的結果 · ' + esc(s.savedAt || "") + '（資料日期 ' + esc(s.asof || "") + '）</p>' : "") +
+    `<p class="sig" style="font-size:1.5rem">${esc(s.code)} ${s.last}<small>${esc(s.asof)}</small></p>
+      <p>大盤未來一週傾向：<b>${esc(s.market_bucket)}</b>（上漲機率 ${pct(s.market_prob)}）。此股 Beta ${s.beta}${s.beta_implied == null ? "" : `，依 Beta 推算的大盤聯動約 ${s.beta_implied}%`}。</p>
+      <p>${e ? `歷史上大盤出現同樣訊號時（${e.n} 個樣本），這檔股票之後 5 日平均 <b>${e.avg}%</b>，勝率 ${e.win}%，八成情況落在 <b>${e.p10}% 到 ${e.p90}%</b>。` : "這檔股票在同類訊號下的歷史樣本不足。"}</p>
+      <p class="note">20 日動能 ${s.mom20}%，年化波動 ${s.vol60}%。這是歷史分布，不是點預測；樣本已降低五日重疊造成的重複計數。</p>
+      <h2 style="margin-top:16px">財報體檢（參考，未納入上面的區間）</h2>` +
+    (s.fundamentals.length ? `<table><thead><tr><th>項目</th><th>數值</th><th>判讀</th></tr></thead><tbody>${s.fundamentals.map(f => `<tr><td>${esc(f.item)}</td><td>${esc(f.value)}</td><td>${fl[f.flag + 1]}</td></tr>`).join("")}</tbody></table>` : '<p class="note">抓不到這檔的財報資料。</p>') +
+    '<p class="note">財報來自 Yahoo，台股欄位常不完整，請對照公開資訊觀測站。沒有「當時公布」的歷史財報可回測，因此只作參考，不調整區間。</p>';
+}
 $("go").onclick = () => {
   const c = $("code").value.trim(); if (!c) return;
   $("stockOut").innerHTML = '<p class="note">查詢中…（需連網抓行情與財報）</p>';
   api("/api/stock?code=" + encodeURIComponent(c)).then(s => {
     if (s.error) { $("stockOut").innerHTML = `<p>${esc(s.error)}</p>`; return; }
-    const e = s.stock_expected, fl = ["偏弱", "—", "較佳"];
-    $("stockOut").innerHTML = `<p class="sig" style="font-size:1.5rem">${esc(s.code)} ${s.last}<small>${s.asof}</small></p>
-      <p>大盤未來一週傾向：<b>${esc(s.market_bucket)}</b>（上漲機率 ${pct(s.market_prob)}）。此股 Beta ${s.beta}${s.beta_implied == null ? "" : `，依 Beta 推算的大盤聯動約 ${s.beta_implied}%`}。</p>
-      <p>${e ? `歷史上大盤出現同樣訊號時（${e.n} 個樣本），這檔股票之後 5 日平均 <b>${e.avg}%</b>，勝率 ${e.win}%，八成情況落在 <b>${e.p10}% 到 ${e.p90}%</b>。` : "這檔股票在同類訊號下的歷史樣本不足。"}</p>
-      <p class="note">20 日動能 ${s.mom20}%，年化波動 ${s.vol60}%。這是歷史分布，不是點預測；5 日區間互相重疊，實際可信度比數字看起來低。</p>
-      <h2 style="margin-top:16px">財報體檢（參考，未納入上面的區間）</h2>` +
-      (s.fundamentals.length ? `<table><thead><tr><th>項目</th><th>數值</th><th>判讀</th></tr></thead><tbody>${s.fundamentals.map(f => `<tr><td>${esc(f.item)}</td><td>${esc(f.value)}</td><td>${fl[f.flag + 1]}</td></tr>`).join("")}</tbody></table>` : '<p class="note">抓不到這檔的財報資料。</p>') +
-      '<p class="note">財報來自 Yahoo，台股欄位常不完整，請對照公開資訊觀測站。沒有「當時公布」的歷史財報可回測，因此只作參考，不調整區間。</p>';
+    renderStock(s, false); saveStockHistory(s);
   }).catch(() => { $("stockOut").innerHTML = '<p class="note">個股功能需要伺服器（python app.py）。</p>'; });
 };
 $("code").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
 
+renderStockHistory();
 loadAll();
 </script>
 </body>
