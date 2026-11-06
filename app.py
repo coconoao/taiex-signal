@@ -374,7 +374,11 @@ class H(SimpleHTTPRequestHandler):
                 self.send_error(503, "無法讀取使用者權限")
                 return False
             self.current_user = row
-            if row.get("role") == "admin" or row.get("status") == "approved":
+            # 管理員身分必須同時符合伺服器設定的 ADMIN_EMAIL。
+            # 其他帳號只有 role=user 且 status=approved 才能使用網站。
+            if email == ADMIN_EMAIL and row.get("role") == "admin" and row.get("status") == "approved":
+                return True
+            if email != ADMIN_EMAIL and row.get("role") == "user" and row.get("status") == "approved":
                 return True
             page = access_message(row.get("status", "pending")).encode("utf-8")
             self.send_response(200 if row.get("status") == "pending" else 403)
