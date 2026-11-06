@@ -16,7 +16,7 @@ Cloud Run 免費額度依每月用量計算；Cloud Storage、網路流量、建
 
 在 Google Cloud Console 的 Cloud Storage 建立 bucket，位置選 `asia-east1`。Bucket 名稱必須全域唯一。記下名稱，以下以 `YOUR_BUCKET` 表示。
 
-把 Cloud Run service 與 Cloud Run Job 使用的服務帳戶授予該 bucket 的 **Storage Object User** 權限。不要把 bucket 設為公開。
+把 Cloud Run service 與 Cloud Run Job 使用的服務帳戶授予該 bucket 的 **Storage Object User** 權限。另將 Cloud Run service 的服務帳戶授予 Secret Manager Secret 的 **Secret Manager Secret Accessor** 權限，以及更新工作 Job 的 **Cloud Run Invoker（roles/run.invoker）** 權限。不要把 bucket 設為公開。
 
 ## 2. 建立 Google OAuth Secret
 
@@ -39,7 +39,7 @@ gcloud run deploy taiex-signal \
   --cpu 1 \
   --port 8080 \
   --timeout 3600 \
-  --set-env-vars TAIEX_DATA=/mnt/data,READONLY=1 \
+  --set-env-vars TAIEX_DATA=/mnt/data,READONLY=1,CLOUD_RUN_REFRESH_JOB=taiex-refresh,CLOUD_RUN_REGION=asia-east1 \
   --set-secrets GOOGLE_CLIENT_SECRET=google-client-secret:latest \
   --add-volume mount-path=/mnt/data,type=cloud-storage,bucket=YOUR_BUCKET
 ```
