@@ -387,13 +387,13 @@ $("runAI").onclick = async () => {
 
 /* ---- 伺服器功能（用 python app.py 啟動時才有）：報價、個股、手動更新、匯出 ---- */
 function renderUSMarket(data) {
-  $("usMarketMeta").textContent = `來源：${data.source} · ${data.interval} 區間 · 更新時間 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
+  $("usMarketMeta").textContent = `${data.stale ? "⚠ 最後成功快取（非最新） · " : ""}來源：${data.source} · ${data.interval} 區間 · 更新時間 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
   const valid = (data.items || []).filter(x => x.pct != null);
   const up = valid.filter(x => x.pct > 0).length, down = valid.filter(x => x.pct < 0).length;
   const flat = valid.length - up - down;
-  $("usMarketSummary").textContent = valid.length
+  $("usMarketSummary").textContent = data.note || (valid.length
     ? `盤中概況：${up} 個指數／標的上漲、${down} 個下跌、${flat} 個持平；此為行情摘要，不是台股方向預測。`
-    : "目前缺少足夠的漲跌資料。";
+    : "目前缺少足夠的漲跌資料。");
   $("usMarketCards").innerHTML = (data.items || []).map(x => {
     const good = x.pct == null ? "" : x.pct >= 0;
     const color = x.pct == null ? "var(--mute)" : good ? "var(--up)" : "var(--down)";
