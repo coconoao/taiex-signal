@@ -209,17 +209,25 @@ function analystHtml(n, title) {
     a.rows.map(r => `<tr><td>${esc(r.name)}</td>${ms.map(m => `<td style="color:${col(r.stances[m])}">${esc(r.stances[m] || "—")}</td>`).join("")}<td style="text-align:left">${esc(title(r.id))}</td></tr>`).join("") +
     `</tbody></table></div><p class="note">平均 ${a.score == null ? "—" : sc(a.score)}。目前每家權重相同；累積紀錄後才能依命中率加權。</p>`;
 }
+function safeNewsHref(value) {
+  try { const u = new URL(value, location.href); return (u.protocol === "https:" || u.protocol === "http:") ? u.href : ""; }
+  catch { return ""; }
+}
 function newsCard(n, key, el) {
   if (!n) { el.innerHTML = '<p class="note">尚無新聞分析（news.json）。</p>'; return; }
   const title = id => (n.headlines.find(h => h.id === id) || {}).title || "";
   const cards = Object.entries(n.models).map(([name, r]) => r.error
     ? `<div class="mc"><b>${esc(name)}</b><p class="note">失敗：${esc(r.error)}</p></div>`
     : `<div class="mc"><b>${esc(name)}</b><div class="big" style="color:${tone(r[key])}">${sc(r[key])}</div><div class="note">信心 ${Math.round(r.confidence * 100)}%</div><p>${esc(r.summary)}</p>
-       <p class="note">${(r.drivers || []).map(d => esc(d.impact) + "：" + esc(title(d.id))).join("<br>")}</p></div>`).join("");
+       <p class="note">${(r.drivers || []).map(d => {
+         const h = n.headlines.find(x => x.id === d.id) || {};
+         const href = safeNewsHref(h.link);
+         return esc(d.impact) + "：" + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title || title(d.id)) + '</a>' : esc(h.title || title(d.id)));
+       }).join("<br>")}</p></div>`).join("");
   const a = n.agg[key];
   el.innerHTML = (n.demo ? '<div class="banner">以下為示範新聞資料，不是真實新聞。</div>' : "") + `<div class="mcs">${cards}</div>` +
     (a.n ? `<p>平均 <b>${sc(a.mean)}</b>（${a.n} 個來源）${a.spread > 0.6 ? "，<b>來源之間意見分歧大，請降低採信程度</b>" : ""}</p>` : "") +
-    (n.missing.length ? `<p class="note">尚未分析：${n.missing.join("、")}。到「設定」填入你自己的金鑰後按「用我的金鑰分析」。分數 -1 極偏空、+1 極偏多。</p>` : '<p class="note">分數 -1 極偏空、+1 極偏多。</p>') + analystHtml(n, title);
+    (n.missing.length ? `<p class="note">尚未分析：${n.missing.join("、")}。到「設定」填入你自己的金鑰後按「用我的金鑰分析」。分數 -1 極偏空、+1 極偏多。</p>` : '<p class="note">分數 -1 極偏空、+1 極偏多。</p>') + `<h3>新聞原文（最多 15 則）</h3><ul>${(n.headlines || []).slice(0,15).map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + '</small></li>'; }).join("")}</ul>` + analystHtml(n, title);
 }
 function renderSummary() {
   const n = mergedNews(), p = [];
@@ -422,7 +430,7 @@ function renderStock(s, cached=false) {
 }
 $("go").onclick = () => {
   const c = $("code").value.trim(); if (!c) return;
-  $("stockOut").innerHTML = '<p class="note">查詢中…（需連網抓行情與財報）</p>';
+  $("stockOut").innerHTML = '<p class="note">正在執行此股票的個股分析流程（不會重跑整套大盤 Pipeline）…</p>';
   api("/api/stock?code=" + encodeURIComponent(c)).then(s => {
     if (s.error) { $("stockOut").innerHTML = `<p>${esc(s.error)}</p>`; return; }
     renderStock(s, false); saveStockHistory(s);
