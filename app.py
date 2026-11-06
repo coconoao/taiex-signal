@@ -578,7 +578,12 @@ class H(SimpleHTTPRequestHandler):
             return
         cloud_job_request = bool(os.environ.get("K_SERVICE")) and self.path == "/api/run"
         admin_request = GOOGLE_ENABLED and self.path == "/api/admin/users"
-        if READONLY and self.path != "/api/ai" and not cloud_job_request and not admin_request:
+        # 對外部署仍保護未登入/非 OAuth 模式；已通過 Supabase 核准的 Google 使用者可操作既有功能。
+        oauth_approved = bool(
+            GOOGLE_ENABLED and self.current_user and
+            (self.current_user.get("role") == "admin" or self.current_user.get("status") == "approved")
+        )
+        if READONLY and not oauth_approved and self.path != "/api/ai" and not cloud_job_request and not admin_request:
             return self.send_json({"error": "唯讀模式，已停用此功能"}, 403)
         if self.headers.get("X-Requested-With") != "dash":
             return self.send_json({"error": "拒絕"}, 403)
