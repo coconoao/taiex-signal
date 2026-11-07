@@ -73,7 +73,7 @@ details[open]>summary{margin-bottom:12px}
 </head>
 <body>
 <main>
-  <h1>加權指數訊號<button class="logout" id="openGemini" type="button" style="margin-right:14px">Gemini 視窗</button> <a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
+  <h1>加權指數訊號<a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
@@ -285,7 +285,6 @@ function openGeminiWindow() {
     if (msg) msg.textContent = "瀏覽器封鎖了彈出式視窗。請允許此網站開啟彈出式視窗，再點一次。";
   }
 }
-$("openGemini").addEventListener("click", openGeminiWindow);
 $("openGeminiSettings").addEventListener("click", openGeminiWindow);
 
 /* ---- 新聞資料：保留內建新聞呈現，提供複製到 Gemini ---- */
@@ -408,11 +407,18 @@ function startUSMarket() {
 
 function startQuote() {
   const tick = () => api("/api/quote").then(q => {
-    if (q.error) throw 0;
+    if (q.error) throw new Error(q.error);
     const c = q.change >= 0 ? "var(--up)" : "var(--down)";
+    const label = q.label || (q.market === "futures" ? "台指期近月" : "加權指數現貨");
+    const note = q.market === "futures"
+      ? `${esc(q.time)} 更新｜${esc(q.source || "資料可能延遲")}｜${esc(q.delay_note || "")}`
+      : `${esc(q.time)} 更新｜${esc(q.source || "資料可能延遲")}`;
     $("live").hidden = false;
-    $("live").innerHTML = `加權指數 <b>${q.last.toLocaleString()}</b> <span style="color:${c}">${q.change >= 0 ? "▲" : "▼"} ${Math.abs(q.change).toFixed(2)}（${q.pct.toFixed(2)}%）</span> <span class="note">${esc(q.time)} 更新，約有數分鐘延遲</span>`;
-  }).catch(() => { $("live").hidden = true; });
+    $("live").innerHTML = `${esc(label)} <b>${q.last.toLocaleString()}</b> <span style="color:${c}">${q.change >= 0 ? "▲" : "▼"} ${Math.abs(q.change).toFixed(2)}（${q.pct.toFixed(2)}%）</span> <span class="note">${note}</span>`;
+  }).catch(e => {
+    $("live").hidden = false;
+    $("live").textContent = e.message || "目前沒有可用的即時行情";
+  });
   tick(); setInterval(() => { if (!document.hidden) tick(); }, 30000);
 }
 const poll = () => api("/api/status").then(s => {
