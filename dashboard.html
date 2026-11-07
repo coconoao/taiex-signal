@@ -267,7 +267,9 @@ function renderDaily(d) {
   const taiwan = `加權指數：${ds.taiwan_index_source || "來源未確認"}；官方補入 ${Number(ds.taiwan_index_official_rows || 0)} 日。`;
   const yahoo = ds.yahoo_status === "ok"
     ? "Yahoo Finance 國際行情更新成功。"
-    : "Yahoo Finance 本次未成功更新；國際市場欄位沿用快取，請依各欄資料日期判斷新舊，不能視為即時行情。";
+    : ds.yahoo_status === "partial"
+      ? "Yahoo Finance 僅部分序列更新；其餘欄位依個別來源與資料日期判斷。"
+      : "Yahoo Finance 本次未成功更新；國際市場欄位沿用快取，請依各欄資料日期判斷新舊，不能視為即時行情。";
   $("dataQuality").textContent = `${taiwan} ${yahoo} ${items.join("；")}`;
   $("demo").hidden = !d.demo;
   const ml = d.missing_layers || [];
