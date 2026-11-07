@@ -95,10 +95,10 @@ def fetch_window(start_local, end_local):
             "source": str(article.get("domain") or article.get("sourcecountry") or "GDELT")[:160],
             "language": str(article.get("language") or "")[:20],
             "source_country": str(article.get("sourcecountry") or "")[:80],
-            "published": seen_at.isoformat(),
+            "seen_at_utc": seen_at.isoformat(),
             "link": link[:1000],
         })
-    normalized.sort(key=lambda x: x["published"])
+    normalized.sort(key=lambda x: x["seen_at_utc"])
     return normalized, len(articles) >= MAX_RECORDS
 
 
@@ -121,7 +121,7 @@ def score_articles(articles):
         "headline_count": count,
         "category_counts": categories,
         "unique_source_count": len(sources),
-        "published_time_coverage_pct": 100.0 if count else 0.0,
+        "seen_time_coverage_pct": 100.0 if count else 0.0,
         "original_link_coverage_pct": round(100 * sum(bool(a.get("link")) for a in articles) / count, 1) if count else 0.0,
         "positive_headline_count": pos,
         "negative_headline_count": neg,
@@ -259,7 +259,7 @@ def main():
         "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "source": "GDELT DOC 2.0",
         "attribution": "Data source: GDELT Project, https://www.gdeltproject.org/",
-        "coverage_note": "DOC 2.0 僅提供約三個月的滾動新聞搜尋範圍；非台灣全部媒體的完整新聞庫。",
+        "coverage_note": "DOC 2.0 僅提供約三個月的滾動新聞搜尋範圍；非台灣全部媒體的完整新聞庫。seen_at_utc 是 GDELT 首次觀測時間，不保證等於媒體原始發布時間。",
         "history_count": len(rows),
         "labeled_count": labeled,
         "fetched_this_run": fetched,
