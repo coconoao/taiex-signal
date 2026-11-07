@@ -76,6 +76,9 @@ details[open]>summary{margin-bottom:12px}
 <body>
 <main>
   <h1><img src="/brand-logo.svg" alt="" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:8px;filter:drop-shadow(0 0 7px #58cfff)">加權指數訊號<a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
+
+
+  <div id="tab-daily">
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="dataQuality">資料來源狀態載入中…</p>
@@ -86,8 +89,6 @@ details[open]>summary{margin-bottom:12px}
   <div class="banner" id="miss" hidden></div>
   <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><p id="usMarketSummary" class="note"></p><div class="usgrid" id="usMarketCards"></div><div class="charttools" aria-label="美股圖表操作"><button class="btn sm ghost" id="usZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="usZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="usPan" type="button">平移</button><button class="btn sm ghost" id="usZoom" type="button">框選縮放</button><button class="btn sm ghost" id="usReset" type="button">重設</button><button class="btn sm ghost" id="usRange1h" type="button">1 小時</button><button class="btn sm ghost" id="usRange3h" type="button">3 小時</button><button class="btn sm ghost" id="usRangeAll" type="button">全部</button></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
   <div class="banner" id="err" hidden>讀不到 signals.json。請用 python app.py 啟動，或用匯出的單一 HTML 檔、已部署的網站開啟（直接雙擊 dashboard.html 讀不到資料檔）。</div>
-
-  <div id="tab-daily">
     <section id="hero" hidden>
       <p class="sig" id="sig"></p>
       <div class="ruler" id="ruler"></div>
@@ -252,31 +253,8 @@ function drawCurve(c) {
 
 function renderDaily(d) {
   $("meta").textContent = `台股最近可用交易日：${d.asof}。休市或尚未取得新收盤資料時，沿用這個交易日的資料，不會把舊資料標成今天。`;
-  const ds = d.data_status || {}, series = ds.series || {};
-  const labels = {SOX:"費半",TSM:"TSM",VIX:"VIX",US10Y:"美國 10 年債",N225:"日經",KOSPI:"韓股",USDTWD:"美元／台幣"};
-  const items = Object.keys(labels).map(k => {
-    const x = series[k] || {};
-    return `${labels[k]}：${x.latest_date || "無資料"}（${x.source || "未知來源"}）`;
-  });
-  const taiwan = `加權指數：${ds.taiwan_index_source || "來源未確認"}；官方補入 ${Number(ds.taiwan_index_official_rows || 0)} 日。`;
-  const yahoo = ds.yahoo_status === "ok"
-    ? "Yahoo Finance 國際行情更新成功。"
-    : ds.yahoo_status === "partial"
-      ? "Yahoo Finance 僅部分序列更新；其餘欄位依個別來源與資料日期判斷。"
-      : "Yahoo Finance 本次未成功更新；國際市場欄位沿用快取，請依各欄資料日期判斷新舊，不能視為即時行情。";
-  $("dataQuality").textContent = `${taiwan} ${yahoo} ${items.join("；")}`;
-  const refs = ds.reference_data || {};
-  const refLabels = {VIX:"VIX",US10Y:"美國 10 年債",USDTWD:"美元／台幣",TSM:"TSM 還原收盤"};
-  const refItems = Object.entries(refs).map(([k,x]) =>
-    `${refLabels[k] || k}：${x.value} ${x.unit || ""}（${x.date}，${x.source}）`
-  );
-  $("referenceData").textContent = refItems.length
-    ? `獨立備援參考（僅供交叉核對，不直接替代模型欄位）：${refItems.join("；")}。各來源定義與發布時間可能不同。`
-    : "獨立備援參考資料本次未取得；請以各序列顯示的來源與日期為準。";
   $("demo").hidden = !d.demo;
-  const ml = d.missing_layers || [];
-  $("miss").hidden = !ml.length;
-  $("miss").textContent = ml.length ? `本次沒有取得這些資料來源：${ml.join("、")}。預測仍可使用，但少了這幾層訊號（來源可能擋了雲端 IP，或首次回補尚未完成）。` : "";
+  $("miss").hidden = true;
   const color = d.signal === "買進" ? "var(--up)" : d.signal === "觀望" ? "var(--hold)" : "var(--down)";
   $("sig").innerHTML = `<span style="color:${color}">${esc(d.signal)}</span><small>上漲機率 ${pct(d.prob_up)}</small>`;
   const s = d.thresholds.sell * 100, b = d.thresholds.buy * 100;
@@ -444,7 +422,7 @@ let lastSig = null, busy = false;
 function loadAll() {
   if (busy) return Promise.resolve();
   busy = true;
-  return Promise.all([loadDaily(), loadWeekly(), loadNews(), loadTaiwanDataStatus()]).then(() => {
+  return Promise.all([loadDaily(), loadWeekly(), loadNews()]).then(() => {
     const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
     $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
   }).finally(() => { busy = false; });
