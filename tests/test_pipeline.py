@@ -4,7 +4,7 @@ import types
 import unittest
 import urllib.error
 from email.message import Message
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 
@@ -113,12 +113,10 @@ class RetryTests(unittest.TestCase):
 
         first = FirstReadTimesOut(b"")
         second = io.BytesIO(b'{"ok": true}')
-        response1 = Mock()
-        response1.__enter__ = Mock(return_value=first)
-        response1.__exit__ = Mock(return_value=False)
-        response2 = Mock()
-        response2.__enter__ = Mock(return_value=second)
-        response2.__exit__ = Mock(return_value=False)
+        response1 = MagicMock()
+        response1.__enter__.return_value = first
+        response2 = MagicMock()
+        response2.__enter__.return_value = second
         with patch("pipeline.urllib.request.urlopen",
                    side_effect=[response1, response2]) as open_url:
             with patch("pipeline.time.sleep") as sleep:
