@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   backfill:
-    if: ${{ vars.ENABLE_DATA_REFRESH == 'true' }}
+    # Manual dispatch only; no scheduled runs.
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
