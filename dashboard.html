@@ -111,20 +111,12 @@ details[open]>summary{margin-bottom:12px}
   </div>
 
   <div id="tab-weekly" hidden>
-    <section><p class="sig" id="wsig">載入中…</p><p id="wexp"></p><p class="note" id="wacc"></p></section>
-    <section><h2>各層訊號推向哪一邊</h2><div id="wlayers"></div></section>
-    <section><h2>歷史上每種訊號之後 5 日的實際表現</h2>
-      <div style="overflow-x:auto"><table><thead><tr><th>訊號</th><th>樣本</th><th>勝率</th><th>平均</th><th>80% 區間</th></tr></thead><tbody id="wb"></tbody></table></div></section>
-    <section><h2>月級距歷史情境分布</h2>
-      <p class="note" id="horizonNote">以歷史不重疊交易日區間計算；這是回顧統計，不是未來預測。</p>
-      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>樣本數</th><th>歷史正報酬比例（95% 區間）</th><th>起點敏感度</th><th>平均</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
-      <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。主欄採固定起點的不重疊區間；括號為 Wilson 95% 近似區間。起點敏感度列出所有可能取樣起點下正報酬比例的最小至最大值，用來檢查切分方式影響；各起點彼此不獨立。樣本少時估計不穩定，均不代表未來發生機率。</p>
-    </section>
-    <section><h2>新聞情緒（一週）：內建規則與 AI 並排</h2><div id="newsW"></div></section>
-    <section><h2>政策事件追蹤</h2>
-      <p class="note">整理政府政策與相關公開訊息，保留來源、發布時間與原文連結。階段標籤僅依標題／摘要字詞初步分類，不代表法律效力判定；新聞彙整項目須交叉核對。此區不推斷市場漲跌方向。</p>
-      <p class="note" id="policyEventMeta">載入政策事件資料中…</p>
-      <div id="policyEvents"><p class="note">目前尚無政策事件資料。</p></div>
+    <section>
+      <h2>長線歷史統計</h2>
+      <p class="note" id="horizonNote">歷史正報酬比例與 95% 信賴區間；這是歷史統計，不是未來預測。</p>
+      <div id="longChart" class="chartbox" role="img" aria-label="1、3、6 個月歷史正報酬比例線圖"></div>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>樣本數</th><th>歷史正報酬比例</th><th>Wilson 95% 區間</th><th>平均報酬</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
+      <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。正報酬比例是歷史樣本中報酬大於零的占比；95% 區間反映估計不確定性。歷史統計不代表未來發生機率，也不是投資建議。</p>
     </section>
   </div>
 
@@ -156,7 +148,7 @@ details[open]>summary{margin-bottom:12px}
 
   <p class="note">研究用途，不構成投資建議。回測績效不代表未來，樣本外表現通常較差。新聞與 AI 分數目前只供參考，沒有納入上面的機率與回測。</p>
 </main>
-<nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">🗓<br>一週</button><button data-t="stock" hidden>🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
+<nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">📊<br>長線</button><button data-t="stock" hidden>🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
 <script>
 /* 獨立導覽控制器：即使主頁面其他功能發生 JavaScript 錯誤，底部導覽仍可切換。 */
 document.addEventListener("click", function(event) {
@@ -300,25 +292,39 @@ function renderDaily(d) {
   drawCurve(t.curve);
 }
 function renderWeekly(w) {
-  const c = w.bucket === "偏多" ? "var(--up)" : w.bucket === "偏空" ? "var(--down)" : "var(--hold)", e = w.expected;
-  $("wsig").innerHTML = `<span style="color:${c}">${esc(w.bucket)}</span><small>未來 5 個交易日上漲機率 ${pct(w.prob_up)}</small>`;
-  $("wexp").textContent = e ? `歷史上模型給出「${w.bucket}」時（${e.n} 個樣本），之後 5 日平均 ${e.avg}%，勝率 ${e.win}%，八成情況落在 ${e.p10}% 到 ${e.p90}%。` : "";
-  $("wacc").textContent = `方向命中率 ${w.direction_acc}%（${w.days} 個交易日；5 日區間互相重疊，實際可信度比數字看起來低）`;
-  const max = Math.max(...w.features.map(f => Math.abs(f.contrib)), 0.1);
-  $("wlayers").innerHTML = Object.entries(w.layers).map(([k, v]) => divRow(esc(k) + "層", v, max * 1.5)).join("");
-  $("wb").innerHTML = ["偏多", "中性", "偏空"].filter(k => w.buckets[k]).map(k => { const b = w.buckets[k];
-    return `<tr><td>${k}</td><td>${b.n}</td><td>${b.win}%</td><td>${b.avg}%</td><td>${b.p10}% ~ ${b.p90}%</td></tr>`; }).join("");
   const hh = w.horizon_history || {};
   const names = [["1m","約 1 個月"],["3m","約 3 個月"],["6m","約 6 個月"]];
+  const valid = names.map(([key,label]) => {
+    const h = hh[key];
+    return h && h.n ? {label, h} : null;
+  }).filter(Boolean);
   $("horizonRows").innerHTML = names.map(([key,label]) => {
     const h = hh[key];
     return h && h.n
-      ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}</td><td>${h.positive_rate}%（${(h.positive_rate_ci95 || [null,null]).join("%～")}%）</td><td>${h.phase_positive_rate_range ? h.phase_positive_rate_range[0] + "%～" + h.phase_positive_rate_range[1] + "%" : "—"}</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
+      ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}</td><td>${h.positive_rate}%</td><td>${(h.positive_rate_ci95 || [null,null]).join("%～")}%</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
       : `<tr><td>${label}</td><td colspan="6">歷史樣本不足</td></tr>`;
   }).join("");
-  $("horizonNote").textContent = `統計截至 ${w.asof}；採用歷史不重疊區間，僅描述過去分布，不是未來走勢預測。`;
+  $("horizonNote").textContent = `統計截至 ${w.asof}；呈現過去各期間正報酬比例，並非未來預測。`;
+  const el = $("longChart");
+  if (!valid.length) { el.textContent = "目前沒有足夠的歷史資料可繪製長線統計圖。"; return; }
+  const x = valid.map(v => v.label), y = valid.map(v => Number(v.h.positive_rate));
+  const low = valid.map(v => Math.max(0, Number(v.h.positive_rate) - Number((v.h.positive_rate_ci95 || [v.h.positive_rate,v.h.positive_rate])[0])));
+  const high = valid.map(v => Math.max(0, Number((v.h.positive_rate_ci95 || [v.h.positive_rate,v.h.positive_rate])[1]) - Number(v.h.positive_rate)));
+  if (window.Plotly) {
+    Plotly.react(el, [{x,y,type:"scatter",mode:"lines+markers",name:"歷史正報酬比例",
+      line:{color:getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),width:3},
+      marker:{size:9},error_y:{type:"data",symmetric:false,array:high,arrayminus:low,visible:true},
+      hovertemplate:"%{x}<br>歷史正報酬比例：%{y:.1f}%<extra></extra>"}],
+      {margin:{l:48,r:18,t:20,b:48},paper_bgcolor:"transparent",plot_bgcolor:"transparent",
+       font:{color:getComputedStyle(document.body).color},xaxis:{title:"歷史期間",showgrid:false},
+       yaxis:{title:"正報酬樣本比例（%）",range:[0,100],ticksuffix:"%",
+         gridcolor:getComputedStyle(document.documentElement).getPropertyValue("--line").trim()},showlegend:false},
+      {responsive:true,displayModeBar:false,displaylogo:false});
+  } else {
+    const pts=y.map((v,i)=>`${60+i*260},${180-v*1.5}`).join(" ");
+    el.innerHTML=`<svg viewBox="0 0 600 220" role="img" aria-label="歷史正報酬比例線圖"><polyline fill="none" stroke="var(--accent)" stroke-width="3" points="${pts}"/>${y.map((v,i)=>`<circle cx="${60+i*260}" cy="${180-v*1.5}" r="5" fill="var(--accent)"/><text x="${60+i*260}" y="205" text-anchor="middle" fill="currentColor" font-size="12">${x[i]}</text>`).join("")}</svg>`;
+  }
 }
-
 /* ---- 使用者自己的 Gemini 登入視窗 ---- */
 function openGeminiWindow() {
   const width = Math.min(1120, Math.max(420, (window.screen && window.screen.availWidth || 1200) - 80));
