@@ -1062,7 +1062,7 @@ def update_news_research_outcomes(series):
             tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as stream:
                 for row in rows:
-                    stream.write(json.dumps(row, ensure_ascii=False) + "\\n")
+                    stream.write(json.dumps(row, ensure_ascii=False) + "\n")
             os.replace(tmp, path)
         latest = rows[-1] if rows else None
         summary = {
