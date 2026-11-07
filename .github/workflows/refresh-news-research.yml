@@ -28,7 +28,7 @@ jobs:
       - name: Restore persisted market and news data
         run: python storage.py restore
       - name: Collect daily news snapshot
-        run: python news.py
+        run: python news_snapshot.py
       - name: Label completed TAIEX sessions and update research summary
         run: python news_research_maintenance.py
       - name: Persist news research
