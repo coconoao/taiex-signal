@@ -23,7 +23,7 @@ h2{font-size:1rem;margin:0 0 12px}
 .meta{color:var(--mute);font-size:.875rem;margin:2px 0 4px}
 .live{font-size:.9375rem;margin:6px 0 4px}
 .banner{background:var(--panel);border:1px solid var(--hold);border-radius:6px;padding:8px 12px;margin-bottom:16px;font-size:.875rem}
-section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px;margin-bottom:16px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 3px 14px rgba(20,32,43,.045)}
 .sig{font-size:2.5rem;font-weight:700;line-height:1.2;margin:0}
 .sig small{font-size:1rem;font-weight:400;color:var(--mute);margin-left:8px}
 .ruler{position:relative;height:14px;margin:28px 0 6px;border-radius:7px;display:flex}
@@ -43,7 +43,8 @@ dd small{font-size:.8125rem;font-weight:400;color:var(--mute)}
 .usitem{border:1px solid var(--line);border-radius:6px;padding:10px;min-width:0}
 .usitem b{display:block;font-size:1.05rem;overflow-wrap:anywhere}
 .usitem small{color:var(--mute)}
-.chartbox{width:100%;min-height:300px}
+.chartbox{width:100%;min-height:340px;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden;padding:6px}
+@media(max-width:520px){.chartbox{min-height:290px;padding:2px}.charttools{align-items:flex-start}.charttools .note{flex-basis:100%}}
 .charttools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
 svg{width:100%;height:auto;display:block}
 .legend{font-size:.8125rem;color:var(--mute)}
@@ -156,22 +157,24 @@ function drawCurve(c) {
   const el = $("curve");
   if (window.Plotly) {
     Plotly.react(el, [
-      {x:c.dates,y:c.strategy,type:"scatter",mode:"lines",name:"模型歷史曲線",line:{width:2}},
-      {x:c.dates,y:c.buyhold,type:"scatter",mode:"lines",name:"市場基準曲線",line:{width:2}}
+      {x:c.dates,y:c.strategy,type:"scatter",mode:"lines",name:"依訊號策略",line:{color:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),width:3},hovertemplate:'%{x|%Y-%m-%d}<br>策略：%{y:.3f}<extra></extra>'},
+      {x:c.dates,y:c.buyhold,type:"scatter",mode:"lines",name:"買進持有基準",line:{color:getComputedStyle(document.documentElement).getPropertyValue('--hold').trim(),width:2,dash:'dot'},hovertemplate:'%{x|%Y-%m-%d}<br>基準：%{y:.3f}<extra></extra>'}
     ], {
-      margin:{l:48,r:18,t:18,b:55}, autosize:true, hovermode:"x unified",
-      dragmode:"zoom", paper_bgcolor:"transparent",plot_bgcolor:"transparent",
-      font:{color:getComputedStyle(document.body).color},
-      xaxis:{type:"date",rangeslider:{visible:true},rangeselector:{buttons:[
+      margin:{l:58,r:18,t:22,b:76}, autosize:true, hovermode:"x unified",
+      dragmode:"pan", paper_bgcolor:"transparent",plot_bgcolor:"transparent",
+      font:{color:getComputedStyle(document.body).color,family:'-apple-system,BlinkMacSystemFont,"PingFang TC",sans-serif',size:12},
+      hoverlabel:{bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--panel').trim(),font:{color:getComputedStyle(document.body).color},bordercolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim()},
+      xaxis:{type:"date",showgrid:false,showline:true,linecolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),tickfont:{size:11},rangeslider:{visible:true,thickness:0.08,bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),bordercolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim()},rangeselector:{bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),activecolor:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),font:{color:getComputedStyle(document.body).color,size:10},buttons:[
         {count:1,label:"1月",step:"month",stepmode:"backward"},
         {count:3,label:"3月",step:"month",stepmode:"backward"},
         {count:6,label:"6月",step:"month",stepmode:"backward"},
         {count:1,label:"1年",step:"year",stepmode:"backward"},
         {step:"all",label:"全部"}]}},
-      yaxis:{title:"累積資產（起始值 = 1）",fixedrange:false},
-      legend:{orientation:"h",y:-0.28}
+      yaxis:{title:{text:"累積資產（起始值 = 1）",font:{size:11}},fixedrange:false,gridcolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),zerolinecolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),tickformat:'.2f'},
+      legend:{orientation:"h",y:-0.34,x:0,font:{size:11}},
+      hoverdistance:100,spikedistance:-1
     }, {responsive:true,scrollZoom:true,displaylogo:false,
-        modeBarButtonsToRemove:["lasso2d","select2d"]});
+        modeBarButtonsToRemove:["lasso2d","select2d","autoScale2d","hoverCompareCartesian","hoverClosestCartesian"]});
     $("curveReset").onclick = () => Plotly.relayout(el, { "xaxis.autorange":true, "yaxis.autorange":true });
     return;
   }
@@ -403,13 +406,15 @@ function renderUSMarket(data) {
   if (data.chart && data.chart.points && data.chart.points.length && window.Plotly) {
     Plotly.react("usMarketChart", [{
       x:data.chart.points.map(p=>p.time), y:data.chart.points.map(p=>p.value),
-      type:"scatter",mode:"lines",name:"S&P 500",line:{width:2}
+      type:"scatter",mode:"lines",name:"S&P 500",line:{color:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),width:3},
+      hovertemplate:'%{x|%H:%M}<br>S&P 500：%{y:,.2f}<extra></extra>'
     }], {
-      title:{text:"S&P 500｜最近可取得的盤中走勢",font:{size:14}},
-      margin:{l:50,r:15,t:40,b:50},autosize:true,hovermode:"x unified",
+      title:{text:"S&P 500｜最近可取得的盤中走勢",font:{size:14},x:0.03,xanchor:'left'},
+      margin:{l:62,r:18,t:48,b:62},autosize:true,hovermode:"x unified",
       paper_bgcolor:"transparent",plot_bgcolor:"transparent",
-      font:{color:getComputedStyle(document.body).color},
-      xaxis:{type:"date",rangeslider:{visible:true}},yaxis:{title:"指數"}
+      font:{color:getComputedStyle(document.body).color,size:12},
+      hoverlabel:{bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--panel').trim(),font:{color:getComputedStyle(document.body).color}},
+      xaxis:{type:"date",showgrid:false,tickfont:{size:11},rangeslider:{visible:true,thickness:0.08,bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()}},yaxis:{title:{text:"指數點位",font:{size:11}},gridcolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),tickformat:',.0f'}
     },{responsive:true,scrollZoom:true,displaylogo:false});
   } else if (!window.Plotly) {
     $("usMarketChart").textContent = "互動圖表載入失敗；上方仍顯示最新可取得的行情數值。";
