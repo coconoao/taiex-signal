@@ -73,7 +73,7 @@ details[open]>summary{margin-bottom:12px}
 </head>
 <body>
 <main>
-  <h1>加權指數訊號<a class="logout" href="/chat" style="margin-right:14px">AI 聊天</a> <a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
+  <h1>加權指數訊號<a class="logout" href="https://gemini.google.com/app" target="_blank" rel="noopener noreferrer" style="margin-right:14px">Gemini</a> <a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
@@ -120,12 +120,11 @@ details[open]>summary{margin-bottom:12px}
   </div>
 
   <div id="tab-settings" hidden>
-    <section><h2>用你自己的 AI 金鑰分析新聞</h2>
-      <p>「內建規則」不需要金鑰，永遠可用。想讓 Claude、ChatGPT、Gemini 也一起分析，請填入 API 金鑰，並從模型選單選擇模型。模型清單會提供常用選項；也可以選「自訂模型 ID」自行輸入。金鑰只保存在這台裝置的瀏覽器，分析時透過登入後的 HTTPS API 即時轉送，不會寫入伺服器資料檔或應用程式日誌。請只在可信任裝置上儲存金鑰。</p>
-      <div id="keys"></div>
-      <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="remember" style="width:auto;margin:0">記住在這個瀏覽器（共用裝置請不要勾選）</label>
-      <p><button class="btn" id="saveKeys">儲存</button> <button class="btn" id="runAI">用我的金鑰分析</button> <button class="btn ghost" id="clearAll">清除全部</button></p>
-      <p class="note" id="aiMsg"></p></section>
+    <section><h2>Gemini 新聞資料</h2>
+      <p>使用你自己的 Google／Gemini 帳號登入官方聊天室。網站不會要求你輸入 API Key，也不會代替你呼叫 Gemini。</p>
+      <p><button class="btn" id="copyNews">複製目前新聞資料</button> <a class="btn" href="https://gemini.google.com/app" target="_blank" rel="noopener noreferrer">開啟 Gemini 聊天室</a></p>
+      <p class="note" id="geminiMsg">先更新新聞，再複製資料；切換到 Gemini 後貼上即可。新聞資料只會複製到你的剪貼簿。</p>
+    </section>
     <section id="srv" hidden><h2>伺服器</h2>
       <p class="note" id="autoMsg"></p>
       <p><button class="btn" data-run="all">立即更新行情與新聞</button></p>
@@ -252,32 +251,19 @@ function renderWeekly(w) {
     return `<tr><td>${k}</td><td>${b.n}</td><td>${b.win}%</td><td>${b.avg}%</td><td>${b.p10}% ~ ${b.p90}%</td></tr>`; }).join("");
 }
 
-/* ---- 新聞：伺服器產生的結果 + 使用者自己的金鑰分析結果（存在自己的瀏覽器） ---- */
+/* ---- 新聞資料：保留內建新聞呈現，提供複製到 Gemini ---- */
 let NEWS = null, WK = null;
-const loadAI = () => { try { return JSON.parse(localStorage.getItem("ai") || "null"); } catch { return null; } };
-const saveAI = v => { try { localStorage.setItem("ai", JSON.stringify(v)); } catch {} };
 function mergedNews() {
   if (!NEWS) return null;
-  const n = JSON.parse(JSON.stringify(NEWS)), ai = loadAI();
-  if (ai && ai.asof === n.asof) Object.assign(n.models, ai.models);
-  const ok = Object.entries(n.models).filter(([, r]) => !r.error), S = {"看多": 1, "看空": -1, "中性": 0}, avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const n = JSON.parse(JSON.stringify(NEWS));
+  const ok = Object.entries(n.models || {}).filter(([, r]) => !r.error);
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
   n.agg = {};
-  ["next_day", "next_week"].forEach(k => { const v = ok.map(([, r]) => r[k]); n.agg[k] = v.length ? {mean: +avg(v).toFixed(2), spread: +(Math.max(...v) - Math.min(...v)).toFixed(2), n: v.length} : {mean: 0, spread: 0, n: 0}; });
-  const rows = {};
-  ok.forEach(([m, r]) => (r.analysts || []).forEach(a => { if (a.stance in S) { const x = rows[a.name] = rows[a.name] || {name: a.name, id: a.id, stances: {}}; x.stances[m] = a.stance; } }));
-  const vals = Object.values(rows).map(r => avg(Object.values(r.stances).map(t => S[t])));
-  n.analyst = {rows: Object.values(rows), score: vals.length ? +avg(vals).toFixed(2) : null};
-  n.missing = ["Claude", "ChatGPT", "Gemini"].filter(m => !(m in n.models));
+  ["next_day", "next_week"].forEach(k => {
+    const v = ok.map(([, r]) => r[k]).filter(Number.isFinite);
+    n.agg[k] = v.length ? {mean: +avg(v).toFixed(2), spread: +(Math.max(...v) - Math.min(...v)).toFixed(2), n: v.length} : {mean: 0, spread: 0, n: 0};
+  });
   return n;
-}
-function analystHtml(n, title) {
-  const a = n.analyst, h = '<h2 style="margin-top:16px">機構觀點（近 7 日標題，僅計明確表態者）</h2>';
-  if (!a || !a.rows.length) return h + '<p class="note">這幾天的標題裡，沒有機構明確表達台股方向。</p>';
-  const col = s => s === "看多" ? "var(--up)" : s === "看空" ? "var(--down)" : "var(--hold)";
-  const ms = Object.keys(n.models).filter(m => !n.models[m].error);
-  return h + `<div style="overflow-x:auto"><table><thead><tr><th>機構</th>${ms.map(m => `<th>${esc(m)}</th>`).join("")}<th style="text-align:left">依據標題</th></tr></thead><tbody>` +
-    a.rows.map(r => `<tr><td>${esc(r.name)}</td>${ms.map(m => `<td style="color:${col(r.stances[m])}">${esc(r.stances[m] || "—")}</td>`).join("")}<td style="text-align:left">${esc(title(r.id))}</td></tr>`).join("") +
-    `</tbody></table></div><p class="note">平均 ${a.score == null ? "—" : sc(a.score)}。目前每家權重相同；累積紀錄後才能依命中率加權。</p>`;
 }
 function safeNewsHref(value) {
   try { const u = new URL(value, location.href); return (u.protocol === "https:" || u.protocol === "http:") ? u.href : ""; }
@@ -285,153 +271,37 @@ function safeNewsHref(value) {
 }
 function newsCard(n, key, el) {
   if (!n) { el.innerHTML = '<p class="note">尚無新聞分析（news.json）。</p>'; return; }
-  const title = id => (n.headlines.find(h => h.id === id) || {}).title || "";
-  const cards = Object.entries(n.models).map(([name, r]) => r.error
-    ? `<div class="mc"><b>${esc(name)}</b><p class="note">失敗：${esc(r.error)}</p></div>`
-    : `<div class="mc"><b>${esc(name)}</b><div class="big" style="color:${tone(r[key])}">${sc(r[key])}</div><div class="note">信心 ${Math.round(r.confidence * 100)}%</div><p>${esc(r.summary)}</p>
-       <p class="note">${(r.drivers || []).map(d => {
-         const h = n.headlines.find(x => x.id === d.id) || {};
-         const href = safeNewsHref(h.link);
-         return esc(d.impact) + "：" + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title || title(d.id)) + '</a>' : esc(h.title || title(d.id)));
-       }).join("<br>")}</p></div>`).join("");
-  const a = n.agg[key];
-  el.innerHTML = (n.demo ? '<div class="banner">以下為示範新聞資料，不是真實新聞。</div>' : "") + `<div class="mcs">${cards}</div>` +
-    (a.n ? `<p>平均 <b>${sc(a.mean)}</b>（${a.n} 個來源）${a.spread > 0.6 ? "，<b>來源之間意見分歧大，請降低採信程度</b>" : ""}</p>` : "") +
-    (n.missing.length ? `<p class="note">尚未分析：${n.missing.join("、")}。到「設定」填入你自己的金鑰後按「用我的金鑰分析」。分數 -1 極偏空、+1 極偏多。</p>` : '<p class="note">分數 -1 極偏空、+1 極偏多。</p>') + `<h3>新聞原文（市場 12 則＋機構 5 則）</h3><ul>${[...(n.headlines || []).filter(h => h.kind === "market").slice(0,12), ...(n.headlines || []).filter(h => h.kind === "analyst").slice(0,5)].map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + '</small></li>'; }).join("")}</ul>` + analystHtml(n, title);
+  const cards = Object.entries(n.models || {}).map(([name, r]) => r.error
+    ? `<div class="mc"><b>${esc(name)}</b><p class="note">暫無資料</p></div>`
+    : `<div class="mc"><b>${esc(name)}</b><div class="big" style="color:${tone(r[key])}">${sc(r[key])}</div><div class="note">信心 ${Math.round(r.confidence * 100)}%</div><p>${esc(r.summary)}</p></div>`).join("");
+  const headlines = (n.headlines || []).filter(h => h.kind === "market").slice(0,12)
+    .concat((n.headlines || []).filter(h => h.kind === "analyst").slice(0,5));
+  el.innerHTML = (n.demo ? '<div class="banner">以下為示範新聞資料，不是真實新聞。</div>' : "") +
+    `<div class="mcs">${cards}</div><h3>新聞原文（市場 12 則＋機構 5 則）</h3><ul>` +
+    headlines.map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + '</small></li>'; }).join("") + "</ul>";
 }
 function renderSummary() {
   const n = mergedNews(), p = [];
   if (WK) p.push(`未來一週：<b>${esc(WK.bucket)}</b>（${pct(WK.prob_up)}）`);
-  if (n && n.agg.next_day.n) p.push(`新聞平均 <b>${sc(n.agg.next_day.mean)}</b>（${n.agg.next_day.n} 個來源）`);
+  if (n && n.agg.next_day.n) p.push(`新聞資料已載入（${(n.headlines || []).length} 則）`);
   $("sumline").innerHTML = p.join("　｜　");
 }
 function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); newsCard(n, "next_week", $("newsW")); renderSummary(); }
-
-/* ---- 載入（可重複執行）與自動更新 ---- */
-const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
-  .catch(() => { $("err").hidden = false; $("meta").textContent = ""; });
-const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); renderSummary(); }).catch(() => { $("wsig").textContent = "尚無 weekly.json"; });
-const loadNews = () => getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }).then(renderNews);
-let lastSig = null, busy = false;
-function loadAll() {
-  if (busy) return Promise.resolve();
-  busy = true;
-  return Promise.all([loadDaily(), loadWeekly(), loadNews()]).then(() => {
-    const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
-    $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
-  }).finally(() => { busy = false; });
-}
-$("reload").onclick = loadAll;
-if (SNAP) $("reload").hidden = true;
-else {
-  setInterval(() => { if (!document.hidden) loadAll(); }, 60000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) loadAll(); });
-}
-
-document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
-  ["daily", "weekly", "stock", "settings"].forEach(t => $("tab-" + t).hidden = b.dataset.t !== t);
-});
-
-/* ---- 使用者自己的 AI 金鑰：只存在自己的瀏覽器，由瀏覽器直接呼叫各家 API ---- */
-const KEY_FIELDS = [["claude", "Claude API 金鑰"], ["openai", "OpenAI API 金鑰"], ["gemini", "Gemini API 金鑰"]];
-const MODEL_OPTIONS = {
-  claudeModel: [
-    ["claude-sonnet-5-5", "Claude Sonnet 5.5（均衡）"],
-    ["claude-opus-5-5", "Claude Opus 5.5（高能力）"],
-    ["claude-haiku-5-5", "Claude Haiku 5.5（快速）"],
-    ["claude-sonnet-4-6", "Claude Sonnet 4.6"],
-    ["claude-haiku-4-5", "Claude Haiku 4.5"]
-  ],
-  openaiModel: [
-    ["gpt-6-luna", "GPT-6 Luna"],
-    ["gpt-6.1-sol", "GPT-6.1 Sol"],
-    ["gpt-6-astra", "GPT-6 Astra"],
-    ["gpt-5.5", "GPT-5.5"],
-    ["gpt-5.4-mini", "GPT-5.4 mini"]
-  ],
-  geminiModel: [
-    ["gemini-3.8-flash", "Gemini 3.8 Flash"],
-    ["gemini-3.1-pro-preview", "Gemini 3.1 Pro（預覽）"],
-    ["gemini-3.7-flash", "Gemini 3.7 Flash"],
-    ["gemini-3.5-flash", "Gemini 3.5 Flash"],
-    ["gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"]
-  ]
+$("copyNews").onclick = async () => {
+  const msg = $("geminiMsg");
+  if (!NEWS || !Array.isArray(NEWS.headlines) || !NEWS.headlines.length) {
+    msg.textContent = "目前沒有新聞資料，請先更新新聞後再試。"; return;
+  }
+  if (NEWS.demo) {
+    msg.textContent = "目前是示範新聞，請先更新成真實新聞資料。"; return;
+  }
+  const items = NEWS.headlines.slice(0, 40).map((h, i) =>
+    `${i + 1}. ${h.title || "（無標題）"}\n來源：${h.source || h.tag || "未提供"}\n時間：${h.published || "未提供"}\n連結：${safeNewsHref(h.link) || "未提供"}`
+  ).join("\n\n");
+  const payload = "請用繁體中文整理以下新聞：先摘要各則新聞，再歸納共同主題、可能存在的不同觀點與資料限制。請區分新聞明確陳述與推論，不要提供股票買賣建議、價格預測或投資策略。\n\n" + items;
+  try { await navigator.clipboard.writeText(payload); msg.textContent = "已複製 " + NEWS.headlines.length + " 則新聞資料。請開啟 Gemini 聊天室並貼上。"; }
+  catch { msg.textContent = "瀏覽器未允許存取剪貼簿，請確認網站使用 HTTPS，或重新點擊複製。"; }
 };
-const MODEL_LABELS = {claudeModel:"Claude 模型",openaiModel:"OpenAI 模型",geminiModel:"Gemini 模型"};
-const mem = {}, rd = s => { try { return s.getItem("keys"); } catch { return null; } };
-function getKeys() { try { return JSON.parse(rd(localStorage) || rd(sessionStorage) || mem.keys || "{}"); } catch { return {}; } }
-function setKeys(k, remember) {
-  const s = JSON.stringify(k); mem.keys = s;
-  try { localStorage.removeItem("keys"); sessionStorage.removeItem("keys"); (remember ? localStorage : sessionStorage).setItem("keys", s); } catch {}
-}
-function renderKeyForm() {
-  const k = getKeys();
-  const keyHtml = KEY_FIELDS.map(([f, label]) =>
-    `<label class="f">${label}<input id="k_${f}" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${k[f] ? "已設定（留空＝不變）" : "尚未設定"}"></label>`
-  ).join("");
-  const modelHtml = Object.entries(MODEL_OPTIONS).map(([f, options]) => {
-    const current = k[f] || options[0][0];
-    const known = options.some(([id]) => id === current);
-    const selected = known ? current : "__custom__";
-    const choices = options.map(([id, label]) => `<option value="${id}" ${id === selected ? "selected" : ""}>${label}</option>`).join("");
-    return `<label class="f">${MODEL_LABELS[f]}<select id="k_${f}" style="display:block;width:100%;margin-top:4px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)"><option value="${options[0][0]}" ${selected === options[0][0] ? "selected" : ""}>${options[0][1]}（預設）</option>${options.slice(1).map(([id,label]) => `<option value="${id}" ${id === selected ? "selected" : ""}>${label}</option>`).join("")}<option value="__custom__" ${selected === "__custom__" ? "selected" : ""}>自訂模型 ID…</option></select><input id="k_${f}_custom" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="輸入模型 ID" value="${known ? "" : esc(current)}" style="display:${known ? "none" : "block"};width:100%;margin-top:6px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)"></label>`;
-  }).join("");
-  $("keys").innerHTML = keyHtml + modelHtml;
-  Object.keys(MODEL_OPTIONS).forEach(f => {
-    $("k_" + f).onchange = () => {
-      $("k_" + f + "_custom").style.display = $("k_" + f).value === "__custom__" ? "block" : "none";
-    };
-  });
-  $("remember").checked = rd(localStorage) !== null;
-}
-renderKeyForm();
-$("saveKeys").onclick = () => {
-  const k = getKeys();
-  KEY_FIELDS.forEach(([f]) => { const v = $("k_" + f).value.trim(); if (v === "-") delete k[f]; else if (v) k[f] = v; });
-  Object.keys(MODEL_OPTIONS).forEach(f => {
-    const selected = $("k_" + f).value;
-    const v = selected === "__custom__" ? $("k_" + f + "_custom").value.trim() : selected;
-    if (v === "-") delete k[f]; else if (v) k[f] = v; else delete k[f];
-  });
-  setKeys(k, $("remember").checked); renderKeyForm(); $("aiMsg").textContent = "已儲存。按「用我的金鑰分析」開始。";
-};
-$("clearAll").onclick = () => { setKeys({}, false); saveAI(null); try { localStorage.removeItem("keys"); } catch {} renderKeyForm(); renderNews(); $("aiMsg").textContent = "已清除金鑰與分析結果。"; };
-
-const J = r => r.json().then(j => r.ok ? j : Promise.reject(new Error((j.error && (j.error.message || j.error)) || r.status)));
-const post = (url, headers, body) => fetch(url, {
-  method: "POST", credentials: "same-origin", cache: "no-store",
-  headers: {"content-type": "application/json", "X-Requested-With": "dash", ...headers},
-  body: JSON.stringify(body)
-}).then(J);
-const CALLS = {
-  Claude: k => k.claude && (p => post("/api/ai", {}, {provider: "Claude", key: k.claude, model: k.claudeModel || "claude-sonnet-5-5", prompt: p}).then(r => r.text)),
-  ChatGPT: k => k.openai && (p => post("/api/ai", {}, {provider: "ChatGPT", key: k.openai, model: k.openaiModel || "gpt-6-luna", prompt: p}).then(r => r.text)),
-  Gemini: k => k.gemini && (p => post("/api/ai", {}, {provider: "Gemini", key: k.gemini, model: k.geminiModel || "gemini-3.8-flash", prompt: p}).then(r => r.text))
-};
-const clip = x => Math.round(Math.max(-1, Math.min(1, +x)) * 100) / 100;
-function parseAI(t) {
-  const d = JSON.parse(t.match(/\{[\s\S]*\}/)[0]);
-  return {next_day: clip(d.next_day), next_week: clip(d.next_week), confidence: Math.min(1, Math.abs(+d.confidence || 0)), drivers: (d.drivers || []).slice(0, 4),
-          summary: String(d.summary || ""), analysts: (d.analysts || []).filter(a => a && typeof a === "object").slice(0, 15)};
-}
-$("runAI").onclick = async () => {
-  if (!NEWS || !NEWS.prompt) { $("aiMsg").textContent = "尚無可分析的新聞資料；請先更新新聞。"; return; }
-  if (NEWS.demo) { $("aiMsg").textContent = "目前載入的是示範新聞，不會送交 AI 分析。請先更新真實新聞資料。"; return; }
-  const k = getKeys(), jobs = Object.entries(CALLS).map(([m, f]) => [m, f(k)]).filter(([, f]) => f);
-  if (!jobs.length) { $("aiMsg").textContent = "請先填入至少一組 AI API 金鑰。"; return; }
-  $("aiMsg").textContent = "分析中…"; $("runAI").disabled = true;
-  const res = {};
-  await Promise.all(jobs.map(([m, f]) => f(NEWS.prompt).then(t => { res[m] = parseAI(t); })
-    .catch(e => {
-      const message = String(e.message || e);
-      res[m] = {error: message.replace(/Failed to fetch|Load failed|NetworkError/i,
-        "無法連接網站 AI 服務；請確認網路後重試")};
-    })));
-  saveAI({asof: NEWS.asof, models: res}); renderNews(); $("runAI").disabled = false;
-  $("aiMsg").textContent = "完成：" + Object.entries(res).map(([m, r]) => m + (r.error ? " 失敗：" + r.error : " 成功")).join("、");
-};
-
 /* ---- 伺服器功能（用 python app.py 啟動時才有）：報價、個股、手動更新、匯出 ---- */
 function renderUSMarket(data) {
   $("usMarketMeta").textContent = `${data.stale ? "⚠ 最後成功快取（非最新） · " : ""}來源：${data.source} · ${data.interval} 區間 · 更新時間 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
