@@ -477,6 +477,22 @@ def call_ai_provider(provider, api_key, model, prompt):
             raise AIProviderError(
                 provider, e.code, f"{provider} API 回應 {e.code}{retry_note}: {detail}"
             )
+        except (TimeoutError, OSError, urllib.error.URLError) as e:
+            if provider == "Gemini" and attempt < max_retries:
+                delay = min(8.0, (2 ** attempt) + random.uniform(0.1, 0.5))
+                print(
+                    f"[api-ai] provider=Gemini retry={attempt + 1}/{max_retries} "
+                    f"network_error={type(e).__name__} wait={delay:.1f}s",
+                    flush=True
+                )
+                time.sleep(delay)
+                continue
+            if provider == "Gemini":
+                raise AIProviderError(
+                    provider, 502,
+                    "Gemini 連線逾時或網路暫時無法連線（已完成自動重試），請稍後再試。"
+                ) from e
+            raise
     if result is None:
         raise RuntimeError(f"{provider} API 沒有回傳結果")
     if provider == "Claude":
