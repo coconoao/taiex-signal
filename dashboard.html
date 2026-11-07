@@ -47,6 +47,20 @@ dd small{font-size:.8125rem;font-weight:400;color:var(--mute)}
 .usitem small{color:var(--mute)}
 .chartbox{width:100%;min-height:340px;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden;padding:6px}
 @media(max-width:520px){.chartbox{min-height:290px;padding:2px}.charttools{align-items:flex-start}.charttools .note{flex-basis:100%}}
+.horizon-table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media(max-width:600px){
+  .horizon-table-wrap{overflow:visible}
+  table.horizon-table,table.horizon-table tbody{display:block;width:100%}
+  table.horizon-table thead{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  table.horizon-table tbody{display:grid;gap:10px}
+  table.horizon-table tr{display:block;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--panel)}
+  table.horizon-table td,table.horizon-table td:first-child{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;text-align:right;padding:7px 0;border-bottom:1px solid var(--line);font-size:.875rem;min-width:0}
+  table.horizon-table td:last-child{border-bottom:0}
+  table.horizon-table td::before{content:attr(data-label);color:var(--mute);text-align:left;flex:0 0 42%;font-size:.8125rem}
+  table.horizon-table td:first-child{font-weight:700;font-size:1rem}
+  table.horizon-table td:first-child::before{font-weight:400;font-size:.8125rem}
+  table.horizon-table td[colspan]::before{content:none}
+}
 .charttools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;align-items:center}.charttools .btn{min-height:36px;touch-action:manipulation}.charttools .btn.active{background:var(--accent);color:var(--panel);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}.modebar-container,.modebar{display:none!important;visibility:hidden!important;pointer-events:none!important}@media(max-width:520px){.charttools{gap:5px}.charttools .btn{padding:5px 9px;min-height:38px}.chartbox .modebar{transform:scale(.9);transform-origin:top right}}
 svg{width:100%;height:auto;display:block}
 .legend{font-size:.8125rem;color:var(--mute)}
@@ -124,7 +138,7 @@ details[open]>summary{margin-bottom:12px}
       <h2>長線歷史統計</h2>
       <p class="note" id="horizonNote">比較不同持有期間的歷史正報酬比例；點與橫線呈現 Wilson 95% 參考區間，不是未來預測。</p>
       <div id="longChart" class="chartbox" role="img" aria-label="1、3、6 個月歷史正報酬比例點區間圖"></div>
-      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>不重疊樣本／逐日觀察</th><th>歷史正報酬比例（不重疊／逐日）</th><th>不重疊樣本 Wilson 95% 參考區間</th><th>平均報酬</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
+      <div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>期間</th><th>不重疊樣本／逐日觀察</th><th>歷史正報酬比例（不重疊／逐日）</th><th>不重疊樣本 Wilson 95% 參考區間</th><th>平均報酬</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
       <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。每格依序顯示「不重疊樣本／逐日重疊觀察」；正報酬比例亦依此順序。逐日觀察數較多，但相鄰期間高度重疊、彼此相關，不可視為同等數量的獨立樣本；Wilson 95% 參考區間只用不重疊樣本計算，但未校正時間序列相依性，因此不應視為精確的不確定性界線。歷史統計不代表未來發生機率。</p>
     </section>
   </div>
@@ -292,8 +306,8 @@ function renderWeekly(w) {
   $("horizonRows").innerHTML = names.map(([key,label]) => {
     const h = hh[key];
     return h && h.n
-      ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}／${h.overlap_n ?? "—"}</td><td>${h.positive_rate}%／${h.overlap_positive_rate ?? "—"}%</td><td>${(h.positive_rate_ci95 || [null,null]).join("%～")}%</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
-      : `<tr><td>${label}</td><td colspan="6">歷史樣本不足</td></tr>`;
+      ? `<tr><td data-label="期間">${label}（${h.days} 日）</td><td data-label="不重疊樣本／逐日觀察">${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}／${h.overlap_n ?? "—"}</td><td data-label="歷史正報酬比例（不重疊／逐日）">${h.positive_rate}%／${h.overlap_positive_rate ?? "—"}%</td><td data-label="不重疊樣本 Wilson 95% 參考區間">${(h.positive_rate_ci95 || [null,null]).join("%～")}%</td><td data-label="平均報酬">${h.mean}%</td><td data-label="中位數">${h.median}%</td><td data-label="歷史 10%～90%">${h.p10}% ～ ${h.p90}%</td></tr>`
+      : `<tr><td data-label="期間">${label}</td><td colspan="6">歷史樣本不足</td></tr>`;
   }).join("");
   $("horizonNote").textContent = `統計截至 ${w.asof}；點與橫線為不重疊樣本的 Wilson 95% 參考區間，未校正時間序列相依性；不是未來預測。`;
   const el = $("longChart");
