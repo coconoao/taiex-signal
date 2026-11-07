@@ -691,22 +691,26 @@ if __name__ == "__main__":
             print(f"{name} 無法讀取，該層暫時略過：{type(exc).__name__}: {exc}", flush=True)
             return None
 
-    chips = demo_chips(df) if demo else (
-        read_existing("chips.csv") if skip_backfill or "--no-chips" in sys.argv
-        else fetch_chips(trading_days=df.index)
-    )
-    if os.path.exists("margin.csv") and "short_units" not in pd.read_csv("margin.csv", nrows=1):
-        print("舊版融資資料缺少融券欄位：保留既有歷史融資資料，融券欄位從本次開始累積。")
-    margin = demo_margin(df) if demo else (
-        read_existing("margin.csv") if skip_backfill or "--no-margin" in sys.argv
-        else fetch_margin(trading_days=df.index)
-    )
-    futures = demo_futures(df) if demo else (
-        read_existing("futures.csv") if skip_backfill or "--no-futures" in sys.argv
-        else fetch_futures(trading_days=df.index)
-    )
-    if skip_backfill:
-        print("快速啟動模式：使用已保存的真實資料計算；缺少資料層會明確標示，歷史回補留待排程執行。", flush=True)
+    if skip_backfill and not demo:
+        # Fast boot must remain independent of sparse optional caches. The full
+        # scheduled pipeline still loads and backfills these layers separately.
+        chips = margin = futures = None
+        print("快速啟動模式：只使用完整基礎行情特徵；籌碼／信用／期貨層留待完整排程回補。", flush=True)
+    else:
+        chips = demo_chips(df) if demo else (
+            read_existing("chips.csv") if "--no-chips" in sys.argv
+            else fetch_chips(trading_days=df.index)
+        )
+        if os.path.exists("margin.csv") and "short_units" not in pd.read_csv("margin.csv", nrows=1):
+            print("舊版融資資料缺少融券欄位：保留既有歷史融資資料，融券欄位從本次開始累積。")
+        margin = demo_margin(df) if demo else (
+            read_existing("margin.csv") if "--no-margin" in sys.argv
+            else fetch_margin(trading_days=df.index)
+        )
+        futures = demo_futures(df) if demo else (
+            read_existing("futures.csv") if "--no-futures" in sys.argv
+            else fetch_futures(trading_days=df.index)
+        )
     X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])
