@@ -536,7 +536,8 @@ const loadNews = () => Promise.all([
   getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }),
   getJSON("news_research.json").then(r => { NEWS_RESEARCH = r; }).catch(() => { NEWS_RESEARCH = null; }),
   getJSON("news_gdelt_research.json").then(r => { GDELT_RESEARCH = r; }).catch(() => { GDELT_RESEARCH = null; }),
-  getJSON("news_policy_archive.json").then(r => { POLICY_ARCHIVE = r; }).catch(() => { POLICY_ARCHIVE = null; }),\n  getJSON("news_policy_research.json").then(r => { POLICY_RESEARCH = r; }).catch(() => { POLICY_RESEARCH = null; })
+  getJSON("news_policy_archive.json").then(r => { POLICY_ARCHIVE = r; }).catch(() => { POLICY_ARCHIVE = null; }),
+  getJSON("news_policy_research.json").then(r => { POLICY_RESEARCH = r; }).catch(() => { POLICY_RESEARCH = null; })
 ]).then(renderNews);
 let lastSig = null, busy = false;
 function loadAll() {
