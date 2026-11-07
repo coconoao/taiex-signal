@@ -34,4 +34,4 @@ jobs:
       - name: Import official historical news metadata
         run: python news_policy_archive_backfill.py
       - name: Persist archive to Supabase
-        run: python storage.py save
+        run: python storage.py save-policy-archive
