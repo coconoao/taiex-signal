@@ -190,12 +190,34 @@ def run_jobs(*whats):
             JOB["running"] = w
             cmd = [sys.executable, os.path.join(CODE, w + ".py")] + (["--demo"] if DEMO and w == "pipeline" else [])
             try:
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=6 * 3600)
-                code = p.returncode
-                log += f"[{w}] exit={code} " + (p.stdout + p.stderr)[-1200:] + "\n"
+                p = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1
+                )
+                def stream_output():
+                    nonlocal log
+                    for line in p.stdout:
+                        entry = f"[{w}] {line}"
+                        log = (log + entry)[-3000:]
+                        JOB["log"] = log
+                        print(entry, end="", flush=True)
+                reader = threading.Thread(target=stream_output, daemon=True)
+                reader.start()
+                try:
+                    code = p.wait(timeout=6 * 3600)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    code = p.wait()
+                    log = (log + f"[{w}] timed out after 6 hours\\n")[-3000:]
+                reader.join()
+                log = (log + f"[{w}] exit={code}\\n")[-3000:]
+                JOB["log"] = log
+                print(f"[{w}] exit={code}", flush=True)
             except Exception as e:
                 code = 1
-                log += f"[{w}] {type(e).__name__}: {e}\n"
+                log = (log + f"[{w}] {type(e).__name__}: {e}\\n")[-3000:]
+                JOB["log"] = log
+                print(log[-500:], flush=True)
             if code == 0 and os.environ.get("TAIEX_STORAGE", "").strip().lower() == "supabase":
                 try:
                     import storage
