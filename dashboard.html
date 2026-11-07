@@ -370,10 +370,10 @@ function newsCard(n, key, el) {
     '<h3>政府政策與國際局勢（官方網站檢索）</h3>' + list(policy);
 }
 function renderSummary() {
-  const n = mergedNews(), p = [];
-  if (WK) p.push(`未來一週：<b>${esc(WK.bucket)}</b>（${pct(WK.prob_up)}）`);
-  if (n && n.agg.next_day.n) p.push(`新聞資料已載入（${(n.headlines || []).length} 則）`);
-  $("sumline").innerHTML = p.join("　｜　");
+  const n = mergedNews();
+  $("sumline").textContent = n && n.agg.next_day.n
+    ? `新聞資料已載入（${(n.headlines || []).length} 則）`
+    : "";
 }
 function renderPolicyEvents(n) {
   const events = (n && Array.isArray(n.policy_events) ? n.policy_events : []).slice(0, 18);
@@ -391,12 +391,12 @@ function renderPolicyEvents(n) {
     </article>`;
   }).join("") : '<p class="note">沒有可顯示的政策事件；來源可能暫時無法連線。</p>';
 }
-function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); newsCard(n, "next_week", $("newsW")); renderPolicyEvents(n); renderSummary(); }
+function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); renderSummary(); }
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
   .catch(() => { $("err").hidden = false; $("meta").textContent = ""; });
-const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); renderSummary(); }).catch(() => { $("wsig").textContent = "尚無 weekly.json"; });
+const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); }).catch(() => { $("horizonNote").textContent = "目前無法載入長線歷史統計。"; $("horizonRows").innerHTML = "<tr><td colspan=\"7\">資料暫時無法取得</td></tr>"; $("longChart").textContent = "資料暫時無法取得。"; });
 const loadNews = () => getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }).then(renderNews);
 let lastSig = null, busy = false;
 function loadAll() {
