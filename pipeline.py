@@ -120,6 +120,20 @@ def _open_with_backoff(req, timeout):
             time.sleep(delay)
 
 
+def _read_with_backoff(req, timeout):
+    """Retry the complete response read, not only the initial connection."""
+    for attempt in range(4):
+        try:
+            with _open_with_backoff(req, timeout=timeout) as response:
+                return response.read()
+        except (TimeoutError, OSError, urllib.error.URLError) as exc:
+            if attempt == 3:
+                raise
+            delay = (5, 15, 30)[attempt]
+            print(f"資料讀取逾時／網路錯誤（{type(exc).__name__}），{delay} 秒後重試（{attempt + 1}/3）", flush=True)
+            time.sleep(delay)
+
+
 def _merge_and_save(old, rows, path):
     out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
     out = out[~out.index.duplicated(keep="last")]
@@ -151,8 +165,7 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with _open_with_backoff(req, timeout=15) as response:
-                j = json.load(response)
+            j = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8"))
         except urllib.error.HTTPError as e:
             print(f"三大法人 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
             if e.code == 429: break
@@ -206,8 +219,7 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
                                        "queryDate": f"{d:%Y/%m/%d}", "commodityId": ""}).encode()
         try:
             req = urllib.request.Request("https://www.taifex.com.tw/cht/3/futContractsDate", body, {"User-Agent": "Mozilla/5.0"})
-            with _open_with_backoff(req, timeout=20) as response:
-                html = response.read().decode("utf-8", "ignore")
+            html = _read_with_backoff(req, timeout=20).decode("utf-8", "ignore")
             time.sleep(0.7)  # Respect TAIFEX request rate limits.
             if "臺股期貨" not in html: continue  # 休市日或尚未公布
             net = _tx_foreign_oi_net(pd.read_html(StringIO(html)))
@@ -242,8 +254,7 @@ def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
         url = f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={d:%Y%m%d}&selectType=MS&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with _open_with_backoff(req, timeout=15) as response:
-                j = json.load(response)
+            j = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8"))
         except urllib.error.HTTPError as e:
             print(f"融資融券 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
             if e.code == 429: break
