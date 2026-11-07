@@ -660,7 +660,18 @@ def historical_horizons(series):
     """非預測：以不重疊交易日區間計算歷史報酬分布，避免把重疊視窗誤當獨立樣本。"""
     out = {}
     for key, label, days in (("1m", "約 1 個月", 21), ("3m", "約 3 個月", 63), ("6m", "約 6 個月", 126)):
-        values = (series.shift(-days) / series - 1).iloc[::days].dropna()
+        forward = series.shift(-days) / series - 1
+        # A single fixed non-overlap anchor can make the result sensitive to
+        # where the sample starts. Evaluate every possible anchor and report
+        # the range as a robustness diagnostic, not as independent samples.
+        phase_rates = []
+        phase_counts = []
+        for offset in range(days):
+            phase = forward.iloc[offset::days].dropna()
+            if len(phase):
+                phase_rates.append(float((phase > 0).mean()) * 100)
+                phase_counts.append(int(len(phase)))
+        values = forward.iloc[::days].dropna()
         if values.empty:
             out[key] = {"label": label, "days": days, "n": 0}
             continue
@@ -679,6 +690,10 @@ def historical_horizons(series):
             "positive_rate_ci95": [round(max(0.0, center - half) * 100, 1),
                                    round(min(1.0, center + half) * 100, 1)],
             "sample_note": "樣本偏少，估計不穩定" if n < 30 else "歷史樣本",
+            "phase_positive_rate_range": [round(min(phase_rates), 1), round(max(phase_rates), 1)] if phase_rates else None,
+            "phase_sample_count_range": [min(phase_counts), max(phase_counts)] if phase_counts else None,
+            "sample_start": str(values.index.min().date()),
+            "sample_end": str(values.index.max().date()),
             "mean": round(float(values.mean()) * 100, 2),
             "median": round(float(values.median()) * 100, 2),
             "p10": round(float(values.quantile(.10)) * 100, 2),
