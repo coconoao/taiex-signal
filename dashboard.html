@@ -111,6 +111,11 @@ details[open]>summary{margin-bottom:12px}
       <div id="newsResearchFeatures"></div>
       <p class="note" id="newsResearchNote">新聞環境分數僅由標題字詞初步分類；相似環境統計是已發生的歷史結果，不是未來機率或買賣指令。</p>
     </section>
+    <section><h2>GDELT 歷史新聞研究（獨立資料源）</h2>
+      <p class="note" id="gdeltResearchMeta">尚未載入 GDELT 歷史研究資料。</p>
+      <div id="gdeltResearchIndicator"></div>
+      <p class="note">資料來源：GDELT Project。此資料為全球新聞報導索引，不等於完整台灣媒體新聞庫；標題分類為字詞規則，歷史關聯不是未來預測或買賣訊號。</p>
+    </section>
     <section><h2>新聞情緒（既有資料）</h2><div id="newsD"></div><p class="note">此區沿用原本新聞摘要與分析，與下方新聞研究資料分開保存。</p></section>
   </div>
 
@@ -356,7 +361,7 @@ function openChatGPTWindow() {
 $("openChatGPTSettings").addEventListener("click", openChatGPTWindow);
 
 /* ---- 新聞資料：提供複製到 Gemini 或 ChatGPT ---- */
-let NEWS = null, WK = null, NEWS_RESEARCH = null;
+let NEWS = null, WK = null, NEWS_RESEARCH = null, GDELT_RESEARCH = null;
 function mergedNews() {
   if (!NEWS) return null;
   const n = JSON.parse(JSON.stringify(NEWS));
@@ -436,7 +441,23 @@ function renderNewsResearch(r) {
   ];
   box.innerHTML = '<div class="mcs">' + rows.map(([k,v]) => `<div class="mc"><b>${esc(k)}</b><div class="big">${esc(v)}</div></div>`).join("") + '</div>';
 }
-function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); renderSummary(); renderNewsResearch(NEWS_RESEARCH); }
+function renderGdeltResearch(r) {
+  const meta = $("gdeltResearchMeta"), box = $("gdeltResearchIndicator");
+  if (!r || !r.latest || !r.latest.features) {
+    meta.textContent = "尚未完成歷史新聞回補。";
+    box.textContent = "目前沒有 GDELT 歷史快照。";
+    return;
+  }
+  const f = r.latest.features, h = r.historical_context || {};
+  const score = Number(f.news_environment_score || 0);
+  const mood = score > 0.08 ? "標題環境偏正面" : score < -0.08 ? "標題環境偏負面" : "標題環境接近中性";
+  const historical = h.status === "available"
+    ? `<div class="mcs"><div class="mc"><b>相似歷史樣本</b><div class="big">${h.sample_count}</div></div><div class="mc"><b>歷史正報酬比例</b><div class="big">${h.positive_return_pct}%</div></div><div class="mc"><b>歷史負報酬比例</b><div class="big">${h.negative_return_pct}%</div></div><div class="mc"><b>平均隔日變化</b><div class="big">${h.average_return_pct}%</div></div></div><p class="note">中位數 ${h.median_return_pct}%｜10%～90% 分位數 ${h.p10_return_pct}% 至 ${h.p90_return_pct}%</p>`
+    : `<p class="note">相似環境已標記樣本：${h.sample_count || 0} 筆；至少 20 筆才顯示歷史描述統計。</p>`;
+  box.innerHTML = `<div class="mc"><b>${mood}</b><div class="big">${score > 0 ? "+" : ""}${score.toFixed(2)}</div><p class="note">新聞標題 ${f.headline_count || 0} 則｜正面 ${f.positive_headline_count || 0}｜負面 ${f.negative_headline_count || 0}</p></div>${historical}<p class="note">${esc(h.note || "資料不足，暫不顯示歷史統計。")}</p>`;
+  meta.textContent = `資料來源 GDELT DOC 2.0｜最近交易日 ${r.latest.asof}｜快照 ${r.history_count || 0} 天｜已標記隔日結果 ${r.labeled_count || 0} 筆｜本次新增 ${r.fetched_this_run || 0} 天｜達查詢上限日期 ${(r.query_capped_dates || []).length} 天`;
+}
+function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); renderSummary(); renderNewsResearch(NEWS_RESEARCH); renderGdeltResearch(GDELT_RESEARCH); }
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
@@ -444,7 +465,8 @@ const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = tr
 const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); }).catch(() => { $("horizonNote").textContent = "目前無法載入長線歷史統計。"; $("horizonRows").innerHTML = "<tr><td colspan=\"7\">資料暫時無法取得</td></tr>"; $("longChart").textContent = "資料暫時無法取得。"; });
 const loadNews = () => Promise.all([
   getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }),
-  getJSON("news_research.json").then(r => { NEWS_RESEARCH = r; }).catch(() => { NEWS_RESEARCH = null; })
+  getJSON("news_research.json").then(r => { NEWS_RESEARCH = r; }).catch(() => { NEWS_RESEARCH = null; }),
+  getJSON("news_gdelt_research.json").then(r => { GDELT_RESEARCH = r; }).catch(() => { GDELT_RESEARCH = null; })
 ]).then(renderNews);
 let lastSig = null, busy = false;
 function loadAll() {
