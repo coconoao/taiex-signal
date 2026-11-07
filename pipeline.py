@@ -365,7 +365,8 @@ def load_demo(n=1800, seed=7):
 
 # Keep each scheduled run bounded. Recent dates are always prioritized while
 # older missing dates are backfilled gradually across subsequent runs.
-BACKFILL_DATES_PER_RUN = 30
+# Each scheduled run backfills a larger bounded batch while preserving checkpoints.
+BACKFILL_DATES_PER_RUN = 80
 RECENT_DATES_PER_RUN = 5
 CHECKPOINT_EVERY = 5
 
@@ -498,7 +499,33 @@ def _fetch_finmind_data(dataset, start_date, end_date, data_id=None):
     return pd.DataFrame(payload["data"])
 
 
-def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
+
+
+def _fetch_finmind_data_for_dates(dataset, dates, data_id=None, batch_size=10):
+    """Fetch sparse historical gaps in small date batches so one timeout cannot lose the whole backfill."""
+    dates = pd.DatetimeIndex(dates).tz_localize(None).normalize().unique().sort_values()
+    frames = []
+    for offset in range(0, len(dates), batch_size):
+        batch = dates[offset:offset + batch_size]
+        try:
+            frame = _fetch_finmind_data(dataset, batch.min(), batch.max(), data_id=data_id)
+            if not frame.empty:
+                frames.append(frame)
+        except Exception as exc:
+            print(
+                f"FinMind {dataset} 區間 {batch.min().date()} 至 {batch.max().date()} "
+                f"暫不可用：{type(exc).__name__}；其餘區間繼續回補",
+                flush=True
+            )
+    if not frames:
+        return pd.DataFrame()
+    result = pd.concat(frames, ignore_index=True)
+    if "date" in result:
+        result = result.drop_duplicates(subset=["date"] + (["data_id"] if "data_id" in result else []), keep="last")
+    return result
+
+
+def fetch_chips(days_back=3650, path="chips.csv", trading_days=None):
     """證交所三大法人買賣超（元），增量寫入 chips.csv（date, foreign_net, trust_net）。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
@@ -536,7 +563,7 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     try:
         needed = [d for d in dates if d not in rows]
         if needed:
-            alt = _fetch_finmind_data("TaiwanStockTotalInstitutionalInvestors", min(needed), max(needed))
+            alt = _fetch_finmind_data_for_dates("TaiwanStockTotalInstitutionalInvestors", needed)
             if not alt.empty and {"date", "name", "buy", "sell"}.issubset(alt.columns):
                 alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
                 alt["net"] = pd.to_numeric(alt["buy"], errors="coerce") - pd.to_numeric(alt["sell"], errors="coerce")
@@ -593,7 +620,7 @@ def _fetch_taifex_openapi_latest():
     raise ValueError("TAIFEX OpenAPI 找不到臺股期貨／外資及陸資資料列")
 
 
-def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
+def fetch_futures(days_back=3650, path="futures.csv", trading_days=None):
     """期交所三大法人「臺股期貨」外資未平倉淨口數，增量寫入 futures.csv（date, foreign_oi_net）。官方僅提供近三年。"""
     from io import StringIO
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
@@ -642,7 +669,7 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     try:
         needed = [d for d in dates if d not in rows]
         if needed:
-            alt = _fetch_finmind_data("TaiwanFuturesInstitutionalInvestors", min(needed), max(needed), data_id="TX")
+            alt = _fetch_finmind_data_for_dates("TaiwanFuturesInstitutionalInvestors", needed, data_id="TX")
             required = {"date", "institutional_investors", "long_open_interest_balance_volume",
                         "short_open_interest_balance_volume"}
             if not alt.empty and required.issubset(alt.columns):
@@ -669,7 +696,7 @@ def demo_futures(df, seed=9):  # 合成期貨淨未平倉，僅供示範
     r = df["TAIEX"].pct_change().fillna(0)
     return pd.DataFrame({"foreign_oi_net": np.cumsum(r * 2e5 + rng.normal(0, 1500, len(df)))}, index=df.index)
 
-def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
+def fetch_margin(days_back=3650, path="margin.csv", trading_days=None):
     """證交所市場融資餘額（元），增量寫入 margin.csv（date, margin_bal）。資料約晚上 9 點後公布。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
@@ -707,7 +734,7 @@ def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
     try:
         needed = [d for d in dates if d not in rows]
         if needed:
-            alt = _fetch_finmind_data("TaiwanStockTotalMarginPurchaseShortSale", min(needed), max(needed))
+            alt = _fetch_finmind_data_for_dates("TaiwanStockTotalMarginPurchaseShortSale", needed)
             if not alt.empty and {"date", "name", "TodayBalance"}.issubset(alt.columns):
                 alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
                 alt["TodayBalance"] = pd.to_numeric(alt["TodayBalance"], errors="coerce")
