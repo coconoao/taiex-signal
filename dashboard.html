@@ -290,7 +290,7 @@ function renderWeekly(w) {
     const h = hh[key];
     return h && h.n
       ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}</td><td>${h.positive_rate}%（${(h.positive_rate_ci95 || [null,null]).join("%～")}%）</td><td>${h.phase_positive_rate_range ? h.phase_positive_rate_range[0] + "%～" + h.phase_positive_rate_range[1] + "%" : "—"}</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
-      : `<tr><td>${label}</td><td colspan="5">歷史樣本不足</td></tr>`;
+      : `<tr><td>${label}</td><td colspan="6">歷史樣本不足</td></tr>`;
   }).join("");
   $("horizonNote").textContent = `統計截至 ${w.asof}；採用歷史不重疊區間，僅描述過去分布，不是未來走勢預測。`;
 }
