@@ -1,8 +1,7 @@
-"""Build a small, clearly sampled index of historical Executive Yuan news.
+"""Build a sampled index of public Executive Yuan news listings.
 
-The legacy OpenAPI endpoint returns HTTP 410. This importer therefore reads
-only the public listing pages and stores short headlines, dates and source
-links. It never downloads article bodies or summaries.
+Only short headlines, dates and source links are stored. Article bodies and
+summaries are never downloaded.
 """
 import datetime as dt
 from html.parser import HTMLParser
@@ -19,8 +18,8 @@ LIST_URL = "https://www.ey.gov.tw/Page/A2EC1FEF9BC39AD0"
 ARTICLE_PREFIX = "/Page/9277F759E41CCD91/"
 PAGE_SIZE = 15
 SAMPLE_COUNT = 80
-DATE_RE = re.compile(r"(?<!\\d)(\\d{2,3})-(\\d{1,2})-(\\d{1,2})")
-TOTAL_PAGES_RE = re.compile(r"共\\s*(\\d+)\\s*頁")
+DATE_RE = re.compile(r"(?<!\d)(\d{2,3})-(\d{1,2})-(\d{1,2})")
+TOTAL_PAGES_RE = re.compile(r"共\s*(\d+)\s*頁")
 
 
 class NewsListParser(HTMLParser):
@@ -46,7 +45,7 @@ class NewsListParser(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag.lower() == "a" and self.active:
-            text = re.sub(r"\\s+", " ", " ".join(self.parts)).strip()
+            text = re.sub(r"\s+", " ", " ".join(self.parts)).strip()
             self.links.append((self.href, text))
             self.active = False
             self.href = ""
@@ -84,8 +83,8 @@ def parse_item(href, text, page):
         published = dt.date(year, month, day).isoformat()
     except ValueError:
         return None
-    title = html.unescape(text[:match.start()]).strip(" -　\\t\\r\\n")
-    title = re.sub(r"\\s+", " ", title)
+    title = html.unescape(text[:match.start()]).strip(" -　\t\r\n")
+    title = re.sub(r"\s+", " ", title)
     if not title:
         return None
     url = urllib.parse.urljoin("https://www.ey.gov.tw", href)
@@ -99,15 +98,20 @@ def parse_item(href, text, page):
 
 
 def main():
-    # Read page 1 first and derive the current pagination size from the
-    # official listing, rather than relying on a stale hard-coded page count.
+    # Read page 1 and extract pagination text after removing HTML tags.
     first_raw = fetch_page(1)
-    total_match = TOTAL_PAGES_RE.search(first_raw)
+    visible_text = html.unescape(re.sub(r"<[^>]*>", " ", first_raw))
+    visible_text = re.sub(r"\s+", " ", visible_text)
+    total_match = TOTAL_PAGES_RE.search(visible_text)
     if not total_match:
-        raise SystemExit("Could not determine official index page count; existing archive preserved.")
+        raise SystemExit(
+            "Could not determine official index page count; existing archive preserved."
+        )
     total_pages = int(total_match.group(1))
     if total_pages < 1:
-        raise SystemExit("Official index returned an invalid page count; existing archive preserved.")
+        raise SystemExit(
+            "Official index returned an invalid page count; existing archive preserved."
+        )
 
     if total_pages == 1 or SAMPLE_COUNT == 1:
         sample_pages = [1]
@@ -116,14 +120,11 @@ def main():
             1 + round(i * (total_pages - 1) / (SAMPLE_COUNT - 1))
             for i in range(SAMPLE_COUNT)
         })
-    page_html = {1: first_raw}
 
     items, seen = [], set()
     successful_pages = []
     for page in sample_pages:
-        raw = page_html.get(page)
-        if raw is None:
-            raw = fetch_page(page)
+        raw = first_raw if page == 1 else fetch_page(page)
         parser = NewsListParser()
         parser.feed(raw)
         page_count = 0
