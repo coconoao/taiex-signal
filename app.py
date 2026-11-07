@@ -831,10 +831,19 @@ class H(SimpleHTTPRequestHandler):
                 print(f"[api-ai] provider={provider} status=ok", flush=True)
                 return self.send_json({"text": result})
             except Exception as e:
-                # 僅記錄服務名稱與例外類型；絕不記錄金鑰、提示內容或完整請求。
+                # 僅記錄例外類型與數字錯誤碼；絕不記錄金鑰、提示、URL 或例外訊息。
+                cause = e.__cause__ or e.__context__
+                cause_type = type(cause).__name__ if cause else "none"
+                cause_errno = getattr(cause, "errno", None) if cause else None
+                reason = getattr(cause, "reason", None) if cause else None
+                reason_type = type(reason).__name__ if reason is not None else "none"
+                reason_errno = getattr(reason, "errno", None) if reason is not None else None
+                safe_errno = cause_errno if isinstance(cause_errno, int) else "none"
+                safe_reason_errno = reason_errno if isinstance(reason_errno, int) else "none"
                 print(
                     f"[api-ai] provider={provider if provider in ('Claude', 'ChatGPT', 'Gemini') else 'unknown'} "
-                    f"status=error type={type(e).__name__}",
+                    f"status=error type={type(e).__name__} cause={cause_type} "
+                    f"errno={safe_errno} reason_type={reason_type} reason_errno={safe_reason_errno}",
                     flush=True
                 )
                 status = (
