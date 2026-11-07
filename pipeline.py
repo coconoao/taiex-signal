@@ -143,8 +143,10 @@ def load_live(years=6, cache_path="market_history.csv"):
             if isinstance(close.columns, pd.MultiIndex):
                 close.columns = close.columns.get_level_values(-1)
             fresh = close.rename(columns={v: k for k, v in TICKERS.items()})
+            if fresh.empty or not fresh.notna().any().any():
+                raise ValueError("Yahoo Finance 回傳資料沒有可用行情欄位")
             if "TAIEX" not in fresh or fresh["TAIEX"].dropna().empty:
-                raise ValueError("Yahoo Finance 回傳資料沒有台灣加權指數")
+                print("Yahoo Finance 本次缺少加權指數欄位，將由 TWSE 官方資料／快取補足。", flush=True)
             break
         except Exception as exc:
             last_error = exc
@@ -200,11 +202,20 @@ def load_live(years=6, cache_path="market_history.csv"):
     # Capture freshness before limited forward-fill so stale inputs are visible.
     source_frame = df.copy()
     df = df.dropna(subset=["TAIEX"]).ffill(limit=3)
+    yahoo_columns = {
+        column for column in TICKERS
+        if yahoo_available and column in fresh and fresh[column].notna().any()
+    }
+    yahoo_status = (
+        "ok" if len(yahoo_columns) == len(TICKERS)
+        else "partial" if yahoo_columns else "limited_or_unavailable"
+    )
     data_status = {
         "updated_at": now.isoformat(),
-        "yahoo_status": "ok" if yahoo_available else "limited_or_unavailable",
+        "yahoo_status": yahoo_status,
+        "yahoo_columns": sorted(yahoo_columns),
         "taiwan_index_source": "TWSE 官方日收盤資料" if official_taiex else (
-            "Yahoo Finance" if yahoo_available else "既有快取"
+            "Yahoo Finance" if yahoo_available and "TAIEX" in yahoo_columns else "既有快取"
         ),
         "taiwan_index_official_rows": len(official_taiex),
         "series": {}
