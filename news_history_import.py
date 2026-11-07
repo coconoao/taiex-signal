@@ -216,6 +216,7 @@ def main():
             articles, capped = fetch_window(start_local, end_local)
         except Exception as exc:
             print(f"GDELT {asof} 擷取失敗：{type(exc).__name__}: {str(exc)[:160]}", flush=True)
+            time.sleep(5.2)
             continue
         if capped:
             capped_dates.append(asof.isoformat())
