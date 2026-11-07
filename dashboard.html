@@ -528,7 +528,7 @@ api("/api/status").then(s => {
   startUSMarket();
 }).catch(() => {});
 document.querySelectorAll("[data-run]").forEach(b => b.onclick = () => api("/api/run", {what: b.dataset.run})
-  .then(r => { if (r.error) $("job").textContent = r.error; else { $("job").textContent = "已開始…"; setTimeout(poll, 1500); } }).catch(() => {}));
+  .then(r => { if (r.error) $("job").textContent = "無法啟動資料更新，請稍後重試。"; else { $("job").textContent = "資料更新已啟動…"; setTimeout(poll, 1500); } }).catch(() => { $("job").textContent = "無法啟動資料更新，請稍後重試。"; }));
 $("exp").onclick = () => api("/api/export", {}).then(r => { $("expMsg").textContent = r.path ? "已存到 " + r.path : (r.error || "失敗"); }).catch(() => {});
 
 const STOCK_CACHE_KEY = "taiex_stock_history_v1";
