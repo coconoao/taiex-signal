@@ -112,6 +112,11 @@ details[open]>summary{margin-bottom:12px}
     <section><h2>各層訊號推向哪一邊</h2><div id="wlayers"></div></section>
     <section><h2>歷史上每種訊號之後 5 日的實際表現</h2>
       <div style="overflow-x:auto"><table><thead><tr><th>訊號</th><th>樣本</th><th>勝率</th><th>平均</th><th>80% 區間</th></tr></thead><tbody id="wb"></tbody></table></div></section>
+    <section><h2>月級距歷史情境分布</h2>
+      <p class="note" id="horizonNote">以歷史不重疊交易日區間計算；這是回顧統計，不是未來預測。</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>樣本數</th><th>歷史正報酬比例</th><th>平均</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
+      <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。樣本採不重疊區間，歷史比例不代表未來發生機率。</p>
+    </section>
     <section><h2>新聞情緒（一週）：內建規則與 AI 並排</h2><div id="newsW"></div></section>
   </div>
 
@@ -269,6 +274,15 @@ function renderWeekly(w) {
   $("wlayers").innerHTML = Object.entries(w.layers).map(([k, v]) => divRow(esc(k) + "層", v, max * 1.5)).join("");
   $("wb").innerHTML = ["偏多", "中性", "偏空"].filter(k => w.buckets[k]).map(k => { const b = w.buckets[k];
     return `<tr><td>${k}</td><td>${b.n}</td><td>${b.win}%</td><td>${b.avg}%</td><td>${b.p10}% ~ ${b.p90}%</td></tr>`; }).join("");
+  const hh = w.horizon_history || {};
+  const names = [["1m","約 1 個月"],["3m","約 3 個月"],["6m","約 6 個月"]];
+  $("horizonRows").innerHTML = names.map(([key,label]) => {
+    const h = hh[key];
+    return h && h.n
+      ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}</td><td>${h.positive_rate}%</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
+      : `<tr><td>${label}</td><td colspan="5">歷史樣本不足</td></tr>`;
+  }).join("");
+  $("horizonNote").textContent = `統計截至 ${w.asof}；採用歷史不重疊區間，僅描述過去分布，不是未來走勢預測。`;
 }
 
 /* ---- 使用者自己的 Gemini 登入視窗 ---- */
@@ -315,9 +329,13 @@ function newsCard(n, key, el) {
     : `<div class="mc"><b>${esc(name)}</b><div class="big" style="color:${tone(r[key])}">${sc(r[key])}</div><div class="note">信心 ${Math.round(r.confidence * 100)}%</div><p>${esc(r.summary)}</p></div>`).join("");
   const headlines = (n.headlines || []).filter(h => h.kind === "market").slice(0,12)
     .concat((n.headlines || []).filter(h => h.kind === "analyst").slice(0,5));
+  const taiwan = (n.headlines || []).filter(h => h.kind === "taiwan").slice(0,12);
+  const policy = (n.headlines || []).filter(h => h.kind === "policy").slice(0,12);
+  const list = rows => rows.length ? '<ul>' + rows.map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + '</small></li>'; }).join("") + '</ul>' : '<p class="note">目前沒有取得這個分類的新聞。</p>';
   el.innerHTML = (n.demo ? '<div class="banner">以下為示範新聞資料，不是真實新聞。</div>' : "") +
-    `<div class="mcs">${cards}</div><h3>新聞原文（市場 12 則＋機構 5 則）</h3><ul>` +
-    headlines.map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + '</small></li>'; }).join("") + "</ul>";
+    `<div class="mcs">${cards}</div><h3>國際市場新聞與機構觀點</h3>` + list(headlines) +
+    '<h3>台灣本地新聞（中央社 RSS）</h3>' + list(taiwan) +
+    '<h3>政府政策與國際局勢（官方網站檢索）</h3>' + list(policy);
 }
 function renderSummary() {
   const n = mergedNews(), p = [];
