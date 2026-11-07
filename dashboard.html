@@ -522,7 +522,8 @@ api("/api/status").then(s => {
       ? "Cloud Run 使用獨立更新工作；可按「立即更新行情與新聞」，本機匯出已停用。"
       : "唯讀模式：本機匯出已停用（仍可用上方「直接下載」）。";
   }
-  if (s.running) poll();\n  else if (s.exit_code != null) $("job").textContent = Number(s.exit_code) === 0 ? "上次資料更新成功。" : "上次資料更新未成功，請稍後重試。";
+  if (s.running) poll();
+  else if (s.exit_code != null) $("job").textContent = Number(s.exit_code) === 0 ? "上次資料更新成功。" : "上次資料更新未成功，請稍後重試。";
   startQuote();
   startUSMarket();
 }).catch(() => {});
