@@ -18,6 +18,10 @@ FILES = (
     "news_gdelt_history.jsonl", "news_gdelt_research.json",
     "news_policy_archive.json",
 )
+# The official historical archive has its own importer. Exclude it from routine
+# Render pipeline saves so an older in-memory copy cannot overwrite a fresh backfill.
+AUTO_SAVE_FILES = tuple(name for name in FILES if name != "news_policy_archive.json")
+POLICY_ARCHIVE_FILE = "news_policy_archive.json"
 TABLE = "site_data"
 
 
@@ -81,13 +85,15 @@ def restore_data(directory="."):
     return restored
 
 
-def save_data(directory="."):
-    """Upsert existing known data files; return number of files saved."""
+def save_data(directory=".", names=None):
+    """Upsert selected data files; routine saves omit the separately managed archive."""
     if not enabled():
         return 0
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     rows = []
-    for name in FILES:
+    for name in (AUTO_SAVE_FILES if names is None else tuple(names)):
+        if name not in FILES:
+            raise ValueError("Unknown data file: " + str(name))
         path = os.path.join(directory, name)
         if os.path.isfile(path):
             with open(path, "r", encoding="utf-8") as stream:
@@ -111,5 +117,10 @@ if __name__ == "__main__":
         print("Restored data files:", restore_data())
     elif action == "save":
         print("Saved data files:", save_data())
+    elif action == "save-policy-archive":
+        print(
+            "Saved policy archive files:",
+            save_data(names=(POLICY_ARCHIVE_FILE,)),
+        )
     else:
-        raise SystemExit("Usage: python storage.py restore|save")
+        raise SystemExit("Usage: python storage.py restore|save|save-policy-archive")
