@@ -18,6 +18,92 @@ GLOBAL = ["SOX", "TSM", "VIX", "US10Y"]      # 國際層
 REGION = ["N225", "KOSPI", "USDTWD"]         # 區域層（亞洲鄰近市場、匯率）
 BUY, SELL, COST = 0.55, 0.45, 0.002          # 買進/賣出門檻、單次換倉成本
 
+
+def _parse_market_number(value):
+    text = str(value or "").strip().replace(",", "").replace(" ", "")
+    if text in ("", "--", "---", "X", "N/A"):
+        return None
+    try:
+        number = float(text)
+        return number if np.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_twse_taiex_day(day):
+    """Fetch one completed TAIEX close from the official TWSE daily index endpoint."""
+    date_text = pd.Timestamp(day).strftime("%Y%m%d")
+    url = (
+        "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?"
+        + urllib.parse.urlencode({"date": date_text, "type": "ALL", "response": "json"})
+    )
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; TAIEXDataQuality/1.0)",
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": "https://www.twse.com.tw/"
+    })
+    raw = _read_with_backoff(req, timeout=20)
+    payload = json.loads(raw.decode("utf-8-sig"))
+    status = str(payload.get("stat", ""))
+    if "沒有符合" in status or "查無" in status:
+        return None
+
+    tables = payload.get("tables") or []
+    if isinstance(payload.get("data"), list):
+        tables = list(tables) + [{"fields": payload.get("fields") or [], "data": payload["data"]}]
+    for table in tables:
+        fields = table.get("fields") or []
+        for row in table.get("data") or []:
+            if isinstance(row, dict):
+                record = row
+            elif fields and len(row) == len(fields):
+                record = dict(zip(fields, row))
+            else:
+                continue
+            index_name = str(
+                record.get("指數") or record.get("指數名稱")
+                or record.get("Index") or record.get("名稱") or ""
+            )
+            if "發行量加權股價指數" not in index_name:
+                continue
+            close = (
+                record.get("收盤指數") or record.get("收盤")
+                or record.get("Close") or record.get("close")
+            )
+            value = _parse_market_number(close)
+            if value is None or not (1000 <= value <= 100000):
+                raise ValueError(f"TWSE 加權指數收盤值異常：{close!r}")
+            return value
+    return None
+
+
+def _fetch_twse_taiex_recent(now, calendar_days=7):
+    """Use TWSE as the authoritative fallback for recent completed daily closes."""
+    local_now = pd.Timestamp(now).tz_convert("Asia/Taipei")
+    end_day = local_now.normalize().tz_localize(None)
+    if local_now.hour < 14:
+        end_day -= pd.Timedelta(days=1)
+    start_day = end_day - pd.Timedelta(days=calendar_days)
+    days = pd.bdate_range(start_day, end_day)
+    rows = {}
+    for day in days:
+        try:
+            value = _fetch_twse_taiex_day(day)
+            if value is not None:
+                rows[pd.Timestamp(day).normalize()] = value
+        except Exception as exc:
+            print(
+                f"TWSE 加權指數備援暫不可用（{day.date()}）："
+                f"{type(exc).__name__}: {exc}", flush=True
+            )
+            # Stop on upstream/network failure; do not hammer the official endpoint.
+            if isinstance(exc, urllib.error.HTTPError) and (exc.code == 429 or exc.code >= 500):
+                break
+            if isinstance(exc, (TimeoutError, OSError, urllib.error.URLError)):
+                break
+    return rows
+
+
 def load_live(years=6, cache_path="market_history.csv"):
     """Load multi-year market history, persist it, then refresh only the recent window."""
     import yfinance as yf
@@ -67,17 +153,42 @@ def load_live(years=6, cache_path="market_history.csv"):
                 time.sleep(5 * (attempt + 1))
             fresh = None
 
-    if fresh is None and cached is None:
-        raise RuntimeError(f"無法取得即時歷史行情，且沒有可用快取。最後錯誤：{last_error}")
+    yahoo_available = fresh is not None
     if fresh is not None:
         fresh.index = pd.to_datetime(fresh.index).tz_localize(None)
         fresh = fresh[~fresh.index.duplicated(keep="last")].sort_index()
         df = fresh.combine_first(cached) if cached is not None else fresh
-        df = df[~df.index.duplicated(keep="last")].sort_index()
+    elif cached is not None:
+        df = cached.copy()
+        print(f"Yahoo Finance 暫不可用，改用既有行情快取：{len(df)} 筆；最後錯誤：{last_error}", flush=True)
+    else:
+        df = pd.DataFrame()
+
+    # Yahoo may throttle cloud-hosted requests. Refresh the Taiwan index close
+    # directly from TWSE, while leaving unavailable overseas series on cache.
+    now = pd.Timestamp.now(tz="Asia/Taipei")
+    official_taiex = _fetch_twse_taiex_recent(now)
+    if official_taiex:
+        if "TAIEX" not in df.columns:
+            df["TAIEX"] = np.nan
+        for day, value in official_taiex.items():
+            df.loc[day, "TAIEX"] = value
+        print(
+            f"TWSE 官方加權指數備援補入 {len(official_taiex)} 個交易日；"
+            f"最新日期 {max(official_taiex).date()}",
+            flush=True
+        )
+    if df.empty or "TAIEX" not in df or df["TAIEX"].dropna().empty:
+        raise RuntimeError(
+            f"無法取得加權指數歷史資料，且官方備援與既有快取皆不可用。最後 Yahoo 錯誤：{last_error}"
+        )
+
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    if fresh is not None or official_taiex:
         tmp = cache_path + ".tmp"
         df.to_csv(tmp, index_label="date")
         os.replace(tmp, cache_path)
-        print(f"行情歷史快取已更新：{len(df)} 筆（本次下載 {period}）", flush=True)
+        print(f"行情歷史快取已更新：{len(df)} 筆", flush=True)
         try:
             import storage
             if storage.enabled():
@@ -85,14 +196,38 @@ def load_live(years=6, cache_path="market_history.csv"):
                 print(f"行情快取已持久化至 Supabase（檔案數 {saved}）", flush=True)
         except Exception as exc:
             print(f"行情快取 Supabase 保存失敗：{type(exc).__name__}: {exc}", flush=True)
-    else:
-        df = cached
-        print(f"Yahoo Finance 暫不可用，改用既有行情快取：{len(df)} 筆；最後錯誤：{last_error}", flush=True)
 
-    df.index = pd.to_datetime(df.index).tz_localize(None)
-    df = df[~df.index.duplicated(keep="last")].sort_index()
+    # Capture freshness before limited forward-fill so stale inputs are visible.
+    source_frame = df.copy()
     df = df.dropna(subset=["TAIEX"]).ffill(limit=3)
-    now = pd.Timestamp.now(tz="Asia/Taipei")
+    data_status = {
+        "updated_at": now.isoformat(),
+        "yahoo_status": "ok" if yahoo_available else "limited_or_unavailable",
+        "taiwan_index_source": "TWSE 官方日收盤資料" if official_taiex else (
+            "Yahoo Finance" if yahoo_available else "既有快取"
+        ),
+        "taiwan_index_official_rows": len(official_taiex),
+        "series": {}
+    }
+    for column in TICKERS:
+        if column not in source_frame or source_frame[column].dropna().empty:
+            data_status["series"][column] = {
+                "source": "無可用資料", "latest_date": None, "age_calendar_days": None
+            }
+            continue
+        latest = pd.Timestamp(source_frame[column].last_valid_index()).tz_localize(None)
+        if column == "TAIEX" and official_taiex:
+            source = "TWSE 官方日收盤資料"
+        elif yahoo_available and column in fresh and fresh[column].notna().any():
+            source = "Yahoo Finance"
+        else:
+            source = "快取（Yahoo Finance 未更新）"
+        data_status["series"][column] = {
+            "source": source,
+            "latest_date": str(latest.date()),
+            "age_calendar_days": max(0, int((now.normalize().tz_localize(None) - latest.normalize()).days))
+        }
+    df.attrs["data_status"] = data_status
     if now.hour < 14:
         df = df[df.index < now.tz_localize(None).normalize()]
     if len(df) < 500:
@@ -748,6 +883,7 @@ if __name__ == "__main__":
         "signal": "買進" if pu > BUY else "賣出／減碼" if pu < SELL else "觀望",
         "thresholds": {"buy": BUY, "sell": SELL},
         "missing_layers": [k for k in ("籌碼", "信用", "期貨") if k not in layers.index],
+        "data_status": df.attrs.get("data_status", {}),
         "layers": {k: round(float(v), 3) for k, v in layers.items()},
         "features": [{"name": k, "contrib": round(float(v), 3)}
                      for k, v in contrib.reindex(contrib.abs().sort_values(ascending=False).index).items()],
@@ -766,6 +902,7 @@ if __name__ == "__main__":
     os.replace(tmp, "weekly_prob.csv")
     wk = weekly_report(p5, f5, l5, c5)
     wk["horizon_history"] = historical_horizons(df["TAIEX"])
+    wk["data_status"] = df.attrs.get("data_status", {})
     tmp = "weekly.json.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(wk, f, ensure_ascii=False)
