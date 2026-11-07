@@ -18,10 +18,10 @@ import urllib.request
 LIST_URL = "https://www.ey.gov.tw/Page/A2EC1FEF9BC39AD0"
 ARTICLE_PREFIX = "/Page/9277F759E41CCD91/"
 PAGE_SIZE = 15
-SAMPLE_PAGES = [
-    1, 36, 72, 108, 144, 180, 216, 252, 288, 324, 360, 396,
-    432, 468, 504, 540, 576, 612, 648, 684, 720, 756, 792, 830,
-]
+SAMPLE_PAGES = sorted({
+    1 + round(i * (830 - 1) / 79)
+    for i in range(80)
+})
 DATE_RE = re.compile(r"(?<!\d)(\d{2,3})-(\d{1,2})-(\d{1,2})")
 
 
@@ -134,7 +134,7 @@ def main():
         "source_url": LIST_URL,
         "rights_note": "僅保存短標題、日期及原文連結；原文及其他內容權利依行政院與原著作權人聲明辦理。",
         "scope": "跨年度分頁抽樣索引，非完整新聞庫；不含新聞全文或摘要。",
-        "sampling": f"等距抽取 {len(successful_pages)} 個歷史分頁，每頁最多 {PAGE_SIZE} 筆。",
+        "sampling": f"從歷史索引前 830 頁等距抽取最多 80 頁，實際成功 {len(successful_pages)} 頁，每頁最多 {PAGE_SIZE} 筆。",
         "sampled_pages": successful_pages,
         "date_start": items[0]["date"],
         "date_end": items[-1]["date"],
