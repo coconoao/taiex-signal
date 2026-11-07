@@ -285,7 +285,12 @@ def load_live(years=10, cache_path="market_history.csv"):
         tmp = cache_path + ".tmp"
         df.to_csv(tmp, index_label="date")
         os.replace(tmp, cache_path)
-        print(f"行情歷史快取已更新：{len(df)} 筆", flush=True)
+        taiex_dates = df["TAIEX"].dropna().index
+        print(
+            f"行情歷史快取已更新：{len(taiex_dates)} 筆；"
+            f"涵蓋 {taiex_dates.min().date()} 至 {taiex_dates.max().date()}",
+            flush=True
+        )
         try:
             import storage
             if storage.enabled():
