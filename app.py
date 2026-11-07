@@ -328,8 +328,82 @@ def _futures_quote():
             "label": "台指期近月（夜盤）", "source": "Yahoo Finance，可能延遲",
             "delay_note": "非期交所官方即時串流，請以資料時間為準"}
 
+def _twse_daily_taiex_close(day):
+    """Fetch one official completed TAIEX close; this is daily data, not an intraday quote."""
+    params = urllib.parse.urlencode({
+        "date": day.strftime("%Y%m%d"), "type": "ALL", "response": "json"
+    })
+    url = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?" + params
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; TAIEXDataQuality/1.0)",
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": "https://www.twse.com.tw/"
+    })
+    with urllib.request.urlopen(req, timeout=8) as response:
+        payload = json.loads(response.read().decode("utf-8-sig"))
+    tables = payload.get("tables") or []
+    if isinstance(payload.get("data"), list):
+        tables = list(tables) + [{"fields": payload.get("fields") or [], "data": payload["data"]}]
+    for table in tables:
+        fields = table.get("fields") or []
+        for row in table.get("data") or []:
+            if isinstance(row, dict):
+                record = row
+            elif fields and len(row) == len(fields):
+                record = dict(zip(fields, row))
+            else:
+                continue
+            name = str(record.get("指數") or record.get("指數名稱") or record.get("Index") or "")
+            if "發行量加權股價指數" not in name:
+                continue
+            raw = record.get("收盤指數") or record.get("收盤") or record.get("Close")
+            try:
+                value = float(str(raw).replace(",", "").strip())
+            except (TypeError, ValueError):
+                return None
+            return value if 1000 <= value <= 100000 else None
+    return None
+
+
+def _twse_last_close_quote():
+    """Return the two latest official daily closes, explicitly labelled as non-real-time."""
+    now = dt.datetime.now(TZ)
+    first_offset = 1 if now.hour < 14 else 0
+    closes = []
+    for offset in range(first_offset, first_offset + 10):
+        day = now.date() - dt.timedelta(days=offset)
+        try:
+            value = _twse_daily_taiex_close(day)
+            if value is not None:
+                closes.append((day, value))
+                if len(closes) == 2:
+                    break
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429 or exc.code >= 500:
+                print(f"TWSE 官方收盤備援暫不可用：HTTP {exc.code}", flush=True)
+                break
+        except Exception as exc:
+            print(f"TWSE 官方收盤備援 {day} 暫不可用：{type(exc).__name__}", flush=True)
+            if isinstance(exc, (TimeoutError, OSError, urllib.error.URLError)):
+                break
+    if not closes:
+        return None
+    latest_day, latest = closes[0]
+    previous = closes[1][1] if len(closes) > 1 else None
+    change = latest - previous if previous and previous > 0 else 0.0
+    pct = change / previous * 100 if previous and previous > 0 else 0.0
+    return {
+        "last": round(latest, 2), "change": round(change, 2),
+        "pct": round(pct, 2), "time": latest_day.isoformat(),
+        "market": "spot_close", "label": "加權指數最近官方收盤",
+        "source": "TWSE 官方日收盤資料（非即時）",
+        "delay_note": "Yahoo 即時來源不可用或目前非交易時段；此數值為最近已完成交易日收盤"
+    }
+
+
 def quote():
-    # 現貨交易時段優先顯示加權指數；夜盤時段改顯示台指期近月。
+    # Intraday Yahoo quotes are attempted first; official TWSE daily close is the
+    # safe fallback and is never presented as a live/intraday value.
     if QUOTE["v"] and time.time() - QUOTE["t"] < 20:
         return QUOTE["v"]
     now = dt.datetime.now(TZ)
@@ -344,14 +418,20 @@ def quote():
                  "label": "加權指數現貨", "source": "Yahoo Finance，可能延遲"}
             QUOTE.update(t=time.time(), v=v)
             return v
-        except Exception:
-            if not _afterhours_session(now):
-                raise
+        except Exception as exc:
+            print(f"Yahoo 加權指數即時報價不可用，改查 TWSE 官方日收盤：{type(exc).__name__}", flush=True)
     if _afterhours_session(now):
-        v = _futures_quote()
-        QUOTE.update(t=time.time(), v=v)
-        return v
-    raise RuntimeError("目前沒有交易中的即時行情（現貨 08:45–13:45；期貨夜盤 15:00–次日 05:00）")
+        try:
+            v = _futures_quote()
+            QUOTE.update(t=time.time(), v=v)
+            return v
+        except Exception as exc:
+            print(f"台指期行情不可用，改查 TWSE 官方日收盤：{type(exc).__name__}", flush=True)
+    fallback = _twse_last_close_quote()
+    if fallback:
+        QUOTE.update(t=time.time(), v=fallback)
+        return fallback
+    raise RuntimeError("Yahoo 即時行情與 TWSE 官方日收盤備援目前都無法取得資料")
 
 def us_market_quote():
     """美股最新可取得的 5 分鐘行情；Yahoo 非官方資料，可能延遲或缺漏，快取 60 秒。"""
