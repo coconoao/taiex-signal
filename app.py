@@ -147,7 +147,6 @@ def ensure_site_user(email):
         supabase_request("POST", "site_users", {"email": email},
                          "resolution=ignore-duplicates,return=minimal")
     return site_user_by_email(email)
-
 def list_site_users():
     return supabase_request(
         "GET",
@@ -297,8 +296,7 @@ def us_market_quote():
     if raw is None or raw.empty:
         raise RuntimeError("目前無法取得美股盤中資料")
     if isinstance(raw.columns, pd.MultiIndex):
-        if "Close" in raw.columns.get_level_values(0):
-            close = raw.xs("Close", axis=1, level=0)
+        if "Close" in raw.columns.get_level_values(0):            close = raw.xs("Close", axis=1, level=0)
         elif "Close" in raw.columns.get_level_values(1):
             close = raw.xs("Close", axis=1, level=1)
         else:
@@ -444,11 +442,11 @@ def call_ai_provider(provider, api_key, model, prompt):
         request = urllib.request.Request(
             url, data=data, headers={"Content-Type": "application/json", **headers}
         )
+        attempt_started = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
                 result = json.loads(response.read().decode("utf-8"))
-            break
-        except urllib.error.HTTPError as e:
+            break        except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:1200]
             try:
                 detail = json.loads(detail).get("error", {}).get("message", detail)
@@ -478,6 +476,20 @@ def call_ai_provider(provider, api_key, model, prompt):
                 provider, e.code, f"{provider} API 回應 {e.code}{retry_note}: {detail}"
             )
         except (TimeoutError, urllib.error.URLError, ConnectionError) as e:
+            # 只記錄耗時與 traceback 函式名稱；不記錄 URL、路徑、金鑰、提示或例外訊息。
+            elapsed = time.monotonic() - attempt_started
+            tb_names = []
+            tb = e.__traceback__
+            while tb is not None:
+                tb_names.append(tb.tb_frame.f_code.co_name)
+                tb = tb.tb_next
+            safe_frames = ",".join(tb_names[-6:]) or "none"
+            if provider == "Gemini":
+                print(
+                    f"[api-ai] provider=Gemini network_error attempt={attempt + 1} "
+                    f"type={type(e).__name__} elapsed={elapsed:.2f}s frames={safe_frames}",
+                    flush=True
+                )
             # Gemini 偶發連線逾時時有限重試一次；不輸出 URL、金鑰或提示內容。
             if provider == "Gemini" and attempt < 1:
                 delay = 2.0 + random.uniform(0.1, 0.5)
@@ -597,8 +609,7 @@ class H(SimpleHTTPRequestHandler):
         user, password = "", ""
         try:
             header = self.headers.get("Authorization", "")
-            scheme, token = header.split(" ", 1)
-            if scheme.lower() != "basic":
+            scheme, token = header.split(" ", 1)            if scheme.lower() != "basic":
                 raise ValueError()
             decoded = base64.b64decode(token, validate=True).decode("utf-8")
             user, password = decoded.split(":", 1)
@@ -747,8 +758,7 @@ class H(SimpleHTTPRequestHandler):
                     state["log"] = "\\n".join(
                         f'{x.get("step")}: exit={x.get("exit_code")} {x.get("log", "")}'
                         for x in saved.get("results", [])
-                    )[-3000:]
-                    state["exit_code"] = saved.get("exit_code")
+                    )[-3000:]                    state["exit_code"] = saved.get("exit_code")
                 except Exception:
                     pass
             return self.send_json(state)
