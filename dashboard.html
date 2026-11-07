@@ -114,8 +114,8 @@ details[open]>summary{margin-bottom:12px}
       <div style="overflow-x:auto"><table><thead><tr><th>訊號</th><th>樣本</th><th>勝率</th><th>平均</th><th>80% 區間</th></tr></thead><tbody id="wb"></tbody></table></div></section>
     <section><h2>月級距歷史情境分布</h2>
       <p class="note" id="horizonNote">以歷史不重疊交易日區間計算；這是回顧統計，不是未來預測。</p>
-      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>樣本數</th><th>歷史正報酬比例（95% 區間）</th><th>平均</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
-      <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。樣本採不重疊區間；括號為歷史正報酬比例的 Wilson 95% 信賴區間，樣本少時區間會較寬，均不代表未來發生機率。</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>樣本數</th><th>歷史正報酬比例（95% 區間）</th><th>起點敏感度</th><th>平均</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
+      <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。主欄採固定起點的不重疊區間；括號為 Wilson 95% 近似區間。起點敏感度列出所有可能取樣起點下正報酬比例的最小至最大值，用來檢查切分方式影響；各起點彼此不獨立。樣本少時估計不穩定，均不代表未來發生機率。</p>
     </section>
     <section><h2>新聞情緒（一週）：內建規則與 AI 並排</h2><div id="newsW"></div></section>
     <section><h2>政策事件追蹤</h2>
@@ -289,7 +289,7 @@ function renderWeekly(w) {
   $("horizonRows").innerHTML = names.map(([key,label]) => {
     const h = hh[key];
     return h && h.n
-      ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}</td><td>${h.positive_rate}%（${(h.positive_rate_ci95 || [null,null]).join("%～")}%）</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
+      ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}</td><td>${h.positive_rate}%（${(h.positive_rate_ci95 || [null,null]).join("%～")}%）</td><td>${h.phase_positive_rate_range ? h.phase_positive_rate_range[0] + "%～" + h.phase_positive_rate_range[1] + "%" : "—"}</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
       : `<tr><td>${label}</td><td colspan="5">歷史樣本不足</td></tr>`;
   }).join("");
   $("horizonNote").textContent = `統計截至 ${w.asof}；採用歷史不重疊區間，僅描述過去分布，不是未來走勢預測。`;
