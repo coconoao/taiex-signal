@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14202b"><title>AI 聊天｜台股訊號</title>
+<style>
+:root{--bg:#f2f5f8;--panel:#fff;--ink:#14202b;--mute:#657383;--line:#d9e0e7;--accent:#3d5a80}
+@media(prefers-color-scheme:dark){:root{--bg:#10171e;--panel:#18222c;--ink:#e6edf3;--mute:#93a1af;--line:#2a3745;--accent:#8fb0d9;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang TC",sans-serif}
+header{max-width:850px;margin:auto;padding:16px;display:flex;justify-content:space-between}a{color:var(--accent)}
+main{max-width:850px;margin:auto;padding:0 16px 110px}h1{font-size:1.2rem;margin:4px 0}.hint{color:var(--mute);font-size:.86rem}
+#messages{display:flex;flex-direction:column;gap:12px;margin:20px 0}.msg{padding:12px 15px;border:1px solid var(--line);border-radius:14px;background:var(--panel);white-space:pre-wrap;overflow-wrap:anywhere;max-width:92%}.user{align-self:flex-end;background:var(--accent);color:white}.assistant{align-self:flex-start}
+form{position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--line);padding:12px max(16px,calc((100vw - 818px)/2)) calc(12px + env(safe-area-inset-bottom))}
+textarea{display:block;width:100%;resize:vertical;min-height:54px;max-height:180px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
+.actions{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px}.btn{padding:9px 18px;border:0;border-radius:8px;background:var(--accent);color:white;font:inherit}.btn:disabled{opacity:.5}
+</style>
+<header><a href="/">← 返回儀表板</a><a href="/auth/logout">登出</a></header>
+<main><h1>AI 聊天</h1><p class="hint">使用網站管理者設定的 AI 服務。聊天內容只在目前頁面記憶體中保留，不會存入網站資料庫。金融相關問題僅提供一般教育或技術資訊，不提供投資建議。</p>
+<div id="messages"><div class="msg assistant">你好！可以直接輸入問題開始聊天。</div></div><p id="status" class="hint" role="status"></p></main>
+<form id="form"><textarea id="input" maxlength="6000" placeholder="輸入訊息…" required></textarea><div class="actions"><span class="hint">Enter 送出 · Shift+Enter 換行</span><button class="btn" id="send">送出</button></div></form>
+<script>
+const box=document.getElementById("messages"),form=document.getElementById("form"),input=document.getElementById("input"),send=document.getElementById("send"),status=document.getElementById("status");
+const history=[];
+function add(role,text){const el=document.createElement("div");el.className="msg "+role;el.textContent=text;box.appendChild(el);window.scrollTo(0,document.body.scrollHeight);return el}
+form.addEventListener("submit",async e=>{e.preventDefault();const value=input.value.trim();if(!value||send.disabled)return;
+history.push({role:"user",content:value});add("user",value);input.value="";send.disabled=true;status.textContent="AI 回覆中…";
+try{const r=await fetch("/api/chat",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-Requested-With":"dash"},body:JSON.stringify({messages:history.slice(-20)})});const d=await r.json();if(!r.ok)throw Error(d.error||"聊天服務暫時無法使用");history.push({role:"assistant",content:d.text});add("assistant",d.text);status.textContent=""}
+catch(err){history.pop();status.textContent=err.message;add("assistant","目前無法回覆："+err.message)}
+finally{send.disabled=false;input.focus()}});
+input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();form.requestSubmit()}});
+</script></main></html>
