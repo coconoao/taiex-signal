@@ -268,6 +268,10 @@ def load_live(years=10, cache_path="market_history.csv"):
     if official_taiex:
         if "TAIEX" not in df.columns:
             df["TAIEX"] = np.nan
+        else:
+            # pandas 3.x rejects assigning fractional official closes into an
+            # integer-typed cached series; normalize before merging TWSE data.
+            df["TAIEX"] = pd.to_numeric(df["TAIEX"], errors="coerce").astype(float)
         for day, value in official_taiex.items():
             df.loc[day, "TAIEX"] = value
         print(
