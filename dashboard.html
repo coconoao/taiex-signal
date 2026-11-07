@@ -118,6 +118,11 @@ details[open]>summary{margin-bottom:12px}
       <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。樣本採不重疊區間，歷史比例不代表未來發生機率。</p>
     </section>
     <section><h2>新聞情緒（一週）：內建規則與 AI 並排</h2><div id="newsW"></div></section>
+    <section><h2>政策事件追蹤</h2>
+      <p class="note">整理政府政策與相關公開訊息，保留來源、發布時間與原文連結。階段標籤僅依標題／摘要字詞初步分類，不代表法律效力判定；新聞彙整項目須交叉核對。此區不推斷市場漲跌方向。</p>
+      <p class="note" id="policyEventMeta">載入政策事件資料中…</p>
+      <div id="policyEvents"><p class="note">目前尚無政策事件資料。</p></div>
+    </section>
   </div>
 
   <div id="tab-stock" hidden>
@@ -343,7 +348,23 @@ function renderSummary() {
   if (n && n.agg.next_day.n) p.push(`新聞資料已載入（${(n.headlines || []).length} 則）`);
   $("sumline").innerHTML = p.join("　｜　");
 }
-function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); newsCard(n, "next_week", $("newsW")); renderSummary(); }
+function renderPolicyEvents(n) {
+  const events = (n && Array.isArray(n.policy_events) ? n.policy_events : []).slice(0, 18);
+  $("policyEventMeta").textContent = events.length
+    ? `本次整理 ${events.length} 件；累積事件紀錄 ${n.policy_event_history_count || events.length} 件。資料日期：${n.asof || "未提供"}。`
+    : "目前沒有取得政策事件。請留意來源更新狀況。";
+  $("policyEvents").innerHTML = events.length ? events.map(e => {
+    const href = safeNewsHref(e.link);
+    return `<article style="padding:10px 0;border-bottom:1px solid var(--line)">
+      <b>${esc(e.title || "（無標題）")}</b>
+      <p class="note">${esc(e.category || "一般政策")} · ${esc(e.status || "待確認政策階段")}</p>
+      <p class="note">${esc(e.source_class || "來源未分類")} · ${esc(e.source || e.tag || "來源未提供")} · ${esc(e.published || "時間未提供")}</p>
+      ${e.description ? `<p class="note">${esc(e.description)}</p>` : ""}
+      ${href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">查看原始來源</a>` : ""}
+    </article>`;
+  }).join("") : '<p class="note">沒有可顯示的政策事件；來源可能暫時無法連線。</p>';
+}
+function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); newsCard(n, "next_week", $("newsW")); renderPolicyEvents(n); renderSummary(); }
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
