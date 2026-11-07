@@ -794,6 +794,18 @@ class H(SimpleHTTPRequestHandler):
                 return self.send_json({"users": list_site_users()})
             except Exception:
                 return self.send_json({"error": "無法讀取使用者清單"}, 503)
+        if u.path == "/api/taiwan-data-status":
+            try:
+                status_path = os.path.join(DATA, "taiwan_data_status.json")
+                with open(status_path, encoding="utf-8") as stream:
+                    status = json.load(stream)
+                if status.get("demo"):
+                    return self.send_json({"error": "示範資料不列入正式台股資料品質檢查"}, 409)
+                return self.send_json(status)
+            except FileNotFoundError:
+                return self.send_json({"error": "尚未完成第一次台股完整資料品質檢查"}, 404)
+            except Exception:
+                return self.send_json({"error": "目前無法讀取台股資料品質狀態"}, 503)
         if u.path == "/api/status":
             state = {
                 "running": JOB.get("running"),
