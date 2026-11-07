@@ -664,9 +664,21 @@ def historical_horizons(series):
         if values.empty:
             out[key] = {"label": label, "days": days, "n": 0}
             continue
+        n = int(len(values))
+        wins = int((values > 0).sum())
+        # Wilson 95% interval for the historical positive-return frequency.
+        # This quantifies sampling uncertainty; it is not a future forecast interval.
+        z = 1.96
+        phat = wins / n
+        denom = 1 + z * z / n
+        center = (phat + z * z / (2 * n)) / denom
+        half = z * np.sqrt(phat * (1 - phat) / n + z * z / (4 * n * n)) / denom
         out[key] = {
-            "label": label, "days": days, "n": int(len(values)),
-            "positive_rate": round(float((values > 0).mean()) * 100, 1),
+            "label": label, "days": days, "n": n,
+            "positive_rate": round(phat * 100, 1),
+            "positive_rate_ci95": [round(max(0.0, center - half) * 100, 1),
+                                   round(min(1.0, center + half) * 100, 1)],
+            "sample_note": "樣本偏少，估計不穩定" if n < 30 else "歷史樣本",
             "mean": round(float(values.mean()) * 100, 2),
             "median": round(float(values.median()) * 100, 2),
             "p10": round(float(values.quantile(.10)) * 100, 2),
