@@ -96,7 +96,7 @@ class CheckpointTests(unittest.TestCase):
                 _checkpoint_if_needed(old, rows, path)
             saved = pd.read_csv(path, index_col=0, parse_dates=True)
         self.assertEqual(len(saved), 6)
-        self.assertEqual(saved.index, saved.index.sort_values())
+        self.assertTrue(saved.index.equals(saved.index.sort_values()))
         fake_storage.save_data.assert_called_once_with()
         self.assertFalse(__import__("os").path.exists(path + ".tmp"))
 
