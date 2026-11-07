@@ -259,9 +259,9 @@ function renderDaily(d) {
   $("layerRows").innerHTML = Object.entries(d.layers).map(([k, v]) => divRow(esc(k) + "層", v, max * 1.5)).join("");
   $("featRows").innerHTML = d.features.slice(0, 6).map(f => divRow(esc(f.name.split(":")[1]) + `<small class="note"> ${esc(f.name.split(":")[0])}</small>`, f.contrib, max)).join("");
   const t = d.backtest, st = t.strategy, bh = t.buyhold;
-  $("stats").innerHTML = [["方向命中率", pct(t.direction_acc / 100), `共 ${t.days} 個交易日`],
+  $("stats").innerHTML = [["方向命中率", pct(t.direction_acc / 100), `擴張式基準 ${t.baseline_direction_acc ?? "—"}% · ${t.days} 個交易日`],
     ["持有日勝率", t.hold_win_rate == null ? "—" : pct(t.hold_win_rate / 100), `換倉 ${t.trades} 次`],
-    ["年化報酬", st.annual + "%", `買進持有 ${bh.annual}%`], ["最大回撤", st.max_dd + "%", `買進持有 ${bh.max_dd}%`], ["Brier 分數（越低越好）", t.brier == null ? "—" : t.brier, "樣本外機率誤差"], ["Log loss（越低越好）", t.log_loss == null ? "—" : t.log_loss, "樣本外機率品質"]]
+    ["年化報酬", st.annual + "%", `買進持有 ${bh.annual}%`], ["最大回撤", st.max_dd + "%", `買進持有 ${bh.max_dd}%`], ["Brier 分數（越低越好）", t.brier == null ? "—" : t.brier, `基準 ${t.baseline_brier ?? "—"}`], ["Brier 技能分數", t.brier_skill == null ? "—" : t.brier_skill, "大於 0 優於擴張式基準；小於 0 較差"], ["Log loss（越低越好）", t.log_loss == null ? "—" : t.log_loss, "樣本外機率品質"]]
     .map(([k, v, n]) => `<div><dt>${k}</dt><dd>${v} <small>${n}</small></dd></div>`).join("");
   drawCurve(t.curve);
 }
@@ -331,7 +331,7 @@ function newsCard(n, key, el) {
     .concat((n.headlines || []).filter(h => h.kind === "analyst").slice(0,5));
   const taiwan = (n.headlines || []).filter(h => h.kind === "taiwan").slice(0,12);
   const policy = (n.headlines || []).filter(h => h.kind === "policy").slice(0,12);
-  const list = rows => rows.length ? '<ul>' + rows.map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + '</small></li>'; }).join("") + '</ul>' : '<p class="note">目前沒有取得這個分類的新聞。</p>';
+  const list = rows => rows.length ? '<ul>' + rows.map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + (h.description ? ' · ' + esc(h.description) : '') + '</small></li>'; }).join("") + '</ul>' : '<p class="note">目前沒有取得這個分類的新聞。</p>';
   el.innerHTML = (n.demo ? '<div class="banner">以下為示範新聞資料，不是真實新聞。</div>' : "") +
     `<div class="mcs">${cards}</div><h3>國際市場新聞與機構觀點</h3>` + list(headlines) +
     '<h3>台灣本地新聞（中央社 RSS）</h3>' + list(taiwan) +
