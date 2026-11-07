@@ -14,6 +14,7 @@ from pipeline import (
     _checkpoint_if_needed,
     _merge_and_save,
     _open_with_backoff,
+    _read_with_backoff,
     _pending_dates,
     fetch_chips,
 )
@@ -78,6 +79,22 @@ class RetryTests(unittest.TestCase):
                 with self.assertRaises(urllib.error.HTTPError):
                     _open_with_backoff(Mock(), timeout=10)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [2.0, 2.0, 2.0])
+
+    def test_retries_timeout_while_reading_response_body(self):
+        import io
+
+        class FirstReadTimesOut(io.BytesIO):
+            def read(self, *args, **kwargs):
+                raise TimeoutError("The read operation timed out")
+
+        first = FirstReadTimesOut(b"")
+        second = io.BytesIO(b'{"ok": true}')
+        with patch("pipeline._open_with_backoff", side_effect=[first, second]) as open_url:
+            with patch("pipeline.time.sleep") as sleep:
+                result = _read_with_backoff(Mock(), timeout=10)
+        self.assertEqual(result, b'{"ok": true}')
+        self.assertEqual(open_url.call_count, 2)
+        sleep.assert_called_once_with(5)
 
 
 class CheckpointTests(unittest.TestCase):
