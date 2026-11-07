@@ -262,6 +262,8 @@ def stale():
         kinds = {h.get("kind") for h in news.get("headlines", []) if isinstance(h, dict)}
         if not {"taiwan", "policy"}.issubset(kinds):
             return True
+        if not isinstance(news.get("policy_events"), list):
+            return True
         return any(time.time() - os.path.getmtime(name) > 18 * 3600 for name in required)
     except Exception:
         return True
