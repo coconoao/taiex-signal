@@ -399,7 +399,11 @@ $("saveKeys").onclick = () => {
 $("clearAll").onclick = () => { setKeys({}, false); saveAI(null); try { localStorage.removeItem("keys"); } catch {} renderKeyForm(); renderNews(); $("aiMsg").textContent = "已清除金鑰與分析結果。"; };
 
 const J = r => r.json().then(j => r.ok ? j : Promise.reject(new Error((j.error && (j.error.message || j.error)) || r.status)));
-const post = (url, headers, body) => fetch(url, {method: "POST", headers: {"content-type": "application/json", "X-Requested-With": "dash", ...headers}, body: JSON.stringify(body)}).then(J);
+const post = (url, headers, body) => fetch(url, {
+  method: "POST", credentials: "same-origin", cache: "no-store",
+  headers: {"content-type": "application/json", "X-Requested-With": "dash", ...headers},
+  body: JSON.stringify(body)
+}).then(J);
 const CALLS = {
   Claude: k => k.claude && (p => post("/api/ai", {}, {provider: "Claude", key: k.claude, model: k.claudeModel || "claude-sonnet-5-5", prompt: p}).then(r => r.text)),
   ChatGPT: k => k.openai && (p => post("/api/ai", {}, {provider: "ChatGPT", key: k.openai, model: k.openaiModel || "gpt-6-luna", prompt: p}).then(r => r.text)),
@@ -419,7 +423,11 @@ $("runAI").onclick = async () => {
   $("aiMsg").textContent = "分析中…"; $("runAI").disabled = true;
   const res = {};
   await Promise.all(jobs.map(([m, f]) => f(NEWS.prompt).then(t => { res[m] = parseAI(t); })
-    .catch(e => { res[m] = {error: String(e.message || e).replace(/Failed to fetch/, "連線失敗（網路、金鑰或瀏覽器限制）")}; })));
+    .catch(e => {
+      const message = String(e.message || e);
+      res[m] = {error: message.replace(/Failed to fetch|Load failed|NetworkError/i,
+        "無法連接網站 AI 服務；請確認網路後重試")};
+    })));
   saveAI({asof: NEWS.asof, models: res}); renderNews(); $("runAI").disabled = false;
   $("aiMsg").textContent = "完成：" + Object.entries(res).map(([m, r]) => m + (r.error ? " 失敗：" + r.error : " 成功")).join("、");
 };
