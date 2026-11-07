@@ -188,7 +188,7 @@ def run_jobs(*whats):
     try:
         for w in whats:
             JOB["running"] = w
-            cmd = [sys.executable, os.path.join(CODE, w + ".py")] + (["--demo"] if DEMO and w == "pipeline" else [])
+            cmd = [sys.executable, "-u", os.path.join(CODE, w + ".py")] + (["--demo"] if DEMO and w == "pipeline" else [])
             try:
                 p = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
