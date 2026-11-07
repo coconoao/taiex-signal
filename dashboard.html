@@ -138,6 +138,11 @@ details[open]>summary{margin-bottom:12px}
       <p><button class="btn" id="openGeminiSettings" type="button">開啟 Gemini 視窗</button> <button class="btn" id="copyNews" type="button">複製目前新聞資料</button></p>
       <p class="note" id="geminiMsg">先開啟 Gemini 並登入自己的帳號；複製新聞後，到 Gemini 視窗貼上即可。電腦瀏覽器會嘗試開啟獨立小視窗；iPhone/iPad 可能依 Safari 設定改以新分頁開啟。</p>
     </section>
+    <section><h2>ChatGPT 個人帳號視窗</h2>
+      <p>按下按鈕會另外開啟 ChatGPT，你可以登入自己的 OpenAI 帳號。網站不會取得你的帳號密碼，也不需要 API Key。</p>
+      <p><button class="btn" id="openChatGPTSettings" type="button">開啟 ChatGPT</button> <button class="btn" id="copyNewsChatGPT" type="button">複製目前新聞資料</button></p>
+      <p class="note" id="chatgptMsg">複製資料後，到 ChatGPT 聊天室貼上即可；iPhone/iPad 可能以新分頁開啟。</p>
+    </section>
     <section id="srv" hidden><h2>伺服器</h2>
       <p class="note" id="autoMsg"></p>
       <p><button class="btn" data-run="all">立即更新行情與新聞</button></p>
@@ -309,7 +314,24 @@ function openGeminiWindow() {
 }
 $("openGeminiSettings").addEventListener("click", openGeminiWindow);
 
-/* ---- 新聞資料：保留內建新聞呈現，提供複製到 Gemini ---- */
+function openChatGPTWindow() {
+  const width = Math.min(1120, Math.max(420, (window.screen && window.screen.availWidth || 1200) - 80));
+  const height = Math.min(860, Math.max(620, (window.screen && window.screen.availHeight || 900) - 100));
+  const left = Math.max(0, Math.round(((window.screen && window.screen.availWidth || width) - width) / 2));
+  const top = Math.max(0, Math.round(((window.screen && window.screen.availHeight || height) - height) / 2));
+  const features = `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+  const popup = window.open("https://chatgpt.com/", "taiexChatGPTPersonalWindow", features);
+  const msg = $("chatgptMsg");
+  if (popup) {
+    try { popup.focus(); } catch {}
+    if (msg) msg.textContent = "已要求瀏覽器開啟 ChatGPT。請登入自己的 OpenAI 帳號；若沒有出現視窗，請允許此網站開啟彈出式視窗。";
+  } else if (msg) {
+    msg.textContent = "瀏覽器封鎖了彈出式視窗。請允許此網站開啟彈出式視窗，再點一次。";
+  }
+}
+$("openChatGPTSettings").addEventListener("click", openChatGPTWindow);
+
+/* ---- 新聞資料：提供複製到 Gemini 或 ChatGPT ---- */
 let NEWS = null, WK = null;
 function mergedNews() {
   if (!NEWS) return null;
@@ -388,8 +410,8 @@ else {
 }
 
 
-$("copyNews").onclick = async () => {
-  const msg = $("geminiMsg");
+async function copyNewsToAI(target) {
+  const msg = $(target === "ChatGPT" ? "chatgptMsg" : "geminiMsg");
   if (!NEWS || !Array.isArray(NEWS.headlines) || !NEWS.headlines.length) {
     msg.textContent = "目前沒有新聞資料，請先更新新聞後再試。"; return;
   }
@@ -408,10 +430,16 @@ $("copyNews").onclick = async () => {
   const events = (NEWS.policy_events || []).slice(0, 18).map((e, i) =>
     `政策事件 ${i + 1}. ${e.title || "（無標題）"}\n類別：${e.category || "一般政策"}\n階段：${e.status || "待確認"}\n來源類型：${e.source_class || "未分類"}\n來源：${e.source || "未提供"}\n發布時間：${e.published || "未提供"}\n摘要：${e.description || "未提供"}\n原文：${safeNewsHref(e.link) || "未提供"}`
   ).join("\n\n");
-  const payload = "請用繁體中文整理以下資料，分成台灣新聞、政府政策、國際局勢與市場新聞。每則請區分已確認事實、尚待確認資訊及分析推論；說明政策可能經由關稅、出口、供應鏈、能源、匯率或利率傳導的管道。政策階段是依標題與摘要的初步字詞分類，請核對原始公告，不要自行判定法律效力。不要提供股票買賣建議、價格預測或投資策略。\n\n【新聞】\n" + items + "\n\n【政策事件資料庫】\n" + events
-  try { await navigator.clipboard.writeText(payload); msg.textContent = "已複製 " + selected.length + " 則新聞資料（含台灣新聞與政策來源）。請開啟 Gemini 聊天室並貼上。"; }
-  catch { msg.textContent = "瀏覽器未允許存取剪貼簿，請確認網站使用 HTTPS，或重新點擊複製。"; }
-};
+  const payload = "請用繁體中文整理以下資料，分成台灣新聞、政府政策、國際局勢與市場新聞。每則請區分已確認事實、尚待確認資訊及分析推論；說明政策可能經由關稅、出口、供應鏈、能源、匯率或利率傳導的管道。政策階段是依標題與摘要的初步字詞分類，請核對原始公告，不要自行判定法律效力。不要提供股票買賣建議、價格預測或投資策略。\n\n【新聞】\n" + items + "\n\n【政策事件資料庫】\n" + events;
+  try {
+    await navigator.clipboard.writeText(payload);
+    msg.textContent = "已複製 " + selected.length + " 則新聞資料（含台灣新聞與政策來源）。請開啟 " + target + " 聊天室並貼上。";
+  } catch {
+    msg.textContent = "瀏覽器未允許存取剪貼簿，請確認網站使用 HTTPS，或重新點擊複製。";
+  }
+}
+$("copyNews").onclick = () => copyNewsToAI("Gemini");
+$("copyNewsChatGPT").onclick = () => copyNewsToAI("ChatGPT");
 /* ---- 伺服器功能（用 python app.py 啟動時才有）：報價、個股、手動更新、匯出 ---- */
 function renderUSMarket(data) {
   $("usMarketMeta").textContent = `${data.stale ? "⚠ 最後成功快取（非最新） · " : ""}來源：${data.source} · ${data.interval} 區間 · 更新時間 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
