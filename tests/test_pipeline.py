@@ -113,7 +113,14 @@ class RetryTests(unittest.TestCase):
 
         first = FirstReadTimesOut(b"")
         second = io.BytesIO(b'{"ok": true}')
-        with patch("pipeline._open_with_backoff", side_effect=[first, second]) as open_url:
+        response1 = Mock()
+        response1.__enter__ = Mock(return_value=first)
+        response1.__exit__ = Mock(return_value=False)
+        response2 = Mock()
+        response2.__enter__ = Mock(return_value=second)
+        response2.__exit__ = Mock(return_value=False)
+        with patch("pipeline.urllib.request.urlopen",
+                   side_effect=[response1, response2]) as open_url:
             with patch("pipeline.time.sleep") as sleep:
                 result = _read_with_backoff(Mock(), timeout=10)
         self.assertEqual(result, b'{"ok": true}')
