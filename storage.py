@@ -16,7 +16,7 @@ FILES = (
     "news.json", "news_history.jsonl", "policy_events.jsonl",
     "news_research.json", "news_research_history.jsonl",
     "news_gdelt_history.jsonl", "news_gdelt_research.json",
-    "news_policy_archive.json",
+    "news_policy_archive.json", "news_policy_research.json",
 )
 # The official historical archive has its own importer. Exclude it from routine
 # Render pipeline saves so an older in-memory copy cannot overwrite a fresh backfill.
