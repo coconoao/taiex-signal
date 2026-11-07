@@ -8,19 +8,19 @@ on:
 
 jobs:
   syntax:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install Python dependencies
         run: pip install -r requirements.txt
       - name: Compile Python modules
         run: python -m compileall -q .
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
       - name: Run isolated security unit tests
         run: python -m unittest discover -s tests -v
       - name: Run isolated demo pipeline smoke test
