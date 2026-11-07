@@ -597,6 +597,27 @@ def weekly_report(prob, fwd, latest, contrib):
             "layers": {k: round(float(v), 3) for k, v in layers.items()},
             "features": [{"name": k, "contrib": round(float(v), 3)} for k, v in top.items()]}
 
+def historical_horizons(series):
+    """非預測：以不重疊交易日區間計算歷史報酬分布，避免把重疊視窗誤當獨立樣本。"""
+    out = {}
+    for key, label, days in (("1m", "約 1 個月", 21), ("3m", "約 3 個月", 63), ("6m", "約 6 個月", 126)):
+        values = (series.shift(-days) / series - 1).iloc[::days].dropna()
+        if values.empty:
+            out[key] = {"label": label, "days": days, "n": 0}
+            continue
+        out[key] = {
+            "label": label, "days": days, "n": int(len(values)),
+            "positive_rate": round(float((values > 0).mean()) * 100, 1),
+            "mean": round(float(values.mean()) * 100, 2),
+            "median": round(float(values.median()) * 100, 2),
+            "p10": round(float(values.quantile(.10)) * 100, 2),
+            "p90": round(float(values.quantile(.90)) * 100, 2),
+            "min": round(float(values.min()) * 100, 2),
+            "max": round(float(values.max()) * 100, 2),
+        }
+    return out
+
+
 if __name__ == "__main__":
     demo = "--demo" in sys.argv
     df = load_demo() if demo else load_live()
@@ -654,6 +675,7 @@ if __name__ == "__main__":
     p5.to_csv(tmp, header=["prob"], index_label="date")  # 供個股估計使用
     os.replace(tmp, "weekly_prob.csv")
     wk = weekly_report(p5, f5, l5, c5)
+    wk["horizon_history"] = historical_horizons(df["TAIEX"])
     tmp = "weekly.json.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(wk, f, ensure_ascii=False)
