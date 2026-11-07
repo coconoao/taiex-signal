@@ -1,11 +1,12 @@
 """Backfill a bounded archive of official Executive Yuan news metadata.
 
 Only titles, publication dates and source URLs are retained. Article bodies are
-not redistributed. This archive is kept separate from multi-source daily
-sentiment snapshots because its source scope is government releases only.
+not redistributed. This archive is separate from multi-source daily sentiment
+snapshots because its source scope is government releases only.
 """
 import datetime as dt
 import json
+import os
 import time
 import urllib.error
 import urllib.parse
@@ -46,6 +47,22 @@ def fetch_range(start, end):
             time.sleep(2 ** attempt)
 
 
+def fetch_complete_range(start, end):
+    rows = fetch_range(start, end)
+    if len(rows) < MAX_SIZE:
+        time.sleep(0.15)
+        return rows
+    if start >= end:
+        raise RuntimeError(
+            f"Single-day API result reached {MAX_SIZE} rows on {start}; "
+            "refusing a potentially truncated archive."
+        )
+    midpoint = start + (end - start) // 2
+    left = fetch_complete_range(start, midpoint)
+    right = fetch_complete_range(midpoint + dt.timedelta(days=1), end)
+    return left + right
+
+
 def parse_day(value):
     raw = str(value or "").strip()[:10]
     for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
@@ -77,35 +94,15 @@ def main():
     cursor = START
     while cursor <= END:
         chunk_end = min(cursor + dt.timedelta(days=13), END)
-        rows = fetch_range(cursor, chunk_end)
-        # Split dense ranges to avoid silently accepting the API's 1,000-row cap.
-        if len(rows) >= MAX_SIZE and cursor < chunk_end:
-            midpoint = cursor + (chunk_end - cursor) // 2
-            ranges = ((cursor, midpoint), (midpoint + dt.timedelta(days=1), chunk_end))
-        else:
-            ranges = ((cursor, chunk_end),)
-        if len(ranges) == 1:
-            for raw in rows:
-                item = normalize(raw)
-                if not item:
-                    continue
-                key = item["url"] or (item["date"] + "|" + item["title"])
-                if key not in seen:
-                    seen.add(key)
-                    items.append(item)
-        else:
-            for left, right in ranges:
-                for raw in fetch_range(left, right):
-                    item = normalize(raw)
-                    if not item:
-                        continue
-                    key = item["url"] or (item["date"] + "|" + item["title"])
-                    if key not in seen:
-                        seen.add(key)
-                        items.append(item)
-                time.sleep(0.15)
+        for raw in fetch_complete_range(cursor, chunk_end):
+            item = normalize(raw)
+            if not item:
+                continue
+            key = item["url"] or (item["date"] + "|" + item["title"])
+            if key not in seen:
+                seen.add(key)
+                items.append(item)
         cursor = chunk_end + dt.timedelta(days=1)
-        time.sleep(0.15)
 
     items.sort(key=lambda x: (x["date"], x["title"]))
     if not items:
@@ -131,7 +128,7 @@ def main():
     with open(tmp, "w", encoding="utf-8") as stream:
         json.dump(archive, stream, ensure_ascii=False, separators=(",", ":"))
         stream.flush()
-    import os
+        os.fsync(stream.fileno())
     os.replace(tmp, "news_policy_archive.json")
     print(
         "Official historical news archive:",
