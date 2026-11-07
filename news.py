@@ -7,7 +7,7 @@
 機構觀點只計入「標題明確寫出該機構對台股方向」者；每日結果累積到 news_history.jsonl，日後可算各機構命中率。
 用法：python news.py   （時間同 pipeline.py：台股交易日 8:30 前後）
 """
-import os, json, re, html, datetime as dt, urllib.request, urllib.parse
+import os, json, re, html, hashlib, datetime as dt, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
@@ -134,6 +134,83 @@ def headlines():
     collect(ANALYSTS, 3, "analyst", out, seen)
     return out
 
+def policy_events(hl):
+    """將政策相關來源整理成可追溯事件清單；不推斷市場漲跌方向。"""
+    channels = {
+        "貿易／關稅": ("關稅", "貿易", "tariff", "trade", "ustr", "出口管制"),
+        "半導體／科技": ("半導體", "晶片", "晶圓", "chip", "semiconductor", "科技", "ai", "人工智慧", "出口管制"),
+        "利率／貨幣": ("利率", "央行", "聯準會", "fed", "貨幣", "匯率", "金融", "通膨", "通胀"),
+        "財政／預算": ("預算", "財政", "補助", "稅", "支出", "建設", "投資抵減"),
+        "能源／原物料": ("能源", "電價", "天然氣", "石油", "電力", "oil", "energy"),
+        "外交／地緣": ("外交", "國安", "台海", "制裁", "sanction", "china", "taiwan", "國際"),
+        "產業／供應鏈": ("產業", "供應鏈", "製造", "投資", "出口", "manufacturing", "supply chain"),
+    }
+    records, seen = [], set()
+    for h in hl:
+        if h.get("kind") != "policy":
+            continue
+        title = str(h.get("title", ""))
+        desc = str(h.get("description", ""))
+        blob = (title + " " + desc).lower()
+        tag = str(h.get("tag", ""))
+        link = str(h.get("link", ""))
+        host = urllib.parse.urlparse(link).hostname or ""
+        official = host.endswith(".gov.tw") or host.endswith(".gov") or host.endswith(".gov.uk")
+        if any(x in blob for x in ("已生效", "正式實施", "開始實施", "生效日期")):
+            status = "已生效／實施（依來源文字）"
+        elif any(x in blob for x in ("草案", "提案", "研議", "徵求意見", "擬議", "proposal", "proposed")):
+            status = "提案／研議（尚待確認）"
+        elif any(x in blob for x in ("公告", "發布", "公布", "決議", "簽署", "通過", "press release", "announces")):
+            status = "已發布／公告（不等於已生效）"
+        else:
+            status = "待確認政策階段"
+        categories = [name for name, words in channels.items() if any(w in blob for w in words)]
+        category = "、".join(categories[:3]) if categories else "一般政策"
+        identity = link or (title + "|" + str(h.get("published", "")))
+        event_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+        if event_id in seen:
+            continue
+        seen.add(event_id)
+        records.append({
+            "event_id": event_id, "title": title, "description": desc,
+            "category": category, "status": status,
+            "source": str(h.get("source") or tag),
+            "source_class": "政府官方網域" if official else "新聞／搜尋彙整，需交叉核對",
+            "published": str(h.get("published", "")), "link": link,
+            "tag": tag, "channels": categories[:3],
+        })
+    return records
+
+
+def save_policy_event_history(events, path="policy_events.jsonl", limit=1200):
+    """以事件網址雜湊去重，保留事件出現紀錄；不覆寫來源原始發布時間。"""
+    old = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                        old[row["event_id"]] = row
+                    except Exception:
+                        continue
+        except OSError:
+            pass
+    today = dt.datetime.now(dt.timezone.utc).isoformat()
+    for event in events:
+        row = dict(event)
+        row["first_seen"] = old.get(event["event_id"], {}).get("first_seen", today)
+        row["last_seen"] = today
+        old[event["event_id"]] = row
+    rows = sorted(old.values(), key=lambda x: x.get("last_seen", ""), reverse=True)[:limit]
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\\n")
+    os.replace(tmp, path)
+    return rows
+
+
 def tally(title):
     ws = re.findall(r"[a-z\-]+", title.lower())
     hit = lambda S: sum(any(w == s or (len(s) > 4 and w.startswith(s)) for s in S) for w in ws)
@@ -214,7 +291,10 @@ def main():
                 row = rows.setdefault(str(a.get("name", "?")), {"name": str(a.get("name", "?")), "id": a.get("id"), "stances": {}})
                 row["stances"][n] = a["stance"]
     vals = [sum(STANCE[s] for s in r["stances"].values()) / len(r["stances"]) for r in rows.values()]
-    out = {"asof": dt.date.today().isoformat(), "demo": False, "headlines": hl, "prompt": p, "models": res, "agg": agg,
+    events = policy_events(hl)
+    event_history = save_policy_event_history(events)
+    out = {"asof": dt.date.today().isoformat(), "demo": False, "headlines": hl, "policy_events": events,
+           "policy_event_history_count": len(event_history), "prompt": p, "models": res, "agg": agg,
            "missing": [n for n in MODELS if n not in todo],
            "analyst": {"rows": list(rows.values()), "score": round(sum(vals) / len(vals), 2) if vals else None}}
     json.dump(out, open("news.json", "w", encoding="utf-8"), ensure_ascii=False)
