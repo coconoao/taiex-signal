@@ -147,6 +147,7 @@ def ensure_site_user(email):
         supabase_request("POST", "site_users", {"email": email},
                          "resolution=ignore-duplicates,return=minimal")
     return site_user_by_email(email)
+
 def list_site_users():
     return supabase_request(
         "GET",
@@ -296,7 +297,8 @@ def us_market_quote():
     if raw is None or raw.empty:
         raise RuntimeError("目前無法取得美股盤中資料")
     if isinstance(raw.columns, pd.MultiIndex):
-        if "Close" in raw.columns.get_level_values(0):            close = raw.xs("Close", axis=1, level=0)
+        if "Close" in raw.columns.get_level_values(0):
+            close = raw.xs("Close", axis=1, level=0)
         elif "Close" in raw.columns.get_level_values(1):
             close = raw.xs("Close", axis=1, level=1)
         else:
@@ -446,7 +448,8 @@ def call_ai_provider(provider, api_key, model, prompt):
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
                 result = json.loads(response.read().decode("utf-8"))
-            break        except urllib.error.HTTPError as e:
+            break
+        except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:1200]
             try:
                 detail = json.loads(detail).get("error", {}).get("message", detail)
@@ -609,7 +612,8 @@ class H(SimpleHTTPRequestHandler):
         user, password = "", ""
         try:
             header = self.headers.get("Authorization", "")
-            scheme, token = header.split(" ", 1)            if scheme.lower() != "basic":
+            scheme, token = header.split(" ", 1)
+            if scheme.lower() != "basic":
                 raise ValueError()
             decoded = base64.b64decode(token, validate=True).decode("utf-8")
             user, password = decoded.split(":", 1)
@@ -758,7 +762,8 @@ class H(SimpleHTTPRequestHandler):
                     state["log"] = "\\n".join(
                         f'{x.get("step")}: exit={x.get("exit_code")} {x.get("log", "")}'
                         for x in saved.get("results", [])
-                    )[-3000:]                    state["exit_code"] = saved.get("exit_code")
+                    )[-3000:]
+                    state["exit_code"] = saved.get("exit_code")
                 except Exception:
                     pass
             return self.send_json(state)
