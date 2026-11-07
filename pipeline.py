@@ -108,7 +108,7 @@ def load_demo(n=1800, seed=7):
 
 # Keep each scheduled run bounded. Recent dates are always prioritized while
 # older missing dates are backfilled gradually across subsequent runs.
-BACKFILL_DATES_PER_RUN = 10
+BACKFILL_DATES_PER_RUN = 30
 RECENT_DATES_PER_RUN = 5
 CHECKPOINT_EVERY = 5
 
