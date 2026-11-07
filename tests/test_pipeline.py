@@ -37,13 +37,45 @@ class LoadLiveTests(unittest.TestCase):
         raw = pd.DataFrame(values, index=index, columns=columns)
         fake_yfinance = types.SimpleNamespace(download=Mock(return_value=raw))
 
-        with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
-            result = load_live()
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = directory + "/market_history.csv"
+            with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+                result = load_live(cache_path=cache_path)
+            saved = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+
+        self.assertGreaterEqual(len(saved), 500)
 
         self.assertIn("TAIEX", result.columns)
         self.assertGreaterEqual(len(result), 500)
         self.assertIs(fake_yfinance.download.call_args.kwargs["threads"], False)
 
+
+
+    def test_uses_saved_history_when_yahoo_is_unavailable(self):
+        import numpy as np
+
+        index = pd.bdate_range(
+            end=pd.Timestamp.today().normalize() - pd.Timedelta(days=1),
+            periods=600,
+        )
+        cached = pd.DataFrame(
+            {name: np.arange(100, 100 + len(index), dtype=float)
+             for name in TICKERS},
+            index=index,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = directory + "/market_history.csv"
+            cached.to_csv(cache_path, index_label="date")
+            fake_yfinance = types.SimpleNamespace(
+                download=Mock(side_effect=TimeoutError("Yahoo unavailable"))
+            )
+            with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+                with patch("pipeline.time.sleep"):
+                    result = load_live(cache_path=cache_path)
+            self.assertGreaterEqual(len(result), 500)
+            self.assertEqual(len(fake_yfinance.download.call_args_list), 3)
+            self.assertEqual(result["TAIEX"].dropna().iloc[-1],
+                             cached["TAIEX"].iloc[-1])
 
 class PendingDatesTests(unittest.TestCase):
     def test_limits_backfill_and_keeps_latest_missing_dates(self):

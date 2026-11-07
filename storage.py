@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 
 FILES = (
-    "signals.json", "weekly.json", "weekly_prob.csv",
+    "signals.json", "weekly.json", "weekly_prob.csv", "market_history.csv",
     "chips.csv", "margin.csv", "futures.csv",
     "news.json", "news_history.jsonl",
 )

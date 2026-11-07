@@ -18,13 +18,28 @@ GLOBAL = ["SOX", "TSM", "VIX", "US10Y"]      # 國際層
 REGION = ["N225", "KOSPI", "USDTWD"]         # 區域層（亞洲鄰近市場、匯率）
 BUY, SELL, COST = 0.55, 0.45, 0.002          # 買進/賣出門檻、單次換倉成本
 
-def load_live(years=6):
+def load_live(years=6, cache_path="market_history.csv"):
+    """Load multi-year market history, persist it, then refresh only the recent window."""
     import yfinance as yf
+
+    cached = None
+    if os.path.isfile(cache_path) and os.path.getsize(cache_path):
+        try:
+            cached = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+            cached.index = pd.to_datetime(cached.index).tz_localize(None)
+            cached = cached[~cached.index.duplicated(keep="last")].sort_index()
+            if "TAIEX" not in cached or cached["TAIEX"].dropna().empty:
+                cached = None
+        except Exception as exc:
+            print(f"既有行情快取無法讀取，改抓完整歷史資料：{type(exc).__name__}: {exc}", flush=True)
+            cached = None
+
     last_error = None
-    df = None
+    fresh = None
+    period = "3mo" if cached is not None else f"{years}y"
     for attempt in range(3):
         try:
-            raw = yf.download(list(TICKERS.values()), period=f"{years}y",
+            raw = yf.download(list(TICKERS.values()), period=period,
                               auto_adjust=True, progress=False, threads=False, timeout=20)
             if raw is None or raw.empty:
                 raise ValueError("Yahoo Finance 沒有回傳行情資料")
@@ -41,23 +56,44 @@ def load_live(years=6):
                 close = close.to_frame()
             if isinstance(close.columns, pd.MultiIndex):
                 close.columns = close.columns.get_level_values(-1)
-            df = close.rename(columns={v: k for k, v in TICKERS.items()})
-            if "TAIEX" not in df or df["TAIEX"].dropna().empty:
+            fresh = close.rename(columns={v: k for k, v in TICKERS.items()})
+            if "TAIEX" not in fresh or fresh["TAIEX"].dropna().empty:
                 raise ValueError("Yahoo Finance 回傳資料沒有台灣加權指數")
             break
-        except Exception as e:
-            last_error = e
-            print(f"行情下載失敗（第 {attempt + 1}/3 次）：{type(e).__name__}: {e}", flush=True)
+        except Exception as exc:
+            last_error = exc
+            print(f"行情下載失敗（第 {attempt + 1}/3 次）：{type(exc).__name__}: {exc}", flush=True)
             if attempt < 2:
                 time.sleep(5 * (attempt + 1))
-            df = None
-    if df is None:
-        raise RuntimeError(f"無法取得即時歷史行情；可能是 Yahoo Finance 限流（HTTP 429）。最後錯誤：{last_error}")
+            fresh = None
+
+    if fresh is None and cached is None:
+        raise RuntimeError(f"無法取得即時歷史行情，且沒有可用快取。最後錯誤：{last_error}")
+    if fresh is not None:
+        fresh.index = pd.to_datetime(fresh.index).tz_localize(None)
+        fresh = fresh[~fresh.index.duplicated(keep="last")].sort_index()
+        df = fresh.combine_first(cached) if cached is not None else fresh
+        df = df[~df.index.duplicated(keep="last")].sort_index()
+        tmp = cache_path + ".tmp"
+        df.to_csv(tmp, index_label="date")
+        os.replace(tmp, cache_path)
+        print(f"行情歷史快取已更新：{len(df)} 筆（本次下載 {period}）", flush=True)
+        try:
+            import storage
+            if storage.enabled():
+                saved = storage.save_data()
+                print(f"行情快取已持久化至 Supabase（檔案數 {saved}）", flush=True)
+        except Exception as exc:
+            print(f"行情快取 Supabase 保存失敗：{type(exc).__name__}: {exc}", flush=True)
+    else:
+        df = cached
+        print(f"Yahoo Finance 暫不可用，改用既有行情快取：{len(df)} 筆；最後錯誤：{last_error}", flush=True)
+
     df.index = pd.to_datetime(df.index).tz_localize(None)
     df = df[~df.index.duplicated(keep="last")].sort_index()
     df = df.dropna(subset=["TAIEX"]).ffill(limit=3)
     now = pd.Timestamp.now(tz="Asia/Taipei")
-    if now.hour < 14:  # 盤中或開盤前：排除今日尚未收盤的資料列
+    if now.hour < 14:
         df = df[df.index < now.tz_localize(None).normalize()]
     if len(df) < 500:
         raise ValueError(f"有效大盤歷史資料不足：只有 {len(df)} 個交易日")
@@ -467,11 +503,33 @@ def weekly_report(prob, fwd, latest, contrib):
 if __name__ == "__main__":
     demo = "--demo" in sys.argv
     df = load_demo() if demo else load_live()
-    chips = demo_chips(df) if demo else None if "--no-chips" in sys.argv else fetch_chips(trading_days=df.index)
+    skip_backfill = "--skip-backfill" in sys.argv
+    def read_existing(name):
+        if not os.path.exists(name) or os.path.getsize(name) == 0:
+            return None
+        try:
+            frame = pd.read_csv(name, index_col=0, parse_dates=True)
+            return frame if len(frame) else None
+        except Exception as exc:
+            print(f"{name} 無法讀取，該層暫時略過：{type(exc).__name__}: {exc}", flush=True)
+            return None
+
+    chips = demo_chips(df) if demo else (
+        read_existing("chips.csv") if skip_backfill or "--no-chips" in sys.argv
+        else fetch_chips(trading_days=df.index)
+    )
     if os.path.exists("margin.csv") and "short_units" not in pd.read_csv("margin.csv", nrows=1):
         print("舊版融資資料缺少融券欄位：保留既有歷史融資資料，融券欄位從本次開始累積。")
-    margin = demo_margin(df) if demo else None if "--no-margin" in sys.argv else fetch_margin(trading_days=df.index)
-    futures = demo_futures(df) if demo else None if "--no-futures" in sys.argv else fetch_futures(trading_days=df.index)
+    margin = demo_margin(df) if demo else (
+        read_existing("margin.csv") if skip_backfill or "--no-margin" in sys.argv
+        else fetch_margin(trading_days=df.index)
+    )
+    futures = demo_futures(df) if demo else (
+        read_existing("futures.csv") if skip_backfill or "--no-futures" in sys.argv
+        else fetch_futures(trading_days=df.index)
+    )
+    if skip_backfill:
+        print("快速啟動模式：使用已保存的真實資料計算；缺少資料層會明確標示，歷史回補留待排程執行。", flush=True)
     X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])

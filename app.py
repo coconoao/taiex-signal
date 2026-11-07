@@ -188,7 +188,10 @@ def run_jobs(*whats):
     try:
         for w in whats:
             JOB["running"] = w
-            cmd = [sys.executable, "-u", os.path.join(CODE, w + ".py")] + (["--demo"] if DEMO and w == "pipeline" else [])
+            script = "pipeline" if w == "pipeline-fast" else w
+            args = (["--demo"] if DEMO and script == "pipeline" else
+                    ["--skip-backfill"] if w == "pipeline-fast" else [])
+            cmd = [sys.executable, "-u", os.path.join(CODE, script + ".py")] + args
             try:
                 p = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -255,7 +258,7 @@ def stale():
 
 def scheduler():
     last = None
-    if stale(): run_jobs("pipeline", "news")
+    if stale(): run_jobs("pipeline-fast", "news")
     while True:
         now = dt.datetime.now(TZ)
         if now.weekday() < 5 and (now.hour, now.minute) == (8, 30) and last != now.date():

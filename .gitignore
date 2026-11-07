@@ -17,6 +17,7 @@ settings.json
 signals.json
 weekly.json
 weekly_prob.csv
+market_history.csv
 chips.csv
 margin.csv
 futures.csv
