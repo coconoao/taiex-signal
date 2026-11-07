@@ -336,9 +336,39 @@ def save_research_snapshot(hl):
             stream.write(json.dumps(row, ensure_ascii=False) + "\n")
     os.replace(path + ".tmp", path)
     labeled = sum(isinstance(row.get("outcome"), dict) for row in records)
+    context = {"status": "insufficient", "sample_count": 0,
+               "note": "相似新聞環境的歷史樣本不足 20 筆，暫不顯示統計比例。"}
+    current_score = snapshot["features"].get("news_environment_score")
+    peers = []
+    for row in records[:-1]:
+        features, outcome = row.get("features") or {}, row.get("outcome") or {}
+        score, value = features.get("news_environment_score"), outcome.get("next_session_return_pct")
+        if score is None or value is None:
+            continue
+        try:
+            if abs(float(score) - float(current_score)) <= 0.20:
+                peers.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    context["sample_count"] = len(peers)
+    if len(peers) >= 20:
+        ordered = sorted(peers)
+        mean = sum(ordered) / len(ordered)
+        quantile = lambda q: round(ordered[min(len(ordered)-1, int((len(ordered)-1)*q))], 3)
+        context = {
+            "status": "available", "sample_count": len(ordered),
+            "positive_return_pct": round(100 * sum(x > 0 for x in ordered) / len(ordered), 1),
+            "negative_return_pct": round(100 * sum(x < 0 for x in ordered) / len(ordered), 1),
+            "average_return_pct": round(mean, 3),
+            "median_return_pct": round((ordered[(len(ordered)-1)//2] + ordered[len(ordered)//2]) / 2, 3),
+            "p10_return_pct": quantile(0.10), "p90_return_pct": quantile(0.90),
+            "score_tolerance": 0.20,
+            "note": "僅為相似新聞環境下的歷史描述統計，不是未來機率或買賣訊號。",
+        }
     summary = {
         "updated_at": snapshot["captured_at"], "latest": snapshot,
         "history_count": len(records), "labeled_count": labeled,
+        "historical_context": context,
         "note": "新聞特徵僅作資料研究；歷史結果只在後續交易日收盤資料到齊後標記，不回填未來資訊。",
     }
     with open("news_research.json.tmp", "w", encoding="utf-8") as stream:
