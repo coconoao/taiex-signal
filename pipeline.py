@@ -995,20 +995,36 @@ def historical_horizons(series):
 def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     """Persist Taiwan-only source coverage before any international/model validation."""
     now = pd.Timestamp.now(tz="Asia/Taipei")
+    expected = pd.DatetimeIndex(pd.to_datetime(df.index, errors="coerce")).dropna()
+    expected = expected.tz_localize(None).normalize().unique().sort_values() if len(expected) else pd.DatetimeIndex([])
+
     def coverage(frame, columns, source):
+        empty = {
+            "source": "無可用資料", "latest_date": None, "start_date": None,
+            "valid_rows": 0, "expected_rows": int(len(expected)),
+            "coverage_pct": 0.0 if len(expected) else None,
+            "missing_rows": int(len(expected)), "missing_dates": [str(x.date()) for x in expected[:20]],
+            "required_columns": list(columns), "age_calendar_days": None
+        }
         if frame is None or not isinstance(frame, pd.DataFrame) or not len(frame):
-            return {"source": "無可用資料", "latest_date": None, "valid_rows": 0,
-                    "required_columns": list(columns), "age_calendar_days": None}
+            return empty
         if not set(columns).issubset(frame.columns):
-            return {"source": source, "latest_date": None, "valid_rows": 0,
-                    "required_columns": list(columns), "age_calendar_days": None}
+            empty["source"] = source + "（缺少必要欄位）"
+            return empty
         valid = frame[list(columns)].apply(pd.to_numeric, errors="coerce").notna().all(axis=1)
         valid_index = pd.DatetimeIndex(pd.to_datetime(frame.index[valid], errors="coerce")).dropna()
+        valid_index = valid_index.tz_localize(None).normalize().unique().sort_values()
         latest = valid_index.max() if len(valid_index) else None
+        missing = expected.difference(valid_index)
         return {
             "source": source if latest is not None else "尚無完整有效資料",
             "latest_date": str(latest.date()) if latest is not None else None,
+            "start_date": str(valid_index.min().date()) if len(valid_index) else None,
             "valid_rows": int(valid.sum()),
+            "expected_rows": int(len(expected)),
+            "coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) else None,
+            "missing_rows": int(len(missing)),
+            "missing_dates": [str(x.date()) for x in missing[:20]],
             "required_columns": list(columns),
             "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
                                              pd.Timestamp(latest).normalize()).days))
@@ -1018,11 +1034,19 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     market_status = df.attrs.get("data_status", {}) if isinstance(df, pd.DataFrame) else {}
     taiex = df["TAIEX"].dropna() if isinstance(df, pd.DataFrame) and "TAIEX" in df else pd.Series(dtype=float)
     latest_taiex = pd.Timestamp(taiex.index[-1]) if len(taiex) else None
+    taiex_index = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
+    taiex_index = taiex_index.tz_localize(None).normalize().unique().sort_values()
+    taiex_missing = expected.difference(taiex_index)
     layers = {
         "TAIEX": {
             "source": market_status.get("taiwan_index_source", "來源未確認"),
             "latest_date": str(latest_taiex.date()) if latest_taiex is not None else None,
             "valid_rows": int(len(taiex)),
+            "start_date": str(taiex_index.min().date()) if len(taiex_index) else None,
+            "expected_rows": int(len(expected)),
+            "coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) else None,
+            "missing_rows": int(len(taiex_missing)),
+            "missing_dates": [str(x.date()) for x in taiex_missing[:20]],
             "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
                                              latest_taiex.normalize()).days))
                                   if latest_taiex is not None else None
