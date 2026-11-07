@@ -163,6 +163,19 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     today = pd.Timestamp.today().normalize()
     dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
+
+    # The official OpenAPI serves the latest published snapshot. Use it only
+    # when its own Date exactly matches a pending trading day; never backfill
+    # historical dates with a current snapshot.
+    try:
+        latest_date, latest_net = _fetch_taifex_openapi_latest()
+        if latest_date in dates:
+            old = _merge_and_save(old, {latest_date: {"foreign_oi_net": latest_net}}, path)
+            dates = dates[dates != latest_date]
+            print(f"期交所 OpenAPI 已保存最新交易日：{latest_date.date()}", flush=True)
+    except Exception as exc:
+        print(f"期交所 OpenAPI 備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
+
     for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
@@ -207,6 +220,25 @@ def _tx_foreign_oi_net(tabs):
                 nums = [v for v in (_num(c) for c in r[k + 1:]) if v is not None]
                 return nums[10] if len(nums) >= 12 else None
     return None
+
+def _fetch_taifex_openapi_latest():
+    """Fetch the latest official TAIFEX institutional futures snapshot."""
+    url = ("https://openapi.taifex.com.tw/v1/"
+           "MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    payload = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError("TAIFEX OpenAPI 回傳格式不是資料列清單")
+    for row in payload:
+        if row.get("ContractCode") != "臺股期貨" or row.get("Item") != "外資及陸資":
+            continue
+        date = pd.to_datetime(str(row.get("Date", "")), format="%Y%m%d", errors="coerce")
+        net = _num(row.get("OpenInterest(Net)"))
+        if pd.isna(date) or net is None:
+            raise ValueError("TAIFEX OpenAPI 最新資料缺少有效日期或未平倉淨額")
+        return date.normalize(), net
+    raise ValueError("TAIFEX OpenAPI 找不到臺股期貨／外資及陸資資料列")
+
 
 def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     """期交所三大法人「臺股期貨」外資未平倉淨口數，增量寫入 futures.csv（date, foreign_oi_net）。官方僅提供近三年。"""
