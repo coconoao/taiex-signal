@@ -319,7 +319,7 @@ def save_research_snapshot(hl):
     records.sort(key=lambda row: str(row.get("asof", "")))
     with open(path + ".tmp", "w", encoding="utf-8") as stream:
         for row in records[-1500:]:
-            stream.write(json.dumps(row, ensure_ascii=False) + "\\n")
+            stream.write(json.dumps(row, ensure_ascii=False) + "\n")
     os.replace(path + ".tmp", path)
     labeled = sum(isinstance(row.get("outcome"), dict) for row in records)
     summary = {
