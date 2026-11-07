@@ -266,18 +266,32 @@ def run(name, fn, p):
 
 
 def research_features(hl):
-    """方向中立的新聞資料覆蓋特徵；不產生市場方向分數。"""
+    """計算方向中立的新聞環境特徵；不輸出買賣指令。"""
     kinds = ("market", "taiwan", "policy", "analyst")
     counts = {kind: sum(1 for h in hl if h.get("kind") == kind) for kind in kinds}
     sources = {str(h.get("source") or h.get("tag") or "").strip()
                for h in hl if str(h.get("source") or h.get("tag") or "").strip()}
     dated = sum(bool(str(h.get("published") or "").strip()) for h in hl)
     linked = sum(bool(str(h.get("link") or "").strip()) for h in hl)
+    positive_words = ("上漲", "成長", "增加", "改善", "利多", "創高", "突破", "復甦", "降息", "回升")
+    negative_words = ("下跌", "衰退", "減少", "惡化", "利空", "暴跌", "制裁", "戰爭", "升息", "疲弱")
+    pos = neg = 0
+    for item in hl:
+        title = str(item.get("title", ""))
+        en_pos, en_neg = tally(title)
+        low = title.lower()
+        p = en_pos + sum(word in title for word in positive_words)
+        q = en_neg + sum(word in title for word in negative_words)
+        pos += int(p > q)
+        neg += int(q > p)
+    score = round((pos - neg) / max(1, len(hl)), 4)
     return {
         "headline_count": len(hl), "category_counts": counts,
         "unique_source_count": len(sources),
         "published_time_coverage_pct": round(100 * dated / len(hl), 1) if hl else 0,
         "original_link_coverage_pct": round(100 * linked / len(hl), 1) if hl else 0,
+        "positive_headline_count": pos, "negative_headline_count": neg,
+        "news_environment_score": score,
     }
 
 
