@@ -770,12 +770,20 @@ class H(SimpleHTTPRequestHandler):
             except Exception:
                 return self.send_json({"error": "更新使用者權限失敗"}, 503)
         if self.path == "/api/ai":
+            provider = body.get("provider")
             try:
                 result = call_ai_provider(
-                    body.get("provider"), body.get("key"), body.get("model", ""), body.get("prompt", "")
+                    provider, body.get("key"), body.get("model", ""), body.get("prompt", "")
                 )
+                print(f"[api-ai] provider={provider} status=ok", flush=True)
                 return self.send_json({"text": result})
             except Exception as e:
+                # 僅記錄服務名稱與例外類型；絕不記錄金鑰、提示內容或完整請求。
+                print(
+                    f"[api-ai] provider={provider if provider in ('Claude', 'ChatGPT', 'Gemini') else 'unknown'} "
+                    f"status=error type={type(e).__name__}",
+                    flush=True
+                )
                 return self.send_json({"error": str(e)}, 502)
         if self.path == "/api/run" and body.get("what") in ("pipeline", "news", "all"):
             if os.environ.get("K_SERVICE"):
