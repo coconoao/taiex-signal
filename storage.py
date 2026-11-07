@@ -15,6 +15,7 @@ FILES = (
     "chips.csv", "margin.csv", "futures.csv",
     "news.json", "news_history.jsonl", "policy_events.jsonl",
     "news_research.json", "news_research_history.jsonl",
+    "news_gdelt_history.jsonl", "news_gdelt_research.json",
 )
 TABLE = "site_data"
 
