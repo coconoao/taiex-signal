@@ -467,11 +467,33 @@ def weekly_report(prob, fwd, latest, contrib):
 if __name__ == "__main__":
     demo = "--demo" in sys.argv
     df = load_demo() if demo else load_live()
-    chips = demo_chips(df) if demo else None if "--no-chips" in sys.argv else fetch_chips(trading_days=df.index)
+    skip_backfill = "--skip-backfill" in sys.argv
+    def read_existing(name):
+        if not os.path.exists(name) or os.path.getsize(name) == 0:
+            return None
+        try:
+            frame = pd.read_csv(name, index_col=0, parse_dates=True)
+            return frame if len(frame) else None
+        except Exception as exc:
+            print(f"{name} 無法讀取，該層暫時略過：{type(exc).__name__}: {exc}", flush=True)
+            return None
+
+    chips = demo_chips(df) if demo else (
+        read_existing("chips.csv") if skip_backfill or "--no-chips" in sys.argv
+        else fetch_chips(trading_days=df.index)
+    )
     if os.path.exists("margin.csv") and "short_units" not in pd.read_csv("margin.csv", nrows=1):
         print("舊版融資資料缺少融券欄位：保留既有歷史融資資料，融券欄位從本次開始累積。")
-    margin = demo_margin(df) if demo else None if "--no-margin" in sys.argv else fetch_margin(trading_days=df.index)
-    futures = demo_futures(df) if demo else None if "--no-futures" in sys.argv else fetch_futures(trading_days=df.index)
+    margin = demo_margin(df) if demo else (
+        read_existing("margin.csv") if skip_backfill or "--no-margin" in sys.argv
+        else fetch_margin(trading_days=df.index)
+    )
+    futures = demo_futures(df) if demo else (
+        read_existing("futures.csv") if skip_backfill or "--no-futures" in sys.argv
+        else fetch_futures(trading_days=df.index)
+    )
+    if skip_backfill:
+        print("快速啟動模式：使用已保存的真實資料計算；缺少資料層會明確標示，歷史回補留待排程執行。", flush=True)
     X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])
