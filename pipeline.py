@@ -477,36 +477,43 @@ def build(df, chips=None, margin=None, h=1, futures=None):
     X["本地:偏離20日均線"] = t / t.rolling(20).mean() - 1
     X["本地:波動10日"] = r["TAIEX"].rolling(10).std()
     first = df.index[0]
-    if chips is not None and len(chips) > 60:
+    # Optional data layers are admitted only when they overlap enough market
+    # sessions to support their rolling features. Row count alone is unsafe:
+    # a cache with many off-calendar or sparse rows can leave only a handful
+    # of complete training samples and abort the whole scheduled refresh.
+    chips_overlap = len(X.index.intersection(chips.index)) if chips is not None else 0
+    if chips is not None and chips_overlap >= 140:
         for k, name in [("foreign_net", "外資"), ("trust_net", "投信")]:
             c = chips[k].reindex(X.index)
-            X[f"籌碼:{name}買賣超"] = c / c.abs().rolling(60, min_periods=20).mean()  # 以近 60 日平均規模標準化
+            X[f"籌碼:{name}買賣超"] = c / c.abs().rolling(60, min_periods=20).mean()
             s = np.sign(c)
             X[f"籌碼:{name}連買連賣天數"] = s.groupby((s != s.shift()).cumsum()).cumsum().clip(-10, 10)
-        first = chips.index.min()  # 只用有籌碼資料的期間
+        first = max(first, chips.index.min())
     elif chips is not None:
-        print("籌碼資料不足，本次略過籌碼層")
-    if margin is not None and len(margin) > 60:
+        print(f"籌碼資料覆蓋不足（與行情重疊 {chips_overlap} 日，至少 140 日），本次略過此層")
+    margin_overlap = len(X.index.intersection(margin.index)) if margin is not None else 0
+    if margin is not None and margin_overlap >= 140:
         b = margin["margin_bal"].reindex(X.index)
         X["信用:融資餘額5日變化"] = b.pct_change(5)
         X["信用:融資餘額偏離60日均"] = b / b.rolling(60, min_periods=20).mean() - 1
-        X["信用:融資與指數背離"] = b.pct_change(5) - t.pct_change(5)  # 指數跌、融資卻增＝散戶逆勢加碼
-        if "short_units" in margin:
+        X["信用:融資與指數背離"] = b.pct_change(5) - t.pct_change(5)
+        if {"short_units", "margin_units"}.issubset(margin.columns):
             sh = margin["short_units"].reindex(X.index)
-            ratio = sh / margin["margin_units"].reindex(X.index)  # 券資比
+            ratio = sh / margin["margin_units"].reindex(X.index)
             X["信用:融券餘額5日變化"] = sh.pct_change(5)
             X["信用:券資比偏離60日均"] = ratio / ratio.rolling(60, min_periods=20).mean() - 1
         first = max(first, margin.index.min())
     elif margin is not None:
-        print("融資資料不足，本次略過信用層")
-    if futures is not None and len(futures) > 60:
+        print(f"信用資料覆蓋不足（與行情重疊 {margin_overlap} 日，至少 140 日），本次略過此層")
+    futures_overlap = len(X.index.intersection(futures.index)) if futures is not None else 0
+    if futures is not None and futures_overlap >= 120:
         o = futures["foreign_oi_net"].reindex(X.index)
         sd = o.rolling(120, min_periods=40).std()
         X["期貨:外資淨未平倉(相對近120日)"] = (o - o.rolling(120, min_periods=40).mean()) / sd
         X["期貨:外資淨未平倉5日變化"] = o.diff(5) / sd
         first = max(first, futures.index.min())
     elif futures is not None:
-        print("期貨資料不足，本次略過期貨層")
+        print(f"期貨資料覆蓋不足（與行情重疊 {futures_overlap} 日，至少 120 日），本次略過此層")
     # 時序：美股 D 日收盤早於台股 D+1 開盤，故 D 列特徵預測 D+1 報酬，無資料洩漏
     fwd = t.shift(-h) / t - 1  # 未來 h 個交易日報酬（h=1 即隔日）
     y = (fwd > 0).astype(float).where(fwd.notna())
