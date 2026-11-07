@@ -45,7 +45,7 @@ class FinMindFallbackTests(unittest.TestCase):
     def test_futures_fallback_calculates_foreign_open_interest_net(self):
         alt = pd.DataFrame([{
             "date": "2026-11-06",
-            "institutional_investors": "Foreign_Investor",
+            "institutional_investors": "外資",
             "long_open_interest_balance_volume": 1000,
             "short_open_interest_balance_volume": 700,
         }])
