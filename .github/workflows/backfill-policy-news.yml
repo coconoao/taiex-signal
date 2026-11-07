@@ -33,5 +33,9 @@ jobs:
         run: python storage.py restore
       - name: Import official historical news metadata
         run: python news_policy_archive_backfill.py
+      - name: Build official policy-news historical alignment
+        run: python news_policy_research.py
       - name: Persist archive to Supabase
         run: python storage.py save-policy-archive
+      - name: Persist policy research artifact
+        run: python storage.py save
