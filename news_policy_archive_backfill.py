@@ -18,11 +18,9 @@ import urllib.request
 LIST_URL = "https://www.ey.gov.tw/Page/A2EC1FEF9BC39AD0"
 ARTICLE_PREFIX = "/Page/9277F759E41CCD91/"
 PAGE_SIZE = 15
-SAMPLE_PAGES = sorted({
-    1 + round(i * (830 - 1) / 79)
-    for i in range(80)
-})
-DATE_RE = re.compile(r"(?<!\d)(\d{2,3})-(\d{1,2})-(\d{1,2})")
+SAMPLE_COUNT = 80
+DATE_RE = re.compile(r"(?<!\\d)(\\d{2,3})-(\\d{1,2})-(\\d{1,2})")
+TOTAL_PAGES_RE = re.compile(r"共\\s*(\\d+)\\s*頁")
 
 
 class NewsListParser(HTMLParser):
@@ -48,7 +46,7 @@ class NewsListParser(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag.lower() == "a" and self.active:
-            text = re.sub(r"\s+", " ", " ".join(self.parts)).strip()
+            text = re.sub(r"\\s+", " ", " ".join(self.parts)).strip()
             self.links.append((self.href, text))
             self.active = False
             self.href = ""
@@ -86,8 +84,8 @@ def parse_item(href, text, page):
         published = dt.date(year, month, day).isoformat()
     except ValueError:
         return None
-    title = html.unescape(text[:match.start()]).strip(" -　\t\r\n")
-    title = re.sub(r"\s+", " ", title)
+    title = html.unescape(text[:match.start()]).strip(" -　\\t\\r\\n")
+    title = re.sub(r"\\s+", " ", title)
     if not title:
         return None
     url = urllib.parse.urljoin("https://www.ey.gov.tw", href)
@@ -101,10 +99,31 @@ def parse_item(href, text, page):
 
 
 def main():
+    # Read page 1 first and derive the current pagination size from the
+    # official listing, rather than relying on a stale hard-coded page count.
+    first_raw = fetch_page(1)
+    total_match = TOTAL_PAGES_RE.search(first_raw)
+    if not total_match:
+        raise SystemExit("Could not determine official index page count; existing archive preserved.")
+    total_pages = int(total_match.group(1))
+    if total_pages < 1:
+        raise SystemExit("Official index returned an invalid page count; existing archive preserved.")
+
+    if total_pages == 1 or SAMPLE_COUNT == 1:
+        sample_pages = [1]
+    else:
+        sample_pages = sorted({
+            1 + round(i * (total_pages - 1) / (SAMPLE_COUNT - 1))
+            for i in range(SAMPLE_COUNT)
+        })
+    page_html = {1: first_raw}
+
     items, seen = [], set()
     successful_pages = []
-    for page in SAMPLE_PAGES:
-        raw = fetch_page(page)
+    for page in sample_pages:
+        raw = page_html.get(page)
+        if raw is None:
+            raw = fetch_page(page)
         parser = NewsListParser()
         parser.feed(raw)
         page_count = 0
@@ -134,7 +153,8 @@ def main():
         "source_url": LIST_URL,
         "rights_note": "僅保存短標題、日期及原文連結；原文及其他內容權利依行政院與原著作權人聲明辦理。",
         "scope": "跨年度分頁抽樣索引，非完整新聞庫；不含新聞全文或摘要。",
-        "sampling": f"從歷史索引前 830 頁等距抽取最多 80 頁，實際成功 {len(successful_pages)} 頁，每頁最多 {PAGE_SIZE} 筆。",
+        "sampling": f"從官方歷史索引共 {total_pages} 頁中等距抽取最多 {SAMPLE_COUNT} 頁，實際成功 {len(successful_pages)} 頁，每頁最多 {PAGE_SIZE} 筆。",
+        "total_index_pages": total_pages,
         "sampled_pages": successful_pages,
         "date_start": items[0]["date"],
         "date_end": items[-1]["date"],
@@ -154,7 +174,7 @@ def main():
         "Official historical news index:",
         len(items), "titles across", len(daily), "dates;",
         items[0]["date"], "to", items[-1]["date"],
-        "| sampled pages", len(successful_pages),
+        "| sampled pages", len(successful_pages), "of", total_pages,
         flush=True,
     )
 
