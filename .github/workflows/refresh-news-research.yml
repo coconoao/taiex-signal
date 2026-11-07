@@ -27,6 +27,8 @@ jobs:
           python-version: "3.12"
       - name: Restore persisted market and news data
         run: python storage.py restore
+      - name: Build official policy-news historical alignment
+        run: python news_policy_research.py
       - name: Collect daily news snapshot
         run: python news_snapshot.py
       - name: Label completed TAIEX sessions and update research summary
