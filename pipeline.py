@@ -1120,10 +1120,42 @@ def update_news_research_outcomes(series):
                     stream.write(json.dumps(row, ensure_ascii=False) + "\n")
             os.replace(tmp, path)
         latest = rows[-1] if rows else None
+        context = {"status": "insufficient", "sample_count": 0,
+                   "note": "相似新聞環境的歷史樣本不足 20 筆，暫不顯示統計比例。"}
+        current_score = (latest or {}).get("features", {}).get("news_environment_score")
+        if current_score is not None:
+            peers = []
+            for row in rows[:-1]:
+                features = row.get("features") or {}
+                outcome = row.get("outcome") or {}
+                score = features.get("news_environment_score")
+                value = outcome.get("next_session_return_pct")
+                if score is None or value is None:
+                    continue
+                try:
+                    if abs(float(score) - float(current_score)) <= 0.20:
+                        peers.append(float(value))
+                except (TypeError, ValueError):
+                    continue
+            context["sample_count"] = len(peers)
+            if len(peers) >= 20:
+                arr = np.asarray(peers, dtype=float)
+                context = {
+                    "status": "available", "sample_count": len(peers),
+                    "positive_return_pct": round(float(np.mean(arr > 0) * 100), 1),
+                    "negative_return_pct": round(float(np.mean(arr < 0) * 100), 1),
+                    "average_return_pct": round(float(np.mean(arr)), 3),
+                    "median_return_pct": round(float(np.median(arr)), 3),
+                    "p10_return_pct": round(float(np.percentile(arr, 10)), 3),
+                    "p90_return_pct": round(float(np.percentile(arr, 90)), 3),
+                    "score_tolerance": 0.20,
+                    "note": "僅為相似新聞環境下的歷史描述統計，不是未來機率或買賣訊號。",
+                }
         summary = {
             "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "latest": latest, "history_count": len(rows),
             "labeled_count": sum(isinstance(row.get("outcome"), dict) for row in rows),
+            "historical_context": context,
             "note": "新聞特徵僅作資料研究；歷史結果只在後續交易日收盤資料到齊後標記，不回填未來資訊。",
         }
         with open("news_research.json.tmp", "w", encoding="utf-8") as stream:
