@@ -521,7 +521,11 @@ def _fetch_finmind_data_for_dates(dataset, dates, data_id=None, batch_size=10):
         return pd.DataFrame()
     result = pd.concat(frames, ignore_index=True)
     if "date" in result:
-        result = result.drop_duplicates(subset=["date"] + (["data_id"] if "data_id" in result else []), keep="last")
+        # Preserve multiple investor/product rows for the same date.
+        keys = ["date"] + [key for key in
+                           ("name", "institutional_investors", "futures_id", "contract_date", "call_put")
+                           if key in result.columns]
+        result = result.drop_duplicates(subset=keys, keep="last")
     return result
 
 
