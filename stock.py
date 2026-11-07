@@ -5,7 +5,6 @@
 """
 import sys, json
 import numpy as np, pandas as pd
-from pipeline import BUY, SELL
 
 def _hist(yf, sym):
     last_error = None
@@ -84,16 +83,6 @@ def analyze(code):
                 raise ValueError("目前仍是示範行情，請先更新真實行情與訊號，再使用個股分析。")
         except json.JSONDecodeError:
             raise ValueError("行情資料檔案格式錯誤，請重新更新行情與訊號。")
-    # 優先使用大盤 Pipeline 的週訊號分組；若尚未產生，仍可執行個股自身歷史分析。
-    wk, p = None, None
-    try:
-        if os.path.exists("weekly.json") and os.path.exists("weekly_prob.csv") and os.path.getsize("weekly_prob.csv") > 0:
-            wk = json.load(open("weekly.json", encoding="utf-8"))
-            p = pd.read_csv("weekly_prob.csv", index_col=0, parse_dates=True)["prob"].dropna()
-            p = p.iloc[::5]  # 與大盤週報一致，降低五日重疊造成的樣本膨脹
-    except (ValueError, KeyError, OSError, pd.errors.ParserError) as e:
-        print(f"大盤週資料不可用，改用個股自身歷史樣本：{e}")
-
     mk = _hist(yf, "^TWII")
     f5 = (px.shift(-5) / px - 1)
     q = lambda values, a: round(float(values.quantile(a)) * 100, 2)
@@ -103,20 +92,7 @@ def analyze(code):
         return {"n": int(len(values)), "win": round(float((values > 0).mean()) * 100, 1),
                 "avg": round(float(values.mean()) * 100, 2),
                 "p10": q(values, .1), "p90": q(values, .9)}
-    buckets = {}
-    market_bucket = "未載入大盤條件"
-    market_prob = None
     stock_expected = summarize(f5)
-    exp = None
-    if p is not None and wk is not None and wk.get("bucket"):
-        aligned = f5.reindex(p.index)
-        name = lambda v: "偏多" if v > BUY else "偏空" if v < SELL else "中性"
-        d = pd.DataFrame({"b": p.map(name), "f": aligned}).dropna()
-        buckets = {k: summarize(g["f"]) for k, g in d.groupby("b")}
-        market_bucket = wk["bucket"]
-        market_prob = wk.get("prob_up")
-        stock_expected = buckets.get(market_bucket)
-        exp = wk.get("expected")
     r = pd.concat([px.pct_change(), mk.pct_change()], axis=1, keys=["s", "m"]).dropna().tail(252)
     if len(r) < 30:
         raise ValueError("此標的與加權指數的共同歷史資料不足 30 個交易日，暫時無法計算 Beta。")
@@ -124,7 +100,6 @@ def analyze(code):
     if not np.isfinite(market_var) or market_var <= 0:
         raise ValueError("無法計算 Beta：大盤報酬資料不足或變異數為零。")
     beta = round(float(r["s"].cov(r["m"]) / market_var), 2)
-    exp = wk.get("expected") if wk else None
     ticker = yf.Ticker(sym)
     try:
         quote_type = (ticker.info or {}).get("quoteType", "")
@@ -133,9 +108,7 @@ def analyze(code):
     asset_type = "ETF" if str(quote_type).upper() == "ETF" else "股票"
     return {"code": code, "symbol": sym, "asset_type": asset_type,
             "last": round(float(px.iloc[-1]), 2), "asof": str(px.index[-1].date()),
-            "market_bucket": market_bucket, "market_prob": market_prob, "beta": beta,
-            "beta_implied": round(beta * exp["avg"], 2) if exp and exp.get("avg") is not None else None,
-            "stock_expected": stock_expected, "buckets": buckets,
+            "beta": beta, "stock_expected": stock_expected,
             "mom20": round(float(px.iloc[-1] / px.iloc[-21] - 1) * 100, 1),
             "vol60": round(float(px.pct_change().tail(60).std() * np.sqrt(252)) * 100, 1),
             "fundamentals": [] if asset_type == "ETF" else fundamentals(ticker)}
