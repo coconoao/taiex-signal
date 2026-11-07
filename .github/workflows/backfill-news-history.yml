@@ -22,13 +22,13 @@ concurrency:
 
 jobs:
   backfill:
-    if: \${{ vars.ENABLE_DATA_REFRESH == 'true' }}
+    if: ${{ vars.ENABLE_DATA_REFRESH == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       TAIEX_STORAGE: supabase
-      SUPABASE_URL: \${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: \${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -39,6 +39,6 @@ jobs:
       - name: Restore persisted market and news data
         run: python storage.py restore
       - name: Import historical GDELT news metadata
-        run: python news_history_import.py --days "\${{ inputs.days }}"
+        run: python news_history_import.py --days "${{ inputs.days }}"
       - name: Persist historical news research
         run: python storage.py save
