@@ -107,8 +107,9 @@ details[open]>summary{margin-bottom:12px}
     </section>
     <section><h2>新聞資料研究版（獨立於原模型）</h2>
       <p class="note" id="newsResearchMeta">載入新聞研究資料中…</p>
+      <div id="newsResearchIndicator"></div>
       <div id="newsResearchFeatures"></div>
-      <p class="note" id="newsResearchNote">此區只整理新聞資料覆蓋情況，並在後續交易日收盤資料到齊後保存實際歷史結果；不產生方向預測。</p>
+      <p class="note" id="newsResearchNote">新聞環境分數僅由標題字詞初步分類；相似環境統計是已發生的歷史結果，不是未來機率或買賣指令。</p>
     </section>
     <section><h2>新聞情緒（既有資料）</h2><div id="newsD"></div><p class="note">此區沿用原本新聞摘要與分析，與下方新聞研究資料分開保存。</p></section>
   </div>
@@ -410,13 +411,20 @@ function renderPolicyEvents(n) {
   }).join("") : '<p class="note">沒有可顯示的政策事件；來源可能暫時無法連線。</p>';
 }
 function renderNewsResearch(r) {
-  const meta = $("newsResearchMeta"), box = $("newsResearchFeatures");
+  const meta = $("newsResearchMeta"), box = $("newsResearchFeatures"), indicator = $("newsResearchIndicator");
   if (!r || !r.latest || !r.latest.features) {
     meta.textContent = "尚無新聞研究快照；待新聞來源成功更新後建立。";
     box.textContent = "目前沒有可用資料。";
+    indicator.textContent = "尚無足夠資料建立新聞環境研究指標。";
     return;
   }
-  const f = r.latest.features, c = f.category_counts || {};
+  const f = r.latest.features, c = f.category_counts || {}, h = r.historical_context || {};
+  const score = Number(f.news_environment_score || 0);
+  const mood = score > 0.08 ? "標題環境偏正面" : score < -0.08 ? "標題環境偏負面" : "標題環境接近中性";
+  const historical = h.status === "available"
+    ? `<div class="mcs"><div class="mc"><b>相似環境歷史樣本</b><div class="big">${h.sample_count}</div></div><div class="mc"><b>歷史正報酬比例</b><div class="big">${h.positive_return_pct}%</div></div><div class="mc"><b>歷史負報酬比例</b><div class="big">${h.negative_return_pct}%</div></div><div class="mc"><b>平均隔日報酬</b><div class="big">${h.average_return_pct}%</div></div></div><p class="note">歷史中位數 ${h.median_return_pct}%｜10%～90% 分位數 ${h.p10_return_pct}% 至 ${h.p90_return_pct}%</p>`
+    : `<p class="note">相似環境歷史樣本：${h.sample_count || 0} 筆。至少累積 20 筆已完成隔日收盤標記的相似樣本後，才顯示歷史統計。</p>`;
+  indicator.innerHTML = `<h3>新聞環境研究指標</h3><div class="mc"><b>${mood}</b><div class="big">${score > 0 ? "+" : ""}${score.toFixed(2)}</div><p class="note">正面標題 ${f.positive_headline_count ?? 0} 則｜負面標題 ${f.negative_headline_count ?? 0} 則</p></div>${historical}<p class="note">${esc(h.note || "歷史資料不足時不顯示統計比例。")}</p>`;
   meta.textContent = `最近交易日 ${r.latest.asof}｜快照 ${r.history_count || 0} 天｜已取得後續收盤結果 ${r.labeled_count || 0} 筆｜擷取時間 ${r.updated_at || "未提供"}`;
   const rows = [
     ["新聞標題數", f.headline_count ?? 0],
