@@ -16,6 +16,7 @@ FILES = (
     "news.json", "news_history.jsonl", "policy_events.jsonl",
     "news_research.json", "news_research_history.jsonl",
     "news_gdelt_history.jsonl", "news_gdelt_research.json",
+    "news_policy_archive.json",
 )
 TABLE = "site_data"
 
