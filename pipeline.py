@@ -382,7 +382,7 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
                 alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
                 for col in ("long_open_interest_balance_volume", "short_open_interest_balance_volume"):
                     alt[col] = pd.to_numeric(alt[col], errors="coerce")
-                foreign = alt[alt["institutional_investors"].astype(str).isin(["Foreign_Investor", "外資及陸資"])]
+                foreign = alt[alt["institutional_investors"].astype(str).isin(["Foreign_Investor", "外資", "外資及陸資"])]
                 foreign = foreign.dropna(subset=["date", "long_open_interest_balance_volume",
                                                  "short_open_interest_balance_volume"])
                 foreign = foreign.assign(net=foreign["long_open_interest_balance_volume"] -
