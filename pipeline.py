@@ -187,7 +187,7 @@ def _fetch_market_reference_data(now):
     return references
 
 
-def load_live(years=6, cache_path="market_history.csv"):
+def load_live(years=10, cache_path="market_history.csv"):
     """Load multi-year market history, persist it, then refresh only the recent window."""
     import yfinance as yf
 
@@ -205,7 +205,19 @@ def load_live(years=6, cache_path="market_history.csv"):
 
     last_error = None
     fresh = None
-    period = "3mo" if cached is not None else f"{years}y"
+    target_start = (pd.Timestamp.now(tz="Asia/Taipei").tz_localize(None).normalize()
+                    - pd.DateOffset(years=years))
+    cache_needs_extension = (
+        cached is not None and
+        (cached["TAIEX"].dropna().index.min() > target_start + pd.Timedelta(days=90))
+    )
+    period = f"{years}y" if cached is None or cache_needs_extension else "3mo"
+    if cache_needs_extension:
+        print(
+            f"歷史行情快取尚未涵蓋目標 {years} 年，嘗試擴充完整歷史；"
+            "若來源限流，會保留既有快取並稍後重試。",
+            flush=True
+        )
     for attempt in range(3):
         try:
             raw = yf.download(list(TICKERS.values()), period=period,
@@ -912,8 +924,10 @@ def historical_horizons(series):
                 phase_rates.append(float((phase > 0).mean()) * 100)
                 phase_counts.append(int(len(phase)))
         values = forward.iloc[::days].dropna()
+        overlapping = forward.dropna()
         if values.empty:
-            out[key] = {"label": label, "days": days, "n": 0}
+            out[key] = {"label": label, "days": days, "n": 0,
+                        "overlap_n": int(len(overlapping))}
             continue
         n = int(len(values))
         wins = int((values > 0).sum())
@@ -926,6 +940,8 @@ def historical_horizons(series):
         half = z * np.sqrt(phat * (1 - phat) / n + z * z / (4 * n * n)) / denom
         out[key] = {
             "label": label, "days": days, "n": n,
+            "overlap_n": int(len(overlapping)),
+            "overlap_positive_rate": round(float((overlapping > 0).mean()) * 100, 1),
             "positive_rate": round(phat * 100, 1),
             "positive_rate_ci95": [round(max(0.0, center - half) * 100, 1),
                                    round(min(1.0, center + half) * 100, 1)],
