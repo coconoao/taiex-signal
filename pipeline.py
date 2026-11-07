@@ -944,6 +944,74 @@ def historical_horizons(series):
     return out
 
 
+def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
+    """Persist Taiwan-only source coverage before any international/model validation."""
+    now = pd.Timestamp.now(tz="Asia/Taipei")
+    def coverage(frame, columns, source):
+        if frame is None or not isinstance(frame, pd.DataFrame) or not len(frame):
+            return {"source": "無可用資料", "latest_date": None, "valid_rows": 0,
+                    "required_columns": list(columns), "age_calendar_days": None}
+        if not set(columns).issubset(frame.columns):
+            return {"source": source, "latest_date": None, "valid_rows": 0,
+                    "required_columns": list(columns), "age_calendar_days": None}
+        valid = frame[list(columns)].apply(pd.to_numeric, errors="coerce").notna().all(axis=1)
+        valid_index = pd.DatetimeIndex(pd.to_datetime(frame.index[valid], errors="coerce")).dropna()
+        latest = valid_index.max() if len(valid_index) else None
+        return {
+            "source": source if latest is not None else "尚無完整有效資料",
+            "latest_date": str(latest.date()) if latest is not None else None,
+            "valid_rows": int(valid.sum()),
+            "required_columns": list(columns),
+            "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
+                                             pd.Timestamp(latest).normalize()).days))
+                                  if latest is not None else None
+        }
+
+    market_status = df.attrs.get("data_status", {}) if isinstance(df, pd.DataFrame) else {}
+    taiex = df["TAIEX"].dropna() if isinstance(df, pd.DataFrame) and "TAIEX" in df else pd.Series(dtype=float)
+    latest_taiex = pd.Timestamp(taiex.index[-1]) if len(taiex) else None
+    layers = {
+        "TAIEX": {
+            "source": market_status.get("taiwan_index_source", "來源未確認"),
+            "latest_date": str(latest_taiex.date()) if latest_taiex is not None else None,
+            "valid_rows": int(len(taiex)),
+            "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
+                                             latest_taiex.normalize()).days))
+                                  if latest_taiex is not None else None
+        },
+        "institutional": coverage(chips, ("foreign_net", "trust_net"),
+                                  "TWSE 官方資料（缺漏日期由 FinMind 補入）"),
+        "margin": coverage(margin, ("margin_bal", "margin_units", "short_units"),
+                           "TWSE 官方資料（缺漏日期由 FinMind 補入）"),
+        "futures": coverage(futures, ("foreign_oi_net",),
+                            "TAIFEX 官方資料（缺漏日期由 FinMind 補入）")
+    }
+    payload = {
+        "updated_at": now.isoformat(),
+        "demo": False,
+        "note": "僅呈現台股資料來源、完整有效筆數與最新日期；不代表即時報價。",
+        "layers": layers
+    }
+    tmp = "taiwan_data_status.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(tmp, "taiwan_data_status.json")
+    try:
+        import storage
+        if storage.enabled():
+            saved = storage.save_data()
+            print(f"台股資料品質狀態已保存至 Supabase（檔案數 {saved}）", flush=True)
+    except Exception as exc:
+        print(f"台股資料品質狀態 Supabase 保存失敗：{type(exc).__name__}", flush=True)
+    summary = "、".join(
+        f"{key}:{value['latest_date'] or '無資料'}（{value['valid_rows']} 筆）"
+        for key, value in layers.items()
+    )
+    print(f"台股資料覆蓋狀態：{summary}", flush=True)
+
+
 if __name__ == "__main__":
     demo = "--demo" in sys.argv
     df = load_demo() if demo else load_live()
@@ -978,7 +1046,7 @@ if __name__ == "__main__":
             read_existing("futures.csv") if "--no-futures" in sys.argv
             else fetch_futures(trading_days=df.index)
         )
-    X, y, fwd = build(df, chips, margin, futures=futures)
+    if not demo and not skip_backfill:\n        write_taiwan_data_status(df, chips, margin, futures)\n    X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])
     layers = contrib.groupby(lambda c: c.split(":")[0]).sum()
