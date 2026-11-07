@@ -430,6 +430,19 @@ $("go").onclick = () => {
 };
 $("code").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
 
+// 底部導覽：切換隔日／一週／個股／設定內容
+ document.querySelectorAll(".tabs [data-t]").forEach(button => {
+  button.addEventListener("click", () => {
+    const key = button.dataset.t;
+    const panel = $("tab-" + key);
+    if (!panel || button.hidden) return;
+    document.querySelectorAll('main > [id^="tab-"]').forEach(el => { el.hidden = true; });
+    panel.hidden = false;
+    document.querySelectorAll(".tabs [data-t]").forEach(el => el.classList.toggle("on", el === button));
+    window.scrollTo({top: 0, behavior: "auto"});
+  });
+});
+
 renderStockHistory();
 loadAll();
 </script>
