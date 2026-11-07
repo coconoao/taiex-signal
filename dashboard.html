@@ -137,6 +137,23 @@ details[open]>summary{margin-bottom:12px}
 </main>
 <nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">🗓<br>一週</button><button data-t="stock" hidden>🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
 <script>
+/* 獨立導覽控制器：即使主頁面其他功能發生 JavaScript 錯誤，底部導覽仍可切換。 */
+document.addEventListener("click", function(event) {
+  const button = event.target.closest(".tabs [data-t]");
+  if (!button || button.hidden) return;
+  const key = button.getAttribute("data-t");
+  const panel = document.getElementById("tab-" + key);
+  if (!panel) return;
+  document.querySelectorAll('main > [id^="tab-"]').forEach(function(item) {
+    item.hidden = item !== panel;
+  });
+  document.querySelectorAll(".tabs [data-t]").forEach(function(item) {
+    item.classList.toggle("on", item === button);
+  });
+  window.scrollTo(0, 0);
+});
+</script>
+<script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const pct = v => (v * 100).toFixed(1) + "%", sc = v => (v > 0 ? "+" : "") + v.toFixed(2);
