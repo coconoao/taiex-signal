@@ -1,0 +1,35 @@
+name: Refresh daily news research
+
+on:
+  schedule:
+    - cron: "40 1 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: taiex-daily-news-research
+  cancel-in-progress: false
+
+jobs:
+  refresh-news:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      TAIEX_STORAGE: supabase
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Restore persisted market and news data
+        run: python storage.py restore
+      - name: Collect daily news snapshot
+        run: python news.py
+      - name: Label completed TAIEX sessions and update research summary
+        run: python news_research_maintenance.py
+      - name: Persist news research
+        run: python storage.py save
