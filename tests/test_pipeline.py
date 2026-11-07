@@ -4,7 +4,7 @@ import types
 import unittest
 import urllib.error
 from email.message import Message
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 
@@ -17,6 +17,8 @@ from pipeline import (
     _read_with_backoff,
     _pending_dates,
     fetch_chips,
+    fetch_futures,
+    _fetch_taifex_openapi_latest,
     load_live,
     TICKERS,
 )
@@ -112,12 +114,69 @@ class RetryTests(unittest.TestCase):
 
         first = FirstReadTimesOut(b"")
         second = io.BytesIO(b'{"ok": true}')
-        with patch("pipeline._open_with_backoff", side_effect=[first, second]) as open_url:
+        response1 = MagicMock()
+        response1.__enter__.return_value = first
+        response2 = MagicMock()
+        response2.__enter__.return_value = second
+        with patch("pipeline.urllib.request.urlopen",
+                   side_effect=[response1, response2]) as open_url:
             with patch("pipeline.time.sleep") as sleep:
                 result = _read_with_backoff(Mock(), timeout=10)
         self.assertEqual(result, b'{"ok": true}')
         self.assertEqual(open_url.call_count, 2)
         sleep.assert_called_once_with(5)
+
+
+class TaifexOpenApiTests(unittest.TestCase):
+    def test_extracts_only_taiwan_futures_foreign_open_interest_net(self):
+        import json
+
+        payload = [
+            {
+                "Date": "20261106",
+                "ContractCode": "臺股期貨",
+                "Item": "外資及陸資",
+                "OpenInterest(Net)": "-12345",
+            },
+            {
+                "Date": "20261106",
+                "ContractCode": "電子期貨",
+                "Item": "外資及陸資",
+                "OpenInterest(Net)": "999",
+            },
+        ]
+        with patch("pipeline._read_with_backoff", return_value=json.dumps(payload).encode()):
+            date, net = _fetch_taifex_openapi_latest()
+
+        self.assertEqual(date, pd.Timestamp("2026-11-06"))
+        self.assertEqual(net, -12345.0)
+
+    def test_rejects_missing_taiwan_futures_foreign_row(self):
+        import json
+
+        payload = [{"Date": "20261106", "ContractCode": "電子期貨",
+                    "Item": "外資及陸資", "OpenInterest(Net)": "10"}]
+        with patch("pipeline._read_with_backoff", return_value=json.dumps(payload).encode()):
+            with self.assertRaisesRegex(ValueError, "找不到"):
+                _fetch_taifex_openapi_latest()
+
+
+class FuturesNetworkFailureTests(unittest.TestCase):
+    def test_stops_batch_after_persistent_network_timeout(self):
+        import os
+
+        dates = pd.bdate_range("2026-11-02", periods=3)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "futures.csv")
+            with patch("pipeline._pending_dates", return_value=dates):
+                with patch("pipeline._fetch_taifex_openapi_latest",
+                           side_effect=ValueError("OpenAPI unavailable")):
+                    with patch("pipeline._read_with_backoff",
+                               side_effect=TimeoutError("source timeout")) as read:
+                        with patch("pipeline.time.sleep"):
+                            result = fetch_futures(path=path)
+        self.assertEqual(read.call_count, 1)
+        self.assertTrue(result.empty)
 
 
 class CheckpointTests(unittest.TestCase):
@@ -182,7 +241,7 @@ class FetchCheckpointIntegrationTests(unittest.TestCase):
                 save_data=Mock(side_effect=record_save),
             )
             with patch("pipeline._pending_dates", return_value=dates):
-                with patch("pipeline._open_with_backoff", side_effect=responses):
+                with patch("pipeline.urllib.request.urlopen", side_effect=responses):
                     with patch("pipeline.time.sleep"):
                         with patch.dict(sys.modules, {"storage": fake_storage}):
                             result = fetch_chips(path=path)

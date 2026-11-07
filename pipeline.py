@@ -123,11 +123,24 @@ def _open_with_backoff(req, timeout):
 
 
 def _read_with_backoff(req, timeout):
-    """Retry the complete response read, not only the initial connection."""
+    """Retry opening and reading as one request, avoiding nested retry loops."""
     for attempt in range(4):
         try:
-            with _open_with_backoff(req, timeout=timeout) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 and exc.code < 500:
+                raise
+            if attempt == 3:
+                raise
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = float(retry_after) if retry_after else (5, 15, 30)[attempt]
+            except (TypeError, ValueError):
+                delay = (5, 15, 30)[attempt]
+            delay = max(1, min(60, delay))
+            print(f"資料來源 HTTP {exc.code}，{delay:.0f} 秒後重試（{attempt + 1}/3）", flush=True)
+            time.sleep(delay)
         except (TimeoutError, OSError, urllib.error.URLError) as exc:
             if attempt == 3:
                 raise
@@ -163,6 +176,7 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     today = pd.Timestamp.today().normalize()
     dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
+
     for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
@@ -208,6 +222,25 @@ def _tx_foreign_oi_net(tabs):
                 return nums[10] if len(nums) >= 12 else None
     return None
 
+def _fetch_taifex_openapi_latest():
+    """Fetch the latest official TAIFEX institutional futures snapshot."""
+    url = ("https://openapi.taifex.com.tw/v1/"
+           "MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    payload = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError("TAIFEX OpenAPI 回傳格式不是資料列清單")
+    for row in payload:
+        if row.get("ContractCode") != "臺股期貨" or row.get("Item") != "外資及陸資":
+            continue
+        date = pd.to_datetime(str(row.get("Date", "")), format="%Y%m%d", errors="coerce")
+        net = _num(row.get("OpenInterest(Net)"))
+        if pd.isna(date) or net is None:
+            raise ValueError("TAIFEX OpenAPI 最新資料缺少有效日期或未平倉淨額")
+        return date.normalize(), net
+    raise ValueError("TAIFEX OpenAPI 找不到臺股期貨／外資及陸資資料列")
+
+
 def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     """期交所三大法人「臺股期貨」外資未平倉淨口數，增量寫入 futures.csv（date, foreign_oi_net）。官方僅提供近三年。"""
     from io import StringIO
@@ -215,6 +248,18 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     today = pd.Timestamp.today().normalize()
     dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
+
+    # The official OpenAPI serves the latest published snapshot. Use it only
+    # when its own Date exactly matches a pending trading day; never backfill
+    # historical dates with a current snapshot.
+    try:
+        latest_date, latest_net = _fetch_taifex_openapi_latest()
+        if latest_date in dates:
+            old = _merge_and_save(old, {latest_date: {"foreign_oi_net": latest_net}}, path)
+            dates = dates[dates != latest_date]
+            print(f"期交所 OpenAPI 已保存最新交易日：{latest_date.date()}", flush=True)
+    except Exception as exc:
+        print(f"期交所 OpenAPI 備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
     for d in dates:
         time.sleep(0.7)
         body = urllib.parse.urlencode({"queryType": "1", "goDay": "", "doQuery": "1", "dateaddcnt": "",
@@ -227,8 +272,12 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
             net = _tx_foreign_oi_net(pd.read_html(StringIO(html)))
         except urllib.error.HTTPError as e:
             print(f"期交所 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
-            if e.code == 429: break
+            if e.code == 429 or e.code >= 500:
+                break
             time.sleep(1); continue
+        except (TimeoutError, OSError, urllib.error.URLError) as e:
+            print(f"期交所 {d.date()} 連線持續失敗：{type(e).__name__}；停止本次回補，保留已取得資料", flush=True)
+            break
         except Exception as e:
             print(f"期交所 {d.date()} 下載／解析失敗：{type(e).__name__}: {e}", flush=True)
             time.sleep(1); continue
