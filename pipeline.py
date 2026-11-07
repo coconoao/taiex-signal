@@ -113,7 +113,7 @@ RECENT_DATES_PER_RUN = 5
 CHECKPOINT_EVERY = 5
 
 
-def _pending_dates(old, today, days_back, trading_days=None):
+def _pending_dates(old, today, days_back, trading_days=None, required_columns=None):
     start = today - pd.Timedelta(days=days_back)
     if trading_days is None:
         dates = pd.bdate_range(start, today)
@@ -121,7 +121,18 @@ def _pending_dates(old, today, days_back, trading_days=None):
         dates = pd.DatetimeIndex(trading_days).tz_localize(None).normalize().unique().sort_values()
         dates = dates[(dates >= start) & (dates <= today)]
     if len(old):
-        existing = pd.DatetimeIndex(old.index).tz_localize(None).normalize().unique()
+        # An index entry is not proof that a source row was downloaded.
+        # Retry dates whose required values are absent, avoiding permanently
+        # skipped dates left by earlier partial or empty checkpoints.
+        if required_columns:
+            missing_columns = [c for c in required_columns if c not in old.columns]
+            if missing_columns:
+                complete = pd.Series(False, index=old.index)
+            else:
+                complete = old[list(required_columns)].notna().all(axis=1)
+            existing = pd.DatetimeIndex(old.index[complete]).tz_localize(None).normalize().unique()
+        else:
+            existing = pd.DatetimeIndex(old.index).tz_localize(None).normalize().unique()
         dates = dates[~dates.isin(existing)]
     if not len(dates):
         return dates
@@ -130,7 +141,6 @@ def _pending_dates(old, today, days_back, trading_days=None):
     recent = dates[-RECENT_DATES_PER_RUN:]
     older = dates[:-RECENT_DATES_PER_RUN][:BACKFILL_DATES_PER_RUN]
     return recent.append(older).unique()
-
 
 def _open_with_backoff(req, timeout):
     """Retry transient throttling, server errors, and network timeouts."""
@@ -235,7 +245,7 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     """證交所三大法人買賣超（元），增量寫入 chips.csv（date, foreign_net, trust_net）。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    dates = _pending_dates(old, today, days_back, trading_days)
+    dates = _pending_dates(old, today, days_back, trading_days, required_columns=("foreign_net", "trust_net"))
     rows = {}
 
     for d in dates:
@@ -331,7 +341,7 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     from io import StringIO
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    dates = _pending_dates(old, today, days_back, trading_days)
+    dates = _pending_dates(old, today, days_back, trading_days, required_columns=("margin_bal", "margin_units", "short_units"))
     rows = {}
 
     # The official OpenAPI serves the latest published snapshot. Use it only
@@ -406,7 +416,7 @@ def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
     """證交所市場融資餘額（元），增量寫入 margin.csv（date, margin_bal）。資料約晚上 9 點後公布。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    dates = _pending_dates(old, today, days_back, trading_days)
+    dates = _pending_dates(old, today, days_back, trading_days, required_columns=("foreign_oi_net",))
     rows = {}
     for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={d:%Y%m%d}&selectType=MS&response=json"
