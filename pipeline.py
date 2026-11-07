@@ -202,6 +202,7 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
             req = urllib.request.Request("https://www.taifex.com.tw/cht/3/futContractsDate", body, {"User-Agent": "Mozilla/5.0"})
             with _open_with_backoff(req, timeout=20) as response:
                 html = response.read().decode("utf-8", "ignore")
+            time.sleep(0.7)  # Respect TAIFEX request rate limits.
             if "臺股期貨" not in html: continue  # 休市日或尚未公布
             net = _tx_foreign_oi_net(pd.read_html(StringIO(html)))
         except urllib.error.HTTPError as e:
