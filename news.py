@@ -7,7 +7,7 @@
 機構觀點只計入「標題明確寫出該機構對台股方向」者；每日結果累積到 news_history.jsonl，日後可算各機構命中率。
 用法：python news.py   （時間同 pipeline.py：台股交易日 8:30 前後）
 """
-import os, json, re, html, hashlib, datetime as dt, urllib.request, urllib.parse
+import os, json, re, html, hashlib, csv, datetime as dt, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
@@ -295,12 +295,37 @@ def research_features(hl):
     }
 
 
+def latest_market_asof():
+    """Use the latest completed TAIEX date, even when the full pipeline has not refreshed signals.json."""
+    try:
+        with open("market_history.csv", encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            date_key = (reader.fieldnames or [None])[0]
+            if not date_key or "TAIEX" not in (reader.fieldnames or []):
+                return None
+            latest = None
+            for row in reader:
+                date_value = str(row.get(date_key) or "").strip()[:10]
+                close = str(row.get("TAIEX") or "").replace(",", "").strip()
+                try:
+                    if date_value and close and close.lower() not in ("nan", "none", "null"):
+                        if float(close) > 0:
+                            latest = date_value
+                except (TypeError, ValueError):
+                    continue
+            return latest
+    except (OSError, csv.Error):
+        return None
+
+
 def save_research_snapshot(hl):
     """保存當日新聞快照；以台灣最近已完成交易日作為對齊日期。"""
-    try:
-        market_asof = json.load(open("signals.json", encoding="utf-8")).get("asof")
-    except Exception:
-        market_asof = None
+    market_asof = latest_market_asof()
+    if not market_asof:
+        try:
+            market_asof = json.load(open("signals.json", encoding="utf-8")).get("asof")
+        except Exception:
+            market_asof = None
     try:
         taipei_today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date().isoformat()
     except Exception:
@@ -313,10 +338,15 @@ def save_research_snapshot(hl):
             for line in stream:
                 try:
                     row = json.loads(line)
-                    if isinstance(row, dict) and row.get("asof") != asof:
+                    if isinstance(row, dict):
                         records.append(row)
                 except Exception:
                     continue
+    # One immutable snapshot per completed TAIEX session; reruns and holidays
+    # must not overwrite an already captured session with a different news window.
+    if any(str(row.get("asof")) == str(asof) for row in records):
+        print(f"新聞研究快照 {asof} 已存在，保留原始紀錄。", flush=True)
+        return
     snapshot = {
         "asof": asof, "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "features": research_features(hl),
