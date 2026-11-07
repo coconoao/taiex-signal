@@ -213,6 +213,24 @@ def _is_transient_fetch_error(exc):
     return isinstance(exc, (TimeoutError, OSError, urllib.error.URLError))
 
 
+def _fetch_finmind_data(dataset, start_date, end_date, data_id=None):
+    """Fetch a bounded date range from FinMind; token is optional for its public quota."""
+    params = {"dataset": dataset, "start_date": str(pd.Timestamp(start_date).date()),
+              "end_date": str(pd.Timestamp(end_date).date())}
+    if data_id:
+        params["data_id"] = data_id
+    url = "https://api.finmindtrade.com/api/v4/data?" + urllib.parse.urlencode(params)
+    headers = {"User-Agent": "TaiexSignal/1.0"}
+    token = os.environ.get("FINMIND_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
+    payload = json.loads(_read_with_backoff(req, timeout=25).decode("utf-8"))
+    if payload.get("status") != 200 or not isinstance(payload.get("data"), list):
+        raise ValueError(f"FinMind {dataset} 回傳狀態或資料格式不正確")
+    return pd.DataFrame(payload["data"])
+
+
 def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     """證交所三大法人買賣超（元），增量寫入 chips.csv（date, foreign_net, trust_net）。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
@@ -247,6 +265,25 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
             _checkpoint_if_needed(old, rows, path)
         else:
             print("欄位名稱與預期不同，請檢查", d.date(), list(diff))
+    # TWSE is primary. Fill only missing dates from FinMind market-wide data.
+    try:
+        needed = [d for d in dates if d not in old.index and d not in rows]
+        if needed:
+            alt = _fetch_finmind_data("TaiwanStockTotalInstitutionalInvestors", min(needed), max(needed))
+            if not alt.empty and {"date", "name", "buy", "sell"}.issubset(alt.columns):
+                alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
+                alt["net"] = pd.to_numeric(alt["buy"], errors="coerce") - pd.to_numeric(alt["sell"], errors="coerce")
+                for date, group in alt.dropna(subset=["date", "net"]).groupby("date"):
+                    if date not in needed:
+                        continue
+                    by_name = group.groupby("name")["net"].sum()
+                    foreign = float(by_name.get("Foreign_Investor", 0)) + float(by_name.get("Foreign_Dealer_Self", 0))
+                    trust = by_name.get("Investment_Trust")
+                    if trust is not None:
+                        rows[date] = {"foreign_net": foreign, "trust_net": float(trust)}
+                print(f"FinMind 籌碼備援補入 {sum(d in rows for d in needed)} 個日期", flush=True)
+    except Exception as exc:
+        print(f"FinMind 籌碼備援暫不可用：{type(exc).__name__}", flush=True)
     return _merge_and_save(old, rows, path)
 
 def demo_chips(df, seed=3):  # 合成籌碼，僅供示範
@@ -334,6 +371,28 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
         else:
             rows[d] = {"foreign_oi_net": net}
             _checkpoint_if_needed(old, rows, path)
+    # TAIFEX is primary. Query FinMind once for the missing date range.
+    try:
+        needed = [d for d in dates if d not in old.index and d not in rows]
+        if needed:
+            alt = _fetch_finmind_data("TaiwanFuturesInstitutionalInvestors", min(needed), max(needed), data_id="TX")
+            required = {"date", "institutional_investors", "long_open_interest_balance_volume",
+                        "short_open_interest_balance_volume"}
+            if not alt.empty and required.issubset(alt.columns):
+                alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
+                for col in ("long_open_interest_balance_volume", "short_open_interest_balance_volume"):
+                    alt[col] = pd.to_numeric(alt[col], errors="coerce")
+                foreign = alt[alt["institutional_investors"].astype(str).isin(["Foreign_Investor", "外資及陸資"])]
+                foreign = foreign.dropna(subset=["date", "long_open_interest_balance_volume",
+                                                 "short_open_interest_balance_volume"])
+                foreign = foreign.assign(net=foreign["long_open_interest_balance_volume"] -
+                                         foreign["short_open_interest_balance_volume"])
+                for date, group in foreign.groupby("date"):
+                    if date in needed:
+                        rows[date] = {"foreign_oi_net": float(group["net"].sum())}
+                print(f"FinMind 期貨備援補入 {sum(d in rows for d in needed)} 個日期", flush=True)
+    except Exception as exc:
+        print(f"FinMind 期貨備援暫不可用：{type(exc).__name__}", flush=True)
     if not rows and not len(old):
         print("期貨：本次沒有取得資料，將在下次執行重試")
     return _merge_and_save(old, rows, path)
@@ -377,6 +436,27 @@ def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
             _checkpoint_if_needed(old, rows, path)
         else:
             print("找不到融資／融券欄位，請檢查", d.date(), list(last))
+    # TWSE is primary. FinMind separates TWD amounts from share counts.
+    try:
+        needed = [d for d in dates if d not in old.index and d not in rows]
+        if needed:
+            alt = _fetch_finmind_data("TaiwanStockTotalMarginPurchaseShortSale", min(needed), max(needed))
+            if not alt.empty and {"date", "name", "TodayBalance"}.issubset(alt.columns):
+                alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
+                alt["TodayBalance"] = pd.to_numeric(alt["TodayBalance"], errors="coerce")
+                for date, group in alt.dropna(subset=["date", "TodayBalance"]).groupby("date"):
+                    if date not in needed:
+                        continue
+                    balances = group.groupby("name")["TodayBalance"].last()
+                    money, margin_units, short_units = (balances.get("MarginPurchaseMoney"),
+                                                        balances.get("MarginPurchase"),
+                                                        balances.get("ShortSale"))
+                    if all(v is not None and pd.notna(v) for v in (money, margin_units, short_units)):
+                        rows[date] = {"margin_bal": float(money), "margin_units": float(margin_units),
+                                      "short_units": float(short_units)}
+                print(f"FinMind 信用資料備援補入 {sum(d in rows for d in needed)} 個日期", flush=True)
+    except Exception as exc:
+        print(f"FinMind 信用資料備援暫不可用：{type(exc).__name__}", flush=True)
     return _merge_and_save(old, rows, path)
 
 def demo_margin(df, seed=5):  # 合成融資餘額，僅供示範
