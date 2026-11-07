@@ -1,9 +1,6 @@
 name: Full pipeline smoke test
 
 on:
-  push:
-    branches:
-      - fix/pipeline-incremental-checkpoints
   workflow_dispatch:
 
 permissions:
