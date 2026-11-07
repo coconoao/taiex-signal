@@ -214,12 +214,17 @@ def run_jobs(*whats):
     return exit_code == 0
 
 def stale():
-    # 個股分析依賴 weekly.json 與 weekly_prob.csv；不能只看 signals.json。
-    required = ("signals.json", "weekly.json", "weekly_prob.csv")
+    # 啟動時必須同時確認模型輸出與市場資料存在；Render 檔案系統是暫存的，
+    # 不能因為 repo 內附帶的 signals/weekly 範例檔很新，就跳過資料重建。
+    required = (
+        "signals.json", "weekly.json", "weekly_prob.csv",
+        "chips.csv", "margin.csv", "futures.csv",
+    )
     try:
-        if any(not os.path.exists(name) or os.path.getsize(name) == 0 for name in required):
+        if any(not os.path.isfile(name) or os.path.getsize(name) == 0 for name in required):
             return True
-        signals = json.load(open("signals.json", encoding="utf-8"))
+        with open("signals.json", encoding="utf-8") as stream:
+            signals = json.load(stream)
         if signals.get("demo"):
             return True
         return any(time.time() - os.path.getmtime(name) > 18 * 3600 for name in required)

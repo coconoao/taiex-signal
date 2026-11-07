@@ -2,25 +2,53 @@ name: Validate application
 
 on:
   push:
-    branches: [main, feature/google-oauth-security]
+    branches: [main, feature/google-oauth-security, fix/pipeline-incremental-checkpoints]
   pull_request:
     branches: [main]
 
 jobs:
   syntax:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
       - name: Compile Python modules
         run: python -m compileall -q .
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
       - name: Run isolated security unit tests
         run: python -m unittest discover -s tests -v
+      - name: Run isolated demo pipeline smoke test
+        run: |
+          tmpdir=$(mktemp -d)
+          trap 'rm -rf "$tmpdir"' EXIT
+          (cd "$tmpdir" && python "$GITHUB_WORKSPACE/pipeline.py" --demo)
+          python - "$tmpdir" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          directory = pathlib.Path(sys.argv[1])
+          required = ("signals.json", "weekly.json", "weekly_prob.csv")
+          missing = [name for name in required if not (directory / name).is_file()]
+          if missing:
+              raise SystemExit(f"Demo pipeline did not create: {missing}")
+
+          signals = json.loads((directory / "signals.json").read_text(encoding="utf-8"))
+          weekly = json.loads((directory / "weekly.json").read_text(encoding="utf-8"))
+          if signals.get("demo") is not True:
+              raise SystemExit("Expected demo output marker")
+          if not signals.get("backtest", {}).get("curve", {}).get("dates"):
+              raise SystemExit("Backtest curve is empty")
+          if not weekly.get("asof") or "prob_up" not in weekly:
+              raise SystemExit("Weekly report is incomplete")
+          print("Demo pipeline generated valid daily, weekly, and chart data.")
+          PY
       - name: Check inline dashboard JavaScript
         run: |
           node <<'NODE'

@@ -23,7 +23,7 @@ h2{font-size:1rem;margin:0 0 12px}
 .meta{color:var(--mute);font-size:.875rem;margin:2px 0 4px}
 .live{font-size:.9375rem;margin:6px 0 4px}
 .banner{background:var(--panel);border:1px solid var(--hold);border-radius:6px;padding:8px 12px;margin-bottom:16px;font-size:.875rem}
-section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px;margin-bottom:16px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 3px 14px rgba(20,32,43,.045)}
 .sig{font-size:2.5rem;font-weight:700;line-height:1.2;margin:0}
 .sig small{font-size:1rem;font-weight:400;color:var(--mute);margin-left:8px}
 .ruler{position:relative;height:14px;margin:28px 0 6px;border-radius:7px;display:flex}
@@ -43,8 +43,9 @@ dd small{font-size:.8125rem;font-weight:400;color:var(--mute)}
 .usitem{border:1px solid var(--line);border-radius:6px;padding:10px;min-width:0}
 .usitem b{display:block;font-size:1.05rem;overflow-wrap:anywhere}
 .usitem small{color:var(--mute)}
-.chartbox{width:100%;min-height:300px}
-.charttools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.chartbox{width:100%;min-height:340px;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden;padding:6px}
+@media(max-width:520px){.chartbox{min-height:290px;padding:2px}.charttools{align-items:flex-start}.charttools .note{flex-basis:100%}}
+.charttools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;align-items:center}.charttools .btn{min-height:36px;touch-action:manipulation}.charttools .btn.active{background:var(--accent);color:var(--panel);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}.modebar-container,.modebar{display:none!important;visibility:hidden!important;pointer-events:none!important}@media(max-width:520px){.charttools{gap:5px}.charttools .btn{padding:5px 9px;min-height:38px}.chartbox .modebar{transform:scale(.9);transform-origin:top right}}
 svg{width:100%;height:auto;display:block}
 .legend{font-size:.8125rem;color:var(--mute)}
 .legend span{display:inline-block;width:14px;height:3px;vertical-align:middle;margin:0 4px 0 12px}
@@ -78,7 +79,7 @@ details[open]>summary{margin-bottom:12px}
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
   <div class="banner" id="miss" hidden></div>
-  <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><p id="usMarketSummary" class="note"></p><div class="usgrid" id="usMarketCards"></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
+  <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><p id="usMarketSummary" class="note"></p><div class="usgrid" id="usMarketCards"></div><div class="charttools" aria-label="美股圖表操作"><button class="btn sm ghost" id="usZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="usZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="usPan" type="button">平移</button><button class="btn sm ghost" id="usZoom" type="button">框選縮放</button><button class="btn sm ghost" id="usReset" type="button">重設</button><button class="btn sm ghost" id="usRange1h" type="button">1 小時</button><button class="btn sm ghost" id="usRange3h" type="button">3 小時</button><button class="btn sm ghost" id="usRangeAll" type="button">全部</button></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
   <div class="banner" id="err" hidden>讀不到 signals.json。請用 python app.py 啟動，或用匯出的單一 HTML 檔、已部署的網站開啟（直接雙擊 dashboard.html 讀不到資料檔）。</div>
 
   <div id="tab-daily">
@@ -98,7 +99,7 @@ details[open]>summary{margin-bottom:12px}
     <section id="bt" hidden>
       <details><summary>歷史回測（滾動式、已扣成本）</summary>
       <dl id="stats"></dl>
-      <div class="charttools"><button class="btn sm ghost" id="curveReset" type="button">重設圖表</button><span class="note">可懸停查看數值、拖曳縮放、使用下方區間滑桿。</span></div><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
+      <div class="charttools" aria-label="歷史回測圖表操作"><button class="btn sm ghost" id="curveZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="curveZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="curvePan" type="button">平移</button><button class="btn sm ghost" id="curveZoom" type="button">框選縮放</button><button class="btn sm ghost" id="curveReset" type="button">重設</button><button class="btn sm ghost" id="curveRange1m" type="button">1 個月</button><button class="btn sm ghost" id="curveRange3m" type="button">3 個月</button><button class="btn sm ghost" id="curveRange6m" type="button">6 個月</button><button class="btn sm ghost" id="curveRangeYtd" type="button">今年</button><button class="btn sm ghost" id="curveRange1y" type="button">1 年</button><button class="btn sm ghost" id="curveRangeAll" type="button">全部</button></div><p class="note">可拖曳下方滑桿選日期；點選「框選縮放」後，在圖表上拖曳選取區域。工具列亦提供下載圖表。</p><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
     <section><h2>新聞情緒（隔日）：內建規則與 AI 並排</h2><div id="newsD"></div></section>
@@ -152,27 +153,65 @@ function divRow(name, v, max) {
   const side = v >= 0 ? "left:50%;background:var(--up)" : "right:50%;background:var(--down)";
   return `<div class="row"><span>${name}</span><div class="div"><span style="${side};width:${w}%"></span></div><b>${v > 0 ? "+" : ""}${v.toFixed(2)}</b></div>`;
 }
+function bindChartControls(id, prefix, dates, unit) {
+  const el = $(id);
+  const relayout = update => Plotly.relayout(el, update);
+  const setMode = mode => {
+    relayout({dragmode:mode});
+    ["Pan","Zoom"].forEach(name => { const button=$(prefix+name); if(button) button.classList.toggle("active",name.toLowerCase()===mode); });
+  };
+  const getRange = () => {
+    const axis=el._fullLayout&&el._fullLayout.xaxis;
+    if(!axis||!axis.range||axis.range.length!==2)return null;
+    const a=new Date(axis.range[0]).getTime(),b=new Date(axis.range[1]).getTime();
+    return Number.isFinite(a)&&Number.isFinite(b)&&b>a?[a,b]:null;
+  };
+  const zoom = factor => {
+    const range=getRange(); if(!range)return;
+    const center=(range[0]+range[1])/2,half=(range[1]-range[0])*factor/2;
+    relayout({"xaxis.range":[new Date(center-half).toISOString(),new Date(center+half).toISOString()],"yaxis.autorange":true});
+  };
+  const setPreset = preset => {
+    if(!dates||!dates.length)return;
+    const end=new Date(dates[dates.length-1]);
+    if(preset==="all"){relayout({"xaxis.autorange":true,"yaxis.autorange":true});return;}
+    const start=new Date(end);
+    if(preset==="ytd")start.setMonth(0,1);
+    else if(unit==="hours")start.setTime(end.getTime()-Number(preset)*3600000);
+    else if(preset.endsWith("m"))start.setMonth(start.getMonth()-Number(preset.slice(0,-1)));
+    else if(preset.endsWith("y"))start.setFullYear(start.getFullYear()-Number(preset.slice(0,-1)));
+    relayout({"xaxis.range":[start.toISOString(),end.toISOString()],"yaxis.autorange":true});
+  };
+  const bind=(suffix,fn)=>{const b=$(prefix+suffix);if(b)b.onclick=fn;};
+  bind("ZoomIn",()=>zoom(.65));bind("ZoomOut",()=>zoom(1.55));
+  bind("Pan",()=>setMode("pan"));bind("Zoom",()=>setMode("zoom"));
+  bind("Reset",()=>relayout({"xaxis.autorange":true,"yaxis.autorange":true}));
+  if(unit==="hours"){bind("Range1h",()=>setPreset("1"));bind("Range3h",()=>setPreset("3"));bind("RangeAll",()=>setPreset("all"));}
+  else ["1m","3m","6m","ytd","1y","all"].forEach(p=>bind("Range"+p[0].toUpperCase()+p.slice(1),()=>setPreset(p)));
+}
 function drawCurve(c) {
   const el = $("curve");
   if (window.Plotly) {
     Plotly.react(el, [
-      {x:c.dates,y:c.strategy,type:"scatter",mode:"lines",name:"模型歷史曲線",line:{width:2}},
-      {x:c.dates,y:c.buyhold,type:"scatter",mode:"lines",name:"市場基準曲線",line:{width:2}}
+      {x:c.dates,y:c.strategy,type:"scatter",mode:"lines",name:"依訊號策略",line:{color:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),width:3},hovertemplate:'%{x|%Y-%m-%d}<br>策略：%{y:.3f}<extra></extra>'},
+      {x:c.dates,y:c.buyhold,type:"scatter",mode:"lines",name:"買進持有基準",line:{color:getComputedStyle(document.documentElement).getPropertyValue('--hold').trim(),width:2,dash:'dot'},hovertemplate:'%{x|%Y-%m-%d}<br>基準：%{y:.3f}<extra></extra>'}
     ], {
-      margin:{l:48,r:18,t:18,b:55}, autosize:true, hovermode:"x unified",
-      dragmode:"zoom", paper_bgcolor:"transparent",plot_bgcolor:"transparent",
-      font:{color:getComputedStyle(document.body).color},
-      xaxis:{type:"date",rangeslider:{visible:true},rangeselector:{buttons:[
+      margin:{l:58,r:18,t:22,b:76}, autosize:true, hovermode:"x unified",
+      dragmode:"pan", paper_bgcolor:"transparent",plot_bgcolor:"transparent",
+      font:{color:getComputedStyle(document.body).color,family:'-apple-system,BlinkMacSystemFont,"PingFang TC",sans-serif',size:12},
+      hoverlabel:{bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--panel').trim(),font:{color:getComputedStyle(document.body).color},bordercolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim()},
+      xaxis:{type:"date",showgrid:false,showline:true,linecolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),tickfont:{size:11},rangeslider:{visible:true,thickness:0.08,bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),bordercolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim()},rangeselector:{bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),activecolor:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),font:{color:getComputedStyle(document.body).color,size:10},buttons:[
         {count:1,label:"1月",step:"month",stepmode:"backward"},
         {count:3,label:"3月",step:"month",stepmode:"backward"},
         {count:6,label:"6月",step:"month",stepmode:"backward"},
         {count:1,label:"1年",step:"year",stepmode:"backward"},
         {step:"all",label:"全部"}]}},
-      yaxis:{title:"累積資產（起始值 = 1）",fixedrange:false},
-      legend:{orientation:"h",y:-0.28}
-    }, {responsive:true,scrollZoom:true,displaylogo:false,
-        modeBarButtonsToRemove:["lasso2d","select2d"]});
-    $("curveReset").onclick = () => Plotly.relayout(el, { "xaxis.autorange":true, "yaxis.autorange":true });
+      yaxis:{title:{text:"累積資產（起始值 = 1）",font:{size:11}},fixedrange:false,gridcolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),zerolinecolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),tickformat:'.2f'},
+      legend:{orientation:"h",y:-0.34,x:0,font:{size:11}},
+      hoverdistance:100,spikedistance:-1
+    }, {responsive:true,scrollZoom:true,displayModeBar:false,displaylogo:false,
+        modeBarButtonsToRemove:["lasso2d","select2d","hoverCompareCartesian","hoverClosestCartesian"]});
+    bindChartControls("curve","curve",c.dates,"dates");
     return;
   }
   const all = c.strategy.concat(c.buyhold), lo = Math.min(...all), hi = Math.max(...all);
@@ -403,14 +442,17 @@ function renderUSMarket(data) {
   if (data.chart && data.chart.points && data.chart.points.length && window.Plotly) {
     Plotly.react("usMarketChart", [{
       x:data.chart.points.map(p=>p.time), y:data.chart.points.map(p=>p.value),
-      type:"scatter",mode:"lines",name:"S&P 500",line:{width:2}
+      type:"scatter",mode:"lines",name:"S&P 500",line:{color:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),width:3},
+      hovertemplate:'%{x|%H:%M}<br>S&P 500：%{y:,.2f}<extra></extra>'
     }], {
-      title:{text:"S&P 500｜最近可取得的盤中走勢",font:{size:14}},
-      margin:{l:50,r:15,t:40,b:50},autosize:true,hovermode:"x unified",
+      title:{text:"S&P 500｜最近可取得的盤中走勢",font:{size:14},x:0.03,xanchor:'left'},
+      margin:{l:62,r:18,t:48,b:62},autosize:true,hovermode:"x unified",
       paper_bgcolor:"transparent",plot_bgcolor:"transparent",
-      font:{color:getComputedStyle(document.body).color},
-      xaxis:{type:"date",rangeslider:{visible:true}},yaxis:{title:"指數"}
-    },{responsive:true,scrollZoom:true,displaylogo:false});
+      font:{color:getComputedStyle(document.body).color,size:12},
+      hoverlabel:{bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--panel').trim(),font:{color:getComputedStyle(document.body).color}},
+      xaxis:{type:"date",showgrid:false,tickfont:{size:11},rangeslider:{visible:true,thickness:0.08,bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()}},yaxis:{title:{text:"指數點位",font:{size:11}},gridcolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),tickformat:',.0f'}
+    },{responsive:true,scrollZoom:true,displayModeBar:false,displaylogo:false,modeBarButtonsToRemove:["lasso2d","select2d","hoverCompareCartesian","hoverClosestCartesian"]});
+    bindChartControls("usMarketChart","us",data.chart.points.map(p=>p.time),"hours");
   } else if (!window.Plotly) {
     $("usMarketChart").textContent = "互動圖表載入失敗；上方仍顯示最新可取得的行情數值。";
   }
