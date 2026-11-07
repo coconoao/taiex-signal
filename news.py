@@ -3,7 +3,7 @@
   1. 內建規則：不需要任何金鑰，永遠執行（只比對字詞，不理解語意，準確度有限）。
   2. AI 模式：在儀表板「設定」頁（或環境變數）填入金鑰後，Claude / ChatGPT / Gemini 會同時分析，結果並排顯示。
      ANTHROPIC_API_KEY（CLAUDE_MODEL 預設 claude-sonnet-5-5）；OPENAI_API_KEY + OPENAI_MODEL；GEMINI_API_KEY + GEMINI_MODEL
-資料來源：以英文通訊社標題為主（不用台灣媒體標題判斷）＋下列機構的近 7 日標題。
+資料來源：國際市場新聞、中央社台灣新聞 RSS，以及台灣／美國政府政策與國際局勢的近 7 日公開資訊。
 機構觀點只計入「標題明確寫出該機構對台股方向」者；每日結果累積到 news_history.jsonl，日後可算各機構命中率。
 用法：python news.py   （時間同 pipeline.py：台股交易日 8:30 前後）
 """
@@ -14,6 +14,19 @@ from concurrent.futures import ThreadPoolExecutor
 MARKET = [("美股", "Wall Street stocks Nasdaq close when:1d"), ("半導體", "TSMC semiconductor chips export when:1d"),
           ("總經", "Fed rates inflation Treasury yields when:1d"), ("台灣總經", "Taiwan central bank OR GDP forecast when:3d"),
           ("地緣", "Taiwan Strait China tensions when:1d")]
+# 中央社 RSS 僅呈現標題、來源、時間與原文連結；遵守其個人非商業使用規範。
+TAIWAN_FEEDS = [
+    ("台灣政治", "https://feeds.feedburner.com/rsscna/politics"),
+    ("台灣產經", "https://feeds.feedburner.com/rsscna/finance"),
+    ("台灣科技", "https://feeds.feedburner.com/rsscna/technology"),
+    ("台灣國際", "https://feeds.feedburner.com/rsscna/intworld"),
+    ("台灣地方", "https://feeds.feedburner.com/rsscna/local"),
+]
+POLICY = [
+    ("台灣政府政策", "site:ey.gov.tw OR site:moea.gov.tw OR site:cbc.gov.tw OR site:dgbas.gov.tw OR site:fsc.gov.tw 台灣經濟產業政策 when:7d"),
+    ("美國政府政策", "site:whitehouse.gov/news OR site:ustr.gov/about/policy-offices/press-office OR site:federalreserve.gov/newsevents 美國關稅貿易科技貨幣政策 when:7d"),
+    ("國際局勢", "Taiwan Strait OR export controls OR sanctions OR Middle East energy supply chain trade when:7d"),
+]
 # 機構清單可自行增刪；也可加入你信任的個人，例如 ("姓名", "姓名 台股 when:7d")
 ANALYSTS = [(n, f"{q} Taiwan stocks when:7d") for n, q in [("高盛", "Goldman Sachs"), ("摩根士丹利", "Morgan Stanley"),
             ("摩根大通", "JPMorgan"), ("花旗", "Citi"), ("瑞銀", "UBS"), ("野村", "Nomura"), ("麥格理", "Macquarie")]]
@@ -25,7 +38,8 @@ NEG = {"fall", "falls", "fell", "drop", "drops", "slump", "plunge", "loss", "los
        "tension", "war", "wars", "tariff", "sanction", "curb", "ban", "bans", "recession", "sell-off", "selloff", "slide", "crash",
        "probe", "bearish", "underweight", "cuts"}
 
-PROMPT = """你是台股分析助理。以下是今天蒐集的新聞標題（id|分類|標題），分成「市場新聞」與「機構觀點」兩部分。只根據標題判斷，不要引用標題以外的資訊；資訊不足時分數接近 0、信心調低。
+PROMPT = """你是台灣市場新聞研究助理。以下資料包含國際市場新聞、台灣本地新聞、政府政策與國際局勢，以及機構觀點。只根據提供的標題判斷，不要引用標題以外的資訊；資訊不足時分數接近 0、信心調低。
+分析政策時，請區分「已公告／已生效」與「提案／討論／媒體推測」，說明可能的傳導管道（例如關稅、出口、半導體供應鏈、能源、匯率、利率、財政支出），不要把政策立場直接等同市場結果。
 只輸出 JSON：{"next_day": 數字, "next_week": 數字, "confidence": 0到1, "drivers": [{"id": 標題id, "impact": "正面"或"負面", "why": "20字內理由"}], "summary": "繁體中文，80字內", "analysts": [{"name": 機構名稱, "id": 標題id, "stance": "看多"或"看空"或"中性"或"無明確看法"}]}
 分數代表對「台灣加權指數」的影響：-1 極偏空、0 中性、1 極偏多；next_day 指下一個交易日，next_week 指未來 5 個交易日。drivers 最多 4 則，來自市場新聞。
 analysts 只列「標題明確寫出該機構對台股或台股大盤的方向性看法」的項目，其他不列，不要從標題推測。
@@ -86,9 +100,28 @@ def collect(groups, per, kind, out, seen):
                 n += 1
                 out.append({"id": len(out), "kind": kind, "tag": tag, **item})
 
+def collect_rss(feeds, kind, out, seen, per=8):
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        futures = [ex.submit(_fetch_feed, url, tag) for tag, url in feeds]
+        for (tag, _), fut in zip(feeds, futures):
+            try:
+                items = fut.result()
+            except Exception as e:
+                print("RSS 新聞來源失敗", tag, type(e).__name__, str(e)[:160])
+                continue
+            count = 0
+            for item in items:
+                key = re.sub(r"\W+", "", item["title"].lower())
+                if key and key not in seen and count < per:
+                    seen.add(key)
+                    out.append({"id": len(out), "kind": kind, "tag": tag, **item})
+                    count += 1
+
 def headlines():
     out, seen = [], set()
     collect(MARKET, 8, "market", out, seen)
+    collect(POLICY, 6, "policy", out, seen)
+    collect_rss(TAIWAN_FEEDS, "taiwan", out, seen, per=8)
     collect(ANALYSTS, 3, "analyst", out, seen)
     return out
 
@@ -150,7 +183,10 @@ def main():
     hl = headlines()
     if len(hl) < 3: raise SystemExit(f"抓到的新聞標題只有 {len(hl)} 則；Google News 與 Bing News RSS 均不足，保留上一版資料。")
     sec = lambda k: "\n".join(f'{h["id"]}|{h["tag"]}|{h["title"]}' for h in hl if h["kind"] == k)
-    p = PROMPT + "【市場新聞】\n" + sec("market") + "\n【機構觀點】\n" + sec("analyst")
+    p = (PROMPT + "【國際市場新聞】\n" + sec("market") +
+         "\n【台灣新聞】\n" + sec("taiwan") +
+         "\n【台灣／美國政府政策與國際局勢】\n" + sec("policy") +
+         "\n【機構觀點】\n" + sec("analyst"))
     todo = {n: f for n, (f, keys) in MODELS.items() if all(os.environ.get(k) for k in keys)}
     with ThreadPoolExecutor() as ex:  # 有金鑰的 AI 同時分析
         res = {"內建規則": lexicon(hl)} | dict(ex.map(lambda kv: run(kv[0], kv[1], p), todo.items()))
