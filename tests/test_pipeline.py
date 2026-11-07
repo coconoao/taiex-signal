@@ -17,6 +17,7 @@ from pipeline import (
     _read_with_backoff,
     _pending_dates,
     fetch_chips,
+    _fetch_taifex_openapi_latest,
     load_live,
     TICKERS,
 )
@@ -118,6 +119,40 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result, b'{"ok": true}')
         self.assertEqual(open_url.call_count, 2)
         sleep.assert_called_once_with(5)
+
+
+class TaifexOpenApiTests(unittest.TestCase):
+    def test_extracts_only_taiwan_futures_foreign_open_interest_net(self):
+        import json
+
+        payload = [
+            {
+                "Date": "20261106",
+                "ContractCode": "臺股期貨",
+                "Item": "外資及陸資",
+                "OpenInterest(Net)": "-12345",
+            },
+            {
+                "Date": "20261106",
+                "ContractCode": "電子期貨",
+                "Item": "外資及陸資",
+                "OpenInterest(Net)": "999",
+            },
+        ]
+        with patch("pipeline._read_with_backoff", return_value=json.dumps(payload).encode()):
+            date, net = _fetch_taifex_openapi_latest()
+
+        self.assertEqual(date, pd.Timestamp("2026-11-06"))
+        self.assertEqual(net, -12345.0)
+
+    def test_rejects_missing_taiwan_futures_foreign_row(self):
+        import json
+
+        payload = [{"Date": "20261106", "ContractCode": "電子期貨",
+                    "Item": "外資及陸資", "OpenInterest(Net)": "10"}]
+        with patch("pipeline._read_with_backoff", return_value=json.dumps(payload).encode()):
+            with self.assertRaisesRegex(ValueError, "找不到"):
+                _fetch_taifex_openapi_latest()
 
 
 class CheckpointTests(unittest.TestCase):
