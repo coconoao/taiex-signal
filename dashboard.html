@@ -324,6 +324,29 @@ function renderSummary() {
   $("sumline").innerHTML = p.join("　｜　");
 }
 function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); newsCard(n, "next_week", $("newsW")); renderSummary(); }
+
+/* ---- 載入（可重複執行）與自動更新 ---- */
+const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
+  .catch(() => { $("err").hidden = false; $("meta").textContent = ""; });
+const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); renderSummary(); }).catch(() => { $("wsig").textContent = "尚無 weekly.json"; });
+const loadNews = () => getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }).then(renderNews);
+let lastSig = null, busy = false;
+function loadAll() {
+  if (busy) return Promise.resolve();
+  busy = true;
+  return Promise.all([loadDaily(), loadWeekly(), loadNews()]).then(() => {
+    const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
+    $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
+  }).finally(() => { busy = false; });
+}
+$("reload").onclick = loadAll;
+if (SNAP) $("reload").hidden = true;
+else {
+  setInterval(() => { if (!document.hidden) loadAll(); }, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) loadAll(); });
+}
+
+
 $("copyNews").onclick = async () => {
   const msg = $("geminiMsg");
   if (!NEWS || !Array.isArray(NEWS.headlines) || !NEWS.headlines.length) {
