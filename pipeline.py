@@ -491,39 +491,54 @@ def build(df, chips=None, margin=None, h=1, futures=None):
     # sessions to support their rolling features. Row count alone is unsafe:
     # a cache with many off-calendar or sparse rows can leave only a handful
     # of complete training samples and abort the whole scheduled refresh.
-    chips_overlap = len(X.index.intersection(chips.index)) if chips is not None else 0
-    if chips is not None and chips_overlap >= 140:
+    chips_aligned = chips.reindex(X.index) if chips is not None else None
+    chips_valid = (chips_aligned[["foreign_net", "trust_net"]].notna().all(axis=1)
+                   if chips_aligned is not None and {"foreign_net", "trust_net"}.issubset(chips_aligned.columns)
+                   else pd.Series(False, index=X.index))
+    chips_count = int(chips_valid.sum())
+    if chips is not None and chips_count >= 140:
         for k, name in [("foreign_net", "外資"), ("trust_net", "投信")]:
-            c = chips[k].reindex(X.index)
+            c = chips_aligned[k]
             X[f"籌碼:{name}買賣超"] = c / c.abs().rolling(60, min_periods=20).mean()
             s = np.sign(c)
             X[f"籌碼:{name}連買連賣天數"] = s.groupby((s != s.shift()).cumsum()).cumsum().clip(-10, 10)
-        first = max(first, chips.index.min())
+        first = max(first, chips_aligned.index[chips_valid].min())
     elif chips is not None:
-        print(f"籌碼資料覆蓋不足（與行情重疊 {chips_overlap} 日，至少 140 日），本次略過此層")
-    margin_overlap = len(X.index.intersection(margin.index)) if margin is not None else 0
-    if margin is not None and margin_overlap >= 140:
-        b = margin["margin_bal"].reindex(X.index)
+        print(f"籌碼有效資料不足（完整有效交易日 {chips_count} 日，至少 140 日），本次略過此層")
+    margin_aligned = margin.reindex(X.index) if margin is not None else None
+    margin_valid = (margin_aligned["margin_bal"].notna()
+                    if margin_aligned is not None and "margin_bal" in margin_aligned.columns
+                    else pd.Series(False, index=X.index))
+    margin_count = int(margin_valid.sum())
+    if margin is not None and margin_count >= 140:
+        b = margin_aligned["margin_bal"]
         X["信用:融資餘額5日變化"] = b.pct_change(5)
         X["信用:融資餘額偏離60日均"] = b / b.rolling(60, min_periods=20).mean() - 1
         X["信用:融資與指數背離"] = b.pct_change(5) - t.pct_change(5)
-        if {"short_units", "margin_units"}.issubset(margin.columns):
-            sh = margin["short_units"].reindex(X.index)
-            ratio = sh / margin["margin_units"].reindex(X.index)
+        short_valid = (margin_aligned[["short_units", "margin_units"]].notna().all(axis=1)
+                       if {"short_units", "margin_units"}.issubset(margin_aligned.columns)
+                       else pd.Series(False, index=X.index))
+        if int(short_valid.sum()) >= 140:
+            sh = margin_aligned["short_units"]
+            ratio = sh / margin_aligned["margin_units"]
             X["信用:融券餘額5日變化"] = sh.pct_change(5)
             X["信用:券資比偏離60日均"] = ratio / ratio.rolling(60, min_periods=20).mean() - 1
-        first = max(first, margin.index.min())
+        first = max(first, margin_aligned.index[margin_valid].min())
     elif margin is not None:
-        print(f"信用資料覆蓋不足（與行情重疊 {margin_overlap} 日，至少 140 日），本次略過此層")
-    futures_overlap = len(X.index.intersection(futures.index)) if futures is not None else 0
-    if futures is not None and futures_overlap >= 120:
-        o = futures["foreign_oi_net"].reindex(X.index)
+        print(f"信用有效資料不足（融資餘額有效交易日 {margin_count} 日，至少 140 日），本次略過此層")
+    futures_aligned = futures.reindex(X.index) if futures is not None else None
+    futures_valid = (futures_aligned["foreign_oi_net"].notna()
+                     if futures_aligned is not None and "foreign_oi_net" in futures_aligned.columns
+                     else pd.Series(False, index=X.index))
+    futures_count = int(futures_valid.sum())
+    if futures is not None and futures_count >= 120:
+        o = futures_aligned["foreign_oi_net"]
         sd = o.rolling(120, min_periods=40).std()
         X["期貨:外資淨未平倉(相對近120日)"] = (o - o.rolling(120, min_periods=40).mean()) / sd
         X["期貨:外資淨未平倉5日變化"] = o.diff(5) / sd
-        first = max(first, futures.index.min())
+        first = max(first, futures_aligned.index[futures_valid].min())
     elif futures is not None:
-        print(f"期貨資料覆蓋不足（與行情重疊 {futures_overlap} 日，至少 120 日），本次略過此層")
+        print(f"期貨有效資料不足（外資未平倉有效交易日 {futures_count} 日，至少 120 日），本次略過此層")
     # 時序：美股 D 日收盤早於台股 D+1 開盤，故 D 列特徵預測 D+1 報酬，無資料洩漏
     fwd = t.shift(-h) / t - 1  # 未來 h 個交易日報酬（h=1 即隔日）
     y = (fwd > 0).astype(float).where(fwd.notna())
