@@ -134,7 +134,7 @@ details[open]>summary{margin-bottom:12px}
     <section><h2>台灣官方歷史新聞資料</h2>
       <p class="note" id="policyArchiveMeta">載入官方歷史新聞資料中…</p>
       <div id="policyArchiveItems"></div>
-      <p class="note">來源：行政院 Open API。僅保存標題、發布日期與官方來源連結；這是政府新聞稿子集，不代表完整媒體新聞庫，也不與多來源每日新聞分數混算。</p>
+      <p class="note">來源：行政院官網歷史新聞索引（抽樣）。僅保存短標題、日期與原文連結，不保存全文或摘要；依原站權利聲明使用，也不與多來源每日新聞分數混算。</p>
     </section>
     <section><h2>新聞情緒（既有資料）</h2><div id="newsD"></div><p class="note">此區沿用原本新聞摘要與分析，與下方新聞研究資料分開保存。</p></section>
   </div>
@@ -487,7 +487,7 @@ function renderPolicyArchive(a) {
     box.textContent = "等待歷史資料回補。";
     return;
   }
-  meta.textContent = `資料來源：${a.dataset || "官方新聞"}｜${a.date_start} 至 ${a.date_end}｜${a.record_count || a.items.length} 則標題｜涵蓋 ${a.date_count || 0} 個發布日期｜匯入時間 ${a.imported_at || "未提供"}`;
+  meta.textContent = `資料來源：${a.dataset || "官方新聞"}｜${a.date_start} 至 ${a.date_end}｜${a.record_count || a.items.length} 則標題｜涵蓋 ${a.date_count || 0} 個發布日期｜${a.sampling || "抽樣範圍未提供"}｜匯入時間 ${a.imported_at || "未提供"}`;
   const rows = a.items.slice(-12).reverse();
   box.innerHTML = rows.map(item => {
     const href = safeNewsHref(item.url);
