@@ -520,6 +520,55 @@ def call_ai_provider(provider, api_key, model, prompt):
 
 
 
+def call_chat_provider(messages):
+    """Use a server-managed provider key; never accept or log browser-supplied secrets."""
+    providers = (
+        ("ChatGPT", os.environ.get("OPENAI_API_KEY", ""), os.environ.get("OPENAI_MODEL", "gpt-4o-mini")),
+        ("Claude", os.environ.get("ANTHROPIC_API_KEY", ""), os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")),
+        ("Gemini", os.environ.get("GEMINI_API_KEY", ""), os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")),
+    )
+    provider, key, model = next(((p, k, m) for p, k, m in providers if k), (None, None, None))
+    if not key:
+        raise RuntimeError("網站尚未設定聊天 AI 服務。管理者需在 Render 環境變數設定 OPENAI_API_KEY、ANTHROPIC_API_KEY 或 GEMINI_API_KEY。")
+    system = ("你是網站內的繁體中文助理。回答清楚、誠實並標示不確定性。"
+              "若問題涉及股票、指數或金融市場，只能提供一般教育資訊與程式／資料技術說明；"
+              "不得提供買賣建議、投資策略、價格預測或個人化投資建議。"
+              "不得把網站資料或模型輸出描述成保證。")
+    if provider == "ChatGPT":
+        body = {"model": model, "messages": [{"role":"system","content":system}] + messages}
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {"Authorization":"Bearer " + key}
+    elif provider == "Claude":
+        body = {"model":model,"max_tokens":1800,"system":system,"messages":messages}
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {"x-api-key":key,"anthropic-version":"2023-06-01"}
+    else:
+        contents = [{"role":"user" if m["role"]=="user" else "model",
+                     "parts":[{"text":m["content"]}]} for m in messages]
+        body = {"systemInstruction":{"parts":[{"text":system}]},"contents":contents}
+        url = "https://generativelanguage.googleapis.com/v1beta/models/" + urllib.parse.quote(model,safe="") + ":generateContent"
+        headers = {"x-goog-api-key":key}
+    req = urllib.request.Request(url,data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type":"application/json",**headers})
+    try:
+        with urllib.request.urlopen(req,timeout=75) as response:
+            result=json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError("聊天 AI 服務回應 HTTP " + str(e.code)) from e
+    if provider == "ChatGPT":
+        choices=result.get("choices") or []
+        answer=choices[0].get("message",{}).get("content","") if choices else ""
+    elif provider == "Claude":
+        answer="".join(x.get("text","") for x in result.get("content",[]) if x.get("type")=="text")
+    else:
+        candidates=result.get("candidates") or []
+        answer="".join(x.get("text","") for x in candidates[0].get("content",{}).get("parts",[])) if candidates else ""
+    if not answer:
+        raise RuntimeError("聊天 AI 沒有回傳文字，請稍後重試。")
+    return answer
+
+
+
 ADMIN_PAGE = """<!doctype html>
 <html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>使用者管理｜TAIEX Signal</title>
@@ -728,6 +777,16 @@ class H(SimpleHTTPRequestHandler):
             return
         if not self.authorized():
             return
+
+        if u.path == "/chat":
+            page = open(os.path.join(CODE, "chat.html"), encoding="utf-8").read().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            return self.wfile.write(page)
+
         if GOOGLE_ENABLED and u.path == "/api/me":
             return self.send_json({
                 "email": self.current_user.get("email"),
@@ -837,6 +896,25 @@ class H(SimpleHTTPRequestHandler):
                 return self.send_json({"error": str(e)}, 400)
             except Exception:
                 return self.send_json({"error": "更新使用者權限失敗"}, 503)
+
+        if self.path == "/api/chat":
+            messages = body.get("messages")
+            if not isinstance(messages, list) or not messages or len(messages) > 20:
+                return self.send_json({"error":"對話內容格式不正確或訊息過多"},400)
+            clean = []
+            for item in messages:
+                if not isinstance(item, dict) or item.get("role") not in ("user","assistant"):
+                    return self.send_json({"error":"訊息格式不正確"},400)
+                content = item.get("content")
+                if not isinstance(content,str) or not content.strip() or len(content)>6000:
+                    return self.send_json({"error":"單則訊息不可空白或超過 6000 字"},400)
+                clean.append({"role":item["role"],"content":content.strip()})
+            try:
+                return self.send_json({"text":call_chat_provider(clean)})
+            except Exception as e:
+                print("[api-chat] status=error type="+type(e).__name__,flush=True)
+                return self.send_json({"error":str(e) if "尚未設定" in str(e) else "聊天服務暫時無法使用，請稍後重試。"},503)
+
         if self.path == "/api/ai":
             provider = body.get("provider")
             try:
