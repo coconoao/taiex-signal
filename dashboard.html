@@ -45,7 +45,7 @@ dd small{font-size:.8125rem;font-weight:400;color:var(--mute)}
 .usitem small{color:var(--mute)}
 .chartbox{width:100%;min-height:340px;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden;padding:6px}
 @media(max-width:520px){.chartbox{min-height:290px;padding:2px}.charttools{align-items:flex-start}.charttools .note{flex-basis:100%}}
-.charttools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;align-items:center}.charttools .btn{min-height:36px;touch-action:manipulation}.charttools .btn.active{background:var(--accent);color:var(--panel);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}.chartbox .modebar-container{opacity:1!important}.chartbox .modebar{display:flex!important;opacity:1!important}@media(max-width:520px){.charttools{gap:5px}.charttools .btn{padding:5px 9px;min-height:38px}.chartbox .modebar{transform:scale(.9);transform-origin:top right}}
+.charttools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;align-items:center}.charttools .btn{min-height:36px;touch-action:manipulation}.charttools .btn.active{background:var(--accent);color:var(--panel);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}.chartbox .modebar-container,.chartbox .modebar{display:none!important}@media(max-width:520px){.charttools{gap:5px}.charttools .btn{padding:5px 9px;min-height:38px}.chartbox .modebar{transform:scale(.9);transform-origin:top right}}
 svg{width:100%;height:auto;display:block}
 .legend{font-size:.8125rem;color:var(--mute)}
 .legend span{display:inline-block;width:14px;height:3px;vertical-align:middle;margin:0 4px 0 12px}
@@ -209,7 +209,7 @@ function drawCurve(c) {
       yaxis:{title:{text:"累積資產（起始值 = 1）",font:{size:11}},fixedrange:false,gridcolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),zerolinecolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),tickformat:'.2f'},
       legend:{orientation:"h",y:-0.34,x:0,font:{size:11}},
       hoverdistance:100,spikedistance:-1
-    }, {responsive:true,scrollZoom:true,displayModeBar:true,displaylogo:false,
+    }, {responsive:true,scrollZoom:true,displayModeBar:false,displaylogo:false,
         modeBarButtonsToRemove:["lasso2d","select2d","hoverCompareCartesian","hoverClosestCartesian"]});
     bindChartControls("curve","curve",c.dates,"dates");
     return;
@@ -451,7 +451,7 @@ function renderUSMarket(data) {
       font:{color:getComputedStyle(document.body).color,size:12},
       hoverlabel:{bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--panel').trim(),font:{color:getComputedStyle(document.body).color}},
       xaxis:{type:"date",showgrid:false,tickfont:{size:11},rangeslider:{visible:true,thickness:0.08,bgcolor:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()}},yaxis:{title:{text:"指數點位",font:{size:11}},gridcolor:getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),tickformat:',.0f'}
-    },{responsive:true,scrollZoom:true,displayModeBar:true,displaylogo:false,modeBarButtonsToRemove:["lasso2d","select2d","hoverCompareCartesian","hoverClosestCartesian"]});
+    },{responsive:true,scrollZoom:true,displayModeBar:false,displaylogo:false,modeBarButtonsToRemove:["lasso2d","select2d","hoverCompareCartesian","hoverClosestCartesian"]});
     bindChartControls("usMarketChart","us",data.chart.points.map(p=>p.time),"hours");
   } else if (!window.Plotly) {
     $("usMarketChart").textContent = "互動圖表載入失敗；上方仍顯示最新可取得的行情數值。";
