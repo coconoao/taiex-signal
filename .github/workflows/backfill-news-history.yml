@@ -1,0 +1,44 @@
+name: Backfill GDELT news research
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "歷史回補天數（GDELT DOC 2.0 約三個月滾動範圍）"
+        required: true
+        type: choice
+        options:
+          - "30"
+          - "60"
+          - "90"
+        default: "90"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: taiex-gdelt-news-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    if: \${{ vars.ENABLE_DATA_REFRESH == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      TAIEX_STORAGE: supabase
+      SUPABASE_URL: \${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: \${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Restore persisted market and news data
+        run: python storage.py restore
+      - name: Import historical GDELT news metadata
+        run: python news_history_import.py --days "\${{ inputs.days }}"
+      - name: Persist historical news research
+        run: python storage.py save
