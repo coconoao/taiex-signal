@@ -17,7 +17,30 @@ from pipeline import (
     _read_with_backoff,
     _pending_dates,
     fetch_chips,
+    load_live,
+    TICKERS,
 )
+
+
+class LoadLiveTests(unittest.TestCase):
+    def test_yahoo_download_disables_parallel_threads(self):
+        import numpy as np
+
+        index = pd.bdate_range(
+            end=pd.Timestamp.today().normalize() - pd.Timedelta(days=1),
+            periods=600,
+        )
+        columns = pd.MultiIndex.from_product([["Close"], list(TICKERS.values())])
+        values = np.tile(np.arange(100, 100 + len(index)), (len(TICKERS), 1)).T
+        raw = pd.DataFrame(values, index=index, columns=columns)
+        fake_yfinance = types.SimpleNamespace(download=Mock(return_value=raw))
+
+        with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+            result = load_live()
+
+        self.assertIn("TAIEX", result.columns)
+        self.assertGreaterEqual(len(result), 500)
+        self.assertIs(fake_yfinance.download.call_args.kwargs["threads"], False)
 
 
 class PendingDatesTests(unittest.TestCase):
