@@ -128,13 +128,19 @@ class FetchCheckpointIntegrationTests(unittest.TestCase):
             ],
         }
         responses = [io.BytesIO(json.dumps(payload).encode("utf-8")) for _ in dates]
-        fake_storage = types.SimpleNamespace(
-            enabled=lambda: True,
-            save_data=Mock(return_value=8),
-        )
-
+        observed_rows_at_save = []
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "chips.csv")
+
+            def record_save():
+                count = len(pd.read_csv(path, index_col=0)) if os.path.exists(path) else 0
+                observed_rows_at_save.append(count)
+                return 8
+
+            fake_storage = types.SimpleNamespace(
+                enabled=lambda: True,
+                save_data=Mock(side_effect=record_save),
+            )
             with patch("pipeline._pending_dates", return_value=dates):
                 with patch("pipeline._open_with_backoff", side_effect=responses):
                     with patch("pipeline.time.sleep"):
@@ -144,7 +150,7 @@ class FetchCheckpointIntegrationTests(unittest.TestCase):
 
         self.assertEqual(len(result), 6)
         self.assertEqual(len(saved), 6)
-        self.assertEqual(fake_storage.save_data.call_count, 2)
+        self.assertEqual(observed_rows_at_save, [5, 6])
 
 
 if __name__ == "__main__":
