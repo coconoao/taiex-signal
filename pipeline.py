@@ -6,7 +6,7 @@
 執行時間：台股交易日早上 8:30 前後（美股已收盤、台股未開盤、前一日籌碼已公布）。
 輸出 signals.json，供 dashboard.html 讀取。僅供研究，非投資建議。
 """
-import os, sys, json, time, datetime as dt, urllib.request, urllib.parse
+import os, sys, json, time, datetime as dt, urllib.request, urllib.parse, urllib.error
 import numpy as np, pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -70,13 +70,70 @@ def load_demo(n=1800, seed=7):
     r["TAIEX"] = 0.0003 + 0.3 * r["SOX"].shift(1).fillna(0) + 0.15 * r["KOSPI"].shift(1).fillna(0) + rng.normal(0, 0.008, n)
     return 100 * (1 + r).cumprod()
 
+# Keep each scheduled run bounded. Recent dates are always prioritized while
+# older missing dates are backfilled gradually across subsequent runs.
+BACKFILL_DATES_PER_RUN = 40
+RECENT_DATES_PER_RUN = 5
+CHECKPOINT_EVERY = 5
+
+
 def _pending_dates(old, today, days_back, trading_days=None):
-    start = old.index.max() + pd.Timedelta(days=1) if len(old) else today - pd.Timedelta(days=days_back)
+    start = today - pd.Timedelta(days=days_back)
     if trading_days is None:
-        return pd.bdate_range(start, today)
-    dates = pd.DatetimeIndex(trading_days).tz_localize(None).normalize().unique().sort_values()
-    dates = dates[(dates >= start) & (dates <= today)]
-    return dates
+        dates = pd.bdate_range(start, today)
+    else:
+        dates = pd.DatetimeIndex(trading_days).tz_localize(None).normalize().unique().sort_values()
+        dates = dates[(dates >= start) & (dates <= today)]
+    if len(old):
+        existing = pd.DatetimeIndex(old.index).tz_localize(None).normalize().unique()
+        dates = dates[~dates.isin(existing)]
+    if not len(dates):
+        return dates
+    recent = dates[-RECENT_DATES_PER_RUN:]
+    older = dates[:-RECENT_DATES_PER_RUN][:BACKFILL_DATES_PER_RUN]
+    return older.append(recent).unique().sort_values()
+
+
+def _open_with_backoff(req, timeout):
+    """Retry transient throttling/server errors without hammering data providers."""
+    for attempt in range(4):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 and exc.code < 500:
+                raise
+            if attempt == 3:
+                raise
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = float(retry_after) if retry_after else (5, 15, 30)[attempt]
+            except (TypeError, ValueError):
+                delay = (5, 15, 30)[attempt]
+            delay = max(1, min(60, delay))
+            print(f"資料來源 HTTP {exc.code}，{delay:.0f} 秒後重試（{attempt + 1}/3）", flush=True)
+            time.sleep(delay)
+
+
+def _merge_and_save(old, rows, path):
+    out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
+    out = out[~out.index.duplicated(keep="last")]
+    if len(out):
+        tmp = path + ".tmp"
+        out.to_csv(tmp, index_label="date")
+        os.replace(tmp, path)
+        try:
+            import storage
+            if storage.enabled():
+                saved = storage.save_data()
+                print(f"已保存檢查點：{path}（Supabase 檔案數 {saved}）", flush=True)
+        except Exception as exc:
+            raise RuntimeError(f"資料檢查點寫入 Supabase 失敗：{path}") from exc
+    return out
+
+
+def _checkpoint_if_needed(old, rows, path):
+    if rows and len(rows) % CHECKPOINT_EVERY == 0:
+        _merge_and_save(old, rows, path)
 
 def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     """證交所三大法人買賣超（元），增量寫入 chips.csv（date, foreign_net, trust_net）。"""
@@ -88,23 +145,26 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            j = json.load(urllib.request.urlopen(req, timeout=15))
+            with _open_with_backoff(req, timeout=15) as response:
+                j = json.load(response)
+        except urllib.error.HTTPError as e:
+            print(f"三大法人 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
+            if e.code == 429: break
+            time.sleep(1); continue
         except Exception as e:
-            print("略過", d.date(), e); time.sleep(3); continue
-        time.sleep(0.7)  # 證交所限流，過快會被暫時封鎖
+            print(f"三大法人 {d.date()} 下載失敗：{type(e).__name__}: {e}", flush=True)
+            time.sleep(1); continue
+        time.sleep(0.7)
         if j.get("stat") != "OK": continue  # 休市日或尚未公布
         diff = {r[0]: float(str(r[3]).replace(",", "")) for r in j["data"]}
         fgn = sorted([k for k in diff if "外資及陸資" in k], key=lambda k: "不含" in k)  # 優先取含外資自營商的整體
         trust = [k for k in diff if "投信" in k]
-        if fgn and trust: rows[d] = {"foreign_net": diff[fgn[0]], "trust_net": diff[trust[0]]}
-        else: print("欄位名稱與預期不同，請檢查", d.date(), list(diff))
-    out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
-    out = out[~out.index.duplicated()]
-    if len(out):
-        tmp = path + ".tmp"
-        out.to_csv(tmp, index_label="date")
-        os.replace(tmp, path)
-    return out
+        if fgn and trust:
+            rows[d] = {"foreign_net": diff[fgn[0]], "trust_net": diff[trust[0]]}
+            _checkpoint_if_needed(old, rows, path)
+        else:
+            print("欄位名稱與預期不同，請檢查", d.date(), list(diff))
+    return _merge_and_save(old, rows, path)
 
 def demo_chips(df, seed=3):  # 合成籌碼，僅供示範
     rng = np.random.default_rng(seed)
@@ -140,21 +200,25 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
                                        "queryDate": f"{d:%Y/%m/%d}", "commodityId": ""}).encode()
         try:
             req = urllib.request.Request("https://www.taifex.com.tw/cht/3/futContractsDate", body, {"User-Agent": "Mozilla/5.0"})
-            html = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "ignore")
+            with _open_with_backoff(req, timeout=20) as response:
+                html = response.read().decode("utf-8", "ignore")
             if "臺股期貨" not in html: continue  # 休市日或尚未公布
             net = _tx_foreign_oi_net(pd.read_html(StringIO(html)))
+        except urllib.error.HTTPError as e:
+            print(f"期交所 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
+            if e.code == 429: break
+            time.sleep(1); continue
         except Exception as e:
-            print("略過", d.date(), e); time.sleep(3); continue
-        if net is None: print("解析不到臺股期貨外資列，請檢查", d.date())
-        else: rows[d] = {"foreign_oi_net": net}
-    out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
-    out = out[~out.index.duplicated()]
-    if len(out):
-        tmp = path + ".tmp"
-        out.to_csv(tmp, index_label="date")
-        os.replace(tmp, path)
-    else: print("期貨：沒有取得任何資料，請確認網路與 lxml 是否安裝")
-    return out
+            print(f"期交所 {d.date()} 下載／解析失敗：{type(e).__name__}: {e}", flush=True)
+            time.sleep(1); continue
+        if net is None:
+            print("解析不到臺股期貨外資列，請檢查", d.date())
+        else:
+            rows[d] = {"foreign_oi_net": net}
+            _checkpoint_if_needed(old, rows, path)
+    if not rows and not len(old):
+        print("期貨：本次沒有取得資料，將在下次執行重試")
+    return _merge_and_save(old, rows, path)
 
 def demo_futures(df, seed=9):  # 合成期貨淨未平倉，僅供示範
     rng = np.random.default_rng(seed)
@@ -171,24 +235,27 @@ def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
         url = f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={d:%Y%m%d}&selectType=MS&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            j = json.load(urllib.request.urlopen(req, timeout=15))
+            with _open_with_backoff(req, timeout=15) as response:
+                j = json.load(response)
+        except urllib.error.HTTPError as e:
+            print(f"融資融券 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
+            if e.code == 429: break
+            time.sleep(1); continue
         except Exception as e:
-            print("略過", d.date(), e); time.sleep(3); continue
+            print(f"融資融券 {d.date()} 下載失敗：{type(e).__name__}: {e}", flush=True)
+            time.sleep(1); continue
         time.sleep(0.7)
         if j.get("stat") != "OK": continue
         tabs = j.get("tables") or [{"data": j.get("creditList", [])}]
         last = {str(r[0]): _num(r[-1]) for t in tabs for r in t.get("data", [])}  # 最後一欄＝今日餘額
         pick = lambda pre: next((v for k, v in last.items() if k.startswith(pre) and v is not None), None)
         amt, lot, sht = pick("融資金額"), pick("融資(交易單位)"), pick("融券(交易單位)")
-        if None not in (amt, lot, sht): rows[d] = {"margin_bal": amt * 1000, "margin_units": lot, "short_units": sht}  # 仟元→元
-        else: print("找不到融資／融券欄位，請檢查", d.date(), list(last))
-    out = pd.concat([old, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
-    out = out[~out.index.duplicated()]
-    if len(out):
-        tmp = path + ".tmp"
-        out.to_csv(tmp, index_label="date")
-        os.replace(tmp, path)
-    return out
+        if None not in (amt, lot, sht):
+            rows[d] = {"margin_bal": amt * 1000, "margin_units": lot, "short_units": sht}  # 仟元→元
+            _checkpoint_if_needed(old, rows, path)
+        else:
+            print("找不到融資／融券欄位，請檢查", d.date(), list(last))
+    return _merge_and_save(old, rows, path)
 
 def demo_margin(df, seed=5):  # 合成融資餘額，僅供示範
     rng = np.random.default_rng(seed)
