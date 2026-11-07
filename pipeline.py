@@ -164,18 +164,6 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
 
-    # The official OpenAPI serves the latest published snapshot. Use it only
-    # when its own Date exactly matches a pending trading day; never backfill
-    # historical dates with a current snapshot.
-    try:
-        latest_date, latest_net = _fetch_taifex_openapi_latest()
-        if latest_date in dates:
-            old = _merge_and_save(old, {latest_date: {"foreign_oi_net": latest_net}}, path)
-            dates = dates[dates != latest_date]
-            print(f"期交所 OpenAPI 已保存最新交易日：{latest_date.date()}", flush=True)
-    except Exception as exc:
-        print(f"期交所 OpenAPI 備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
-
     for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
@@ -247,6 +235,18 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     today = pd.Timestamp.today().normalize()
     dates = _pending_dates(old, today, days_back, trading_days)
     rows = {}
+
+    # The official OpenAPI serves the latest published snapshot. Use it only
+    # when its own Date exactly matches a pending trading day; never backfill
+    # historical dates with a current snapshot.
+    try:
+        latest_date, latest_net = _fetch_taifex_openapi_latest()
+        if latest_date in dates:
+            old = _merge_and_save(old, {latest_date: {"foreign_oi_net": latest_net}}, path)
+            dates = dates[dates != latest_date]
+            print(f"期交所 OpenAPI 已保存最新交易日：{latest_date.date()}", flush=True)
+    except Exception as exc:
+        print(f"期交所 OpenAPI 備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
     for d in dates:
         time.sleep(0.7)
         body = urllib.parse.urlencode({"queryType": "1", "goDay": "", "doQuery": "1", "dateaddcnt": "",
