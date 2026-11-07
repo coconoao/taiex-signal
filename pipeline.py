@@ -1046,7 +1046,9 @@ if __name__ == "__main__":
             read_existing("futures.csv") if "--no-futures" in sys.argv
             else fetch_futures(trading_days=df.index)
         )
-    if not demo and not skip_backfill:\n        write_taiwan_data_status(df, chips, margin, futures)\n    X, y, fwd = build(df, chips, margin, futures=futures)
+    if not demo and not skip_backfill:
+        write_taiwan_data_status(df, chips, margin, futures)
+    X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])
     layers = contrib.groupby(lambda c: c.split(":")[0]).sum()
