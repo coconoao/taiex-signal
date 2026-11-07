@@ -7,7 +7,7 @@
 機構觀點只計入「標題明確寫出該機構對台股方向」者；每日結果累積到 news_history.jsonl，日後可算各機構命中率。
 用法：python news.py   （時間同 pipeline.py：台股交易日 8:30 前後）
 """
-import os, json, re, datetime as dt, urllib.request, urllib.parse
+import os, json, re, html, datetime as dt, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
@@ -38,10 +38,10 @@ NEG = {"fall", "falls", "fell", "drop", "drops", "slump", "plunge", "loss", "los
        "tension", "war", "wars", "tariff", "sanction", "curb", "ban", "bans", "recession", "sell-off", "selloff", "slide", "crash",
        "probe", "bearish", "underweight", "cuts"}
 
-PROMPT = """你是台灣市場新聞研究助理。以下資料包含國際市場新聞、台灣本地新聞、政府政策與國際局勢，以及機構觀點。只根據提供的標題判斷，不要引用標題以外的資訊；資訊不足時分數接近 0、信心調低。
+PROMPT = """你是台灣市場新聞研究助理。以下資料包含國際市場新聞、台灣本地新聞、政府政策與國際局勢，以及機構觀點。只根據提供的標題與 RSS 摘要判斷，不要引用未提供的資訊；資訊不足時分數接近 0、信心調低。
 分析政策時，請區分「已公告／已生效」與「提案／討論／媒體推測」，說明可能的傳導管道（例如關稅、出口、半導體供應鏈、能源、匯率、利率、財政支出），不要把政策立場直接等同市場結果。
 只輸出 JSON：{"next_day": 數字, "next_week": 數字, "confidence": 0到1, "drivers": [{"id": 標題id, "impact": "正面"或"負面", "why": "20字內理由"}], "summary": "繁體中文，80字內", "analysts": [{"name": 機構名稱, "id": 標題id, "stance": "看多"或"看空"或"中性"或"無明確看法"}]}
-分數代表對「台灣加權指數」的影響：-1 極偏空、0 中性、1 極偏多；next_day 指下一個交易日，next_week 指未來 5 個交易日。drivers 最多 4 則，來自市場新聞。
+分數代表對「台灣加權指數」的影響：-1 極偏空、0 中性、1 極偏多；next_day 指下一個交易日，next_week 指未來 5 個交易日。drivers 最多 4 則，可引用市場新聞、台灣新聞或政策新聞，並指出來源 id。
 analysts 只列「標題明確寫出該機構對台股或台股大盤的方向性看法」的項目，其他不列，不要從標題推測。
 """
 
@@ -56,10 +56,14 @@ def _fetch_feed(url, provider):
     for item in ET.fromstring(xml).iter("item"):
         title = (item.findtext("title") or "").strip()
         link = (item.findtext("link") or "").strip()
-        published = (item.findtext("pubDate") or "").strip()
+        published = (item.findtext("pubDate") or item.findtext("date") or "").strip()
         source = (item.findtext("source") or provider).strip()
+        description = item.findtext("description") or item.findtext("summary") or ""
+        description = html.unescape(re.sub(r"<[^>]+>", " ", description))
+        description = re.sub(r"\\s+", " ", description).strip()[:360]
         if title:
-            items.append({"title": title, "link": link, "published": published, "source": source})
+            items.append({"title": title, "description": description, "link": link,
+                          "published": published, "source": source})
     return items
 
 def _collect_group(group, per):
@@ -182,7 +186,10 @@ def main():
     load_settings()
     hl = headlines()
     if len(hl) < 3: raise SystemExit(f"抓到的新聞標題只有 {len(hl)} 則；Google News 與 Bing News RSS 均不足，保留上一版資料。")
-    sec = lambda k: "\n".join(f'{h["id"]}|{h["tag"]}|{h["title"]}' for h in hl if h["kind"] == k)
+    sec = lambda k: "\n".join(
+        f'{h["id"]}|{h["tag"]}|{h["title"]}|摘要：{h.get("description", "")}'
+        for h in hl if h["kind"] == k
+    )
     p = (PROMPT + "【國際市場新聞】\n" + sec("market") +
          "\n【台灣新聞】\n" + sec("taiwan") +
          "\n【台灣／美國政府政策與國際局勢】\n" + sec("policy") +
