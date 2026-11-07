@@ -795,18 +795,22 @@ class H(SimpleHTTPRequestHandler):
             except Exception:
                 return self.send_json({"error": "無法讀取使用者清單"}, 503)
         if u.path == "/api/status":
-            state = {**JOB, "readonly": READONLY, "auto": AUTO, "cloud_run": bool(os.environ.get("K_SERVICE"))}
+            state = {
+                "running": JOB.get("running"),
+                "exit_code": JOB.get("exit_code"),
+                "finished": JOB.get("finished"),
+                "readonly": READONLY,
+                "auto": AUTO,
+                "cloud_run": bool(os.environ.get("K_SERVICE"))
+            }
             if os.environ.get("K_SERVICE"):
                 try:
                     saved = json.load(open(os.path.join(DATA, "refresh_status.json"), encoding="utf-8"))
                     state["running"] = saved.get("current") if saved.get("running") else None
+                    state["exit_code"] = saved.get("exit_code")
+                    state["updated_at"] = saved.get("updated_at")
                     if not saved.get("running"):
                         JOB["running"] = None
-                    state["log"] = "\\n".join(
-                        f'{x.get("step")}: exit={x.get("exit_code")} {x.get("log", "")}'
-                        for x in saved.get("results", [])
-                    )[-3000:]
-                    state["exit_code"] = saved.get("exit_code")
                 except Exception:
                     pass
             return self.send_json(state)
