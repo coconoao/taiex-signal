@@ -26,8 +26,8 @@ class PendingDatesTests(unittest.TestCase):
         trading_days = pd.bdate_range(end=today, periods=120)
         result = _pending_dates(pd.DataFrame(), today, 365, trading_days)
         self.assertEqual(len(result), BACKFILL_DATES_PER_RUN + RECENT_DATES_PER_RUN)
-        self.assertEqual(result[:BACKFILL_DATES_PER_RUN].tolist(), trading_days[:BACKFILL_DATES_PER_RUN].tolist())
-        self.assertEqual(result[-RECENT_DATES_PER_RUN:].tolist(), trading_days[-RECENT_DATES_PER_RUN:].tolist())
+        self.assertEqual(result[:RECENT_DATES_PER_RUN].tolist(), trading_days[-RECENT_DATES_PER_RUN:].tolist())
+        self.assertEqual(result[RECENT_DATES_PER_RUN:].tolist(), trading_days[:BACKFILL_DATES_PER_RUN].tolist())
 
     def test_excludes_dates_already_saved_and_fills_oldest_gaps_next(self):
         today = pd.Timestamp("2026-11-06")
@@ -35,8 +35,8 @@ class PendingDatesTests(unittest.TestCase):
         saved = pd.DataFrame(index=trading_days[:40])
         result = _pending_dates(saved, today, 365, trading_days)
         self.assertEqual(len(result), BACKFILL_DATES_PER_RUN + RECENT_DATES_PER_RUN)
-        self.assertEqual(result[0], trading_days[40])
-        self.assertEqual(result[-RECENT_DATES_PER_RUN:].tolist(), trading_days[-RECENT_DATES_PER_RUN:].tolist())
+        self.assertEqual(result[:RECENT_DATES_PER_RUN].tolist(), trading_days[-RECENT_DATES_PER_RUN:].tolist())
+        self.assertEqual(result[RECENT_DATES_PER_RUN], trading_days[40])
         self.assertFalse(result.isin(saved.index).any())
 
     def test_returns_all_dates_when_only_five_or_fewer_are_missing(self):
