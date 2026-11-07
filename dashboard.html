@@ -78,6 +78,7 @@ details[open]>summary{margin-bottom:12px}
   <h1><img src="/brand-logo.svg" alt="" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:8px;filter:drop-shadow(0 0 7px #58cfff)">加權指數訊號<a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
+  <p class="note" id="dataQuality">資料來源狀態載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
   <div class="banner" id="miss" hidden></div>
@@ -257,6 +258,17 @@ function drawCurve(c) {
 
 function renderDaily(d) {
   $("meta").textContent = `台股最近可用交易日：${d.asof}。休市或尚未取得新收盤資料時，沿用這個交易日的資料，不會把舊資料標成今天。`;
+  const ds = d.data_status || {}, series = ds.series || {};
+  const labels = {SOX:"費半",TSM:"TSM",VIX:"VIX",US10Y:"美國 10 年債",N225:"日經",KOSPI:"韓股",USDTWD:"美元／台幣"};
+  const items = Object.keys(labels).map(k => {
+    const x = series[k] || {};
+    return `${labels[k]}：${x.latest_date || "無資料"}（${x.source || "未知來源"}）`;
+  });
+  const taiwan = `加權指數：${ds.taiwan_index_source || "來源未確認"}；官方補入 ${Number(ds.taiwan_index_official_rows || 0)} 日。`;
+  const yahoo = ds.yahoo_status === "ok"
+    ? "Yahoo Finance 國際行情更新成功。"
+    : "Yahoo Finance 本次未成功更新；國際市場欄位沿用快取，請依各欄資料日期判斷新舊，不能視為即時行情。";
+  $("dataQuality").textContent = `${taiwan} ${yahoo} ${items.join("；")}`;
   $("demo").hidden = !d.demo;
   const ml = d.missing_layers || [];
   $("miss").hidden = !ml.length;
