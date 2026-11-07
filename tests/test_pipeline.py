@@ -17,6 +17,7 @@ from pipeline import (
     _read_with_backoff,
     _pending_dates,
     fetch_chips,
+    fetch_futures,
     _fetch_taifex_openapi_latest,
     load_live,
     TICKERS,
@@ -158,6 +159,22 @@ class TaifexOpenApiTests(unittest.TestCase):
         with patch("pipeline._read_with_backoff", return_value=json.dumps(payload).encode()):
             with self.assertRaisesRegex(ValueError, "找不到"):
                 _fetch_taifex_openapi_latest()
+
+
+class FuturesNetworkFailureTests(unittest.TestCase):
+    def test_stops_batch_after_persistent_network_timeout(self):
+        dates = pd.bdate_range("2026-11-02", periods=3)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "futures.csv")
+            with patch("pipeline._pending_dates", return_value=dates):
+                with patch("pipeline._fetch_taifex_openapi_latest",
+                           side_effect=ValueError("OpenAPI unavailable")):
+                    with patch("pipeline._read_with_backoff",
+                               side_effect=TimeoutError("source timeout")) as read:
+                        with patch("pipeline.time.sleep"):
+                            result = fetch_futures(path=path)
+        self.assertEqual(read.call_count, 1)
+        self.assertTrue(result.empty)
 
 
 class CheckpointTests(unittest.TestCase):
