@@ -11,6 +11,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from zoneinfo import ZoneInfo
@@ -214,6 +215,24 @@ def main():
         end_local = dt.datetime.combine(asof, CUTOFF, TZ)
         try:
             articles, capped = fetch_window(start_local, end_local)
+        except urllib.error.HTTPError as exc:
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                detail = exc.read(300).decode("utf-8", "replace").replace("\\n", " ")
+            except Exception:
+                detail = ""
+            print(
+                f"GDELT {asof} 擷取失敗：HTTP {exc.code}; "
+                f"Retry-After={retry_after or 'not supplied'}; {detail[:160]}",
+                flush=True,
+            )
+            if exc.code == 429:
+                raise SystemExit(
+                    "GDELT DOC API rate-limited this importer (HTTP 429). "
+                    "Stop instead of repeating blocked requests; existing history is preserved."
+                )
+            time.sleep(5.2)
+            continue
         except Exception as exc:
             print(f"GDELT {asof} 擷取失敗：{type(exc).__name__}: {str(exc)[:160]}", flush=True)
             time.sleep(5.2)
@@ -243,6 +262,12 @@ def main():
         fetched += 1
         print(f"GDELT {asof}: {len(articles)} 篇標題；{'達到單次上限' if capped else '未達單次上限'}", flush=True)
         time.sleep(5.2)
+
+    if fetched == 0 and not rows_by_date:
+        raise SystemExit(
+            "No GDELT snapshots were retrieved and no prior history exists; "
+            "refusing to write an empty history or success summary."
+        )
 
     rows = sorted(rows_by_date.values(), key=lambda x: x.get("asof", ""))[-1500:]
     with open("news_gdelt_history.jsonl.tmp", "w", encoding="utf-8") as f:
