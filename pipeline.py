@@ -1033,9 +1033,57 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     print(f"台股資料覆蓋狀態：{summary}", flush=True)
 
 
+
+def update_news_research_outcomes(series):
+    """只在下一個交易日收盤資料出現後，為已保存新聞快照補上實際結果。"""
+    path = "news_research_history.jsonl"
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as stream:
+            rows = [json.loads(line) for line in stream if line.strip()]
+        dates = {str(index.date()): i for i, index in enumerate(series.index)}
+        changed = False
+        for row in rows:
+            if row.get("outcome") is not None:
+                continue
+            i = dates.get(str(row.get("asof", "")))
+            if i is None or i + 1 >= len(series):
+                continue
+            start, end = float(series.iloc[i]), float(series.iloc[i + 1])
+            if not np.isfinite(start) or not np.isfinite(end) or start == 0:
+                continue
+            row["outcome"] = {
+                "next_session_date": str(series.index[i + 1].date()),
+                "next_session_return_pct": round((end / start - 1) * 100, 4),
+            }
+            changed = True
+        if changed:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as stream:
+                for row in rows:
+                    stream.write(json.dumps(row, ensure_ascii=False) + "\\n")
+            os.replace(tmp, path)
+        latest = rows[-1] if rows else None
+        summary = {
+            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "latest": latest, "history_count": len(rows),
+            "labeled_count": sum(isinstance(row.get("outcome"), dict) for row in rows),
+            "note": "新聞特徵僅作資料研究；歷史結果只在後續交易日收盤資料到齊後標記，不回填未來資訊。",
+        }
+        with open("news_research.json.tmp", "w", encoding="utf-8") as stream:
+            json.dump(summary, stream, ensure_ascii=False)
+        os.replace("news_research.json.tmp", "news_research.json")
+        print(f"新聞研究資料：累積 {len(rows)} 個日期快照，已取得後續收盤結果 {summary['labeled_count']} 筆", flush=True)
+    except Exception as exc:
+        print(f"新聞研究資料標記暫不可用：{type(exc).__name__}", flush=True)
+
+
 if __name__ == "__main__":
     demo = "--demo" in sys.argv
     df = load_demo() if demo else load_live()
+    if not demo:
+        update_news_research_outcomes(df["TAIEX"])
     skip_backfill = "--skip-backfill" in sys.argv
     def read_existing(name):
         if not os.path.exists(name) or os.path.getsize(name) == 0:
