@@ -163,6 +163,8 @@ class TaifexOpenApiTests(unittest.TestCase):
 
 class FuturesNetworkFailureTests(unittest.TestCase):
     def test_stops_batch_after_persistent_network_timeout(self):
+        import os
+
         dates = pd.bdate_range("2026-11-02", periods=3)
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "futures.csv")
