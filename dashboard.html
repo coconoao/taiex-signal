@@ -102,7 +102,7 @@ details[open]>summary{margin-bottom:12px}
     <section id="bt" hidden>
       <details><summary>歷史回測（滾動式、已扣成本）</summary>
       <dl id="stats"></dl>
-      <div class="charttools" aria-label="歷史回測圖表操作"><button class="btn sm ghost" id="curveZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="curveZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="curvePan" type="button">平移</button><button class="btn sm ghost" id="curveZoom" type="button">框選縮放</button><button class="btn sm ghost" id="curveReset" type="button">重設</button><button class="btn sm ghost" id="curveRange1m" type="button">1 個月</button><button class="btn sm ghost" id="curveRange3m" type="button">3 個月</button><button class="btn sm ghost" id="curveRange6m" type="button">6 個月</button><button class="btn sm ghost" id="curveRangeYtd" type="button">今年</button><button class="btn sm ghost" id="curveRange1y" type="button">1 年</button><button class="btn sm ghost" id="curveRangeAll" type="button">全部</button></div><p class="note">可拖曳下方滑桿選日期；點選「框選縮放」後，在圖表上拖曳選取區域。此圖為歷史模擬比較，不代表實際成交結果。</p><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
+      <div class="charttools" aria-label="歷史回測圖表操作"><button class="btn sm ghost" id="curveZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="curveZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="curvePan" type="button">平移</button><button class="btn sm ghost" id="curveZoom" type="button">框選縮放</button><button class="btn sm ghost" id="curveReset" type="button">重設</button><button class="btn sm ghost" id="curveRange1m" type="button">1 個月</button><button class="btn sm ghost" id="curveRange3m" type="button">3 個月</button><button class="btn sm ghost" id="curveRange6m" type="button">6 個月</button><button class="btn sm ghost" id="curveRangeYtd" type="button">今年</button><button class="btn sm ghost" id="curveRange1y" type="button">1 年</button><button class="btn sm ghost" id="curveRangeAll" type="button">全部</button></div><p class="note">可拖曳下方滑桿選日期；點選「框選縮放」後，在圖表上拖曳選取區域。此圖為歷史滾動樣本外模擬，非實際成交；程式假設每次部位變動成本 0.2%，未必涵蓋所有交易摩擦。</p><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
     <section><h2>新聞情緒（隔日）：內建規則與 AI 並排</h2><div id="newsD"></div></section>
@@ -284,7 +284,7 @@ function renderWeekly(w) {
       ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}／${h.overlap_n ?? "—"}</td><td>${h.positive_rate}%／${h.overlap_positive_rate ?? "—"}%</td><td>${(h.positive_rate_ci95 || [null,null]).join("%～")}%</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
       : `<tr><td>${label}</td><td colspan="6">歷史樣本不足</td></tr>`;
   }).join("");
-  $("horizonNote").textContent = `統計截至 ${w.asof}；呈現過去各期間正報酬比例，並非未來預測。`;
+  $("horizonNote").textContent = `統計截至 ${w.asof}；點與橫線為不重疊樣本的 Wilson 95% 參考區間，未校正時間序列相依性；不是未來預測。`;
   const el = $("longChart");
   if (!valid.length) { el.textContent = "目前沒有足夠的歷史資料可繪製長線統計圖。"; return; }
   const x = valid.map(v => v.label), y = valid.map(v => Number(v.h.positive_rate));
