@@ -206,6 +206,13 @@ def _checkpoint_if_needed(old, rows, path):
     if rows and len(rows) % CHECKPOINT_EVERY == 0:
         _merge_and_save(old, rows, path)
 
+def _is_transient_fetch_error(exc):
+    """Return True for throttling, upstream server failures, and network timeouts."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code == 429 or exc.code >= 500
+    return isinstance(exc, (TimeoutError, OSError, urllib.error.URLError))
+
+
 def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
     """證交所三大法人買賣超（元），增量寫入 chips.csv（date, foreign_net, trust_net）。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
@@ -219,11 +226,16 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             j = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8"))
         except urllib.error.HTTPError as e:
-            print(f"三大法人 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
-            if e.code == 429: break
+            if _is_transient_fetch_error(e):
+                print(f"三大法人 {d.date()} HTTP {e.code}：上游暫時不可用，停止本次回補；保留已取得資料供下次接續", flush=True)
+                break
+            print(f"三大法人 {d.date()} HTTP {e.code}：略過此日期", flush=True)
             time.sleep(1); continue
         except Exception as e:
-            print(f"三大法人 {d.date()} 下載失敗：{type(e).__name__}: {e}", flush=True)
+            if _is_transient_fetch_error(e):
+                print(f"三大法人 {d.date()} 網路持續失敗（{type(e).__name__}）：停止本次回補；保留已取得資料供下次接續", flush=True)
+                break
+            print(f"三大法人 {d.date()} 下載／解析失敗：{type(e).__name__}: {e}", flush=True)
             time.sleep(1); continue
         time.sleep(0.7)
         if j.get("stat") != "OK": continue  # 休市日或尚未公布
@@ -343,11 +355,16 @@ def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             j = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8"))
         except urllib.error.HTTPError as e:
-            print(f"融資融券 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
-            if e.code == 429: break
+            if _is_transient_fetch_error(e):
+                print(f"融資融券 {d.date()} HTTP {e.code}：上游暫時不可用，停止本次回補；保留已取得資料供下次接續", flush=True)
+                break
+            print(f"融資融券 {d.date()} HTTP {e.code}：略過此日期", flush=True)
             time.sleep(1); continue
         except Exception as e:
-            print(f"融資融券 {d.date()} 下載失敗：{type(e).__name__}: {e}", flush=True)
+            if _is_transient_fetch_error(e):
+                print(f"融資融券 {d.date()} 網路持續失敗（{type(e).__name__}）：停止本次回補；保留已取得資料供下次接續", flush=True)
+                break
+            print(f"融資融券 {d.date()} 下載／解析失敗：{type(e).__name__}: {e}", flush=True)
             time.sleep(1); continue
         time.sleep(0.7)
         if j.get("stat") != "OK": continue
