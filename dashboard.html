@@ -73,7 +73,7 @@ details[open]>summary{margin-bottom:12px}
 </head>
 <body>
 <main>
-  <h1>加權指數訊號<a class="logout" href="https://gemini.google.com/app" target="_blank" rel="noopener noreferrer" style="margin-right:14px">Gemini</a> <a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
+  <h1>加權指數訊號<button class="logout" id="openGemini" type="button" style="margin-right:14px">Gemini 視窗</button> <a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
@@ -120,10 +120,10 @@ details[open]>summary{margin-bottom:12px}
   </div>
 
   <div id="tab-settings" hidden>
-    <section><h2>Gemini 新聞資料</h2>
-      <p>使用你自己的 Google／Gemini 帳號登入官方聊天室。網站不會要求你輸入 API Key，也不會代替你呼叫 Gemini。</p>
-      <p><button class="btn" id="copyNews">複製目前新聞資料</button> <a class="btn" href="https://gemini.google.com/app" target="_blank" rel="noopener noreferrer">開啟 Gemini 聊天室</a></p>
-      <p class="note" id="geminiMsg">先更新新聞，再複製資料；切換到 Gemini 後貼上即可。新聞資料只會複製到你的剪貼簿。</p>
+    <section><h2>Gemini 個人帳號視窗</h2>
+      <p>按下按鈕會另外開啟 Gemini 視窗，你可以在裡面登入自己的 Google 帳號並使用 Gemini。網站不會取得你的 Google 密碼，也不需要 API Key。</p>
+      <p><button class="btn" id="openGeminiSettings" type="button">開啟 Gemini 視窗</button> <button class="btn" id="copyNews" type="button">複製目前新聞資料</button></p>
+      <p class="note" id="geminiMsg">先開啟 Gemini 並登入自己的帳號；複製新聞後，到 Gemini 視窗貼上即可。電腦瀏覽器會嘗試開啟獨立小視窗；iPhone/iPad 可能依 Safari 設定改以新分頁開啟。</p>
     </section>
     <section id="srv" hidden><h2>伺服器</h2>
       <p class="note" id="autoMsg"></p>
@@ -267,6 +267,26 @@ function renderWeekly(w) {
   $("wb").innerHTML = ["偏多", "中性", "偏空"].filter(k => w.buckets[k]).map(k => { const b = w.buckets[k];
     return `<tr><td>${k}</td><td>${b.n}</td><td>${b.win}%</td><td>${b.avg}%</td><td>${b.p10}% ~ ${b.p90}%</td></tr>`; }).join("");
 }
+
+/* ---- 使用者自己的 Gemini 登入視窗 ---- */
+function openGeminiWindow() {
+  const width = Math.min(1120, Math.max(420, (window.screen && window.screen.availWidth || 1200) - 80));
+  const height = Math.min(860, Math.max(620, (window.screen && window.screen.availHeight || 900) - 100));
+  const left = Math.max(0, Math.round(((window.screen && window.screen.availWidth || width) - width) / 2));
+  const top = Math.max(0, Math.round(((window.screen && window.screen.availHeight || height) - height) / 2));
+  const features = `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+  const popup = window.open("https://gemini.google.com/app", "taiexGeminiPersonalWindow", features);
+  if (popup) {
+    try { popup.focus(); } catch {}
+    const msg = $("geminiMsg");
+    if (msg) msg.textContent = "已要求瀏覽器開啟 Gemini。請在該視窗登入自己的 Google 帳號；若沒有出現視窗，請允許此網站開啟彈出式視窗。";
+  } else {
+    const msg = $("geminiMsg");
+    if (msg) msg.textContent = "瀏覽器封鎖了彈出式視窗。請允許此網站開啟彈出式視窗，再點一次。";
+  }
+}
+$("openGemini").addEventListener("click", openGeminiWindow);
+$("openGeminiSettings").addEventListener("click", openGeminiWindow);
 
 /* ---- 新聞資料：保留內建新聞呈現，提供複製到 Gemini ---- */
 let NEWS = null, WK = null;
