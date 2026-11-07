@@ -444,6 +444,7 @@ def call_ai_provider(provider, api_key, model, prompt):
         request = urllib.request.Request(
             url, data=data, headers={"Content-Type": "application/json", **headers}
         )
+        attempt_started = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
                 result = json.loads(response.read().decode("utf-8"))
@@ -478,6 +479,20 @@ def call_ai_provider(provider, api_key, model, prompt):
                 provider, e.code, f"{provider} API 回應 {e.code}{retry_note}: {detail}"
             )
         except (TimeoutError, urllib.error.URLError, ConnectionError) as e:
+            # 只記錄耗時與 traceback 函式名稱；不記錄 URL、路徑、金鑰、提示或例外訊息。
+            elapsed = time.monotonic() - attempt_started
+            tb_names = []
+            tb = e.__traceback__
+            while tb is not None:
+                tb_names.append(tb.tb_frame.f_code.co_name)
+                tb = tb.tb_next
+            safe_frames = ",".join(tb_names[-6:]) or "none"
+            if provider == "Gemini":
+                print(
+                    f"[api-ai] provider=Gemini network_error attempt={attempt + 1} "
+                    f"type={type(e).__name__} elapsed={elapsed:.2f}s frames={safe_frames}",
+                    flush=True
+                )
             # Gemini 偶發連線逾時時有限重試一次；不輸出 URL、金鑰或提示內容。
             if provider == "Gemini" and attempt < 1:
                 delay = 2.0 + random.uniform(0.1, 0.5)
