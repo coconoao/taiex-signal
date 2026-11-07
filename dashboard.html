@@ -142,6 +142,11 @@ details[open]>summary{margin-bottom:12px}
       <p class="note" id="job"></p>
       <p><button class="btn" id="exp">匯出單一 HTML 檔</button> <a href="/export" download>或直接下載</a></p>
       <p class="note" id="expMsg">內嵌目前資料，可直接雙擊開啟或上傳到任何靜態空間，不含你的金鑰。</p></section>
+    <section id="taiwanQuality"><h2>台股資料品質</h2>
+      <p class="note" id="taiwanQualityMeta">讀取台股資料品質狀態中…</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>資料類別</th><th>來源</th><th>最新日期</th><th>有效筆數</th><th>狀態</th></tr></thead><tbody id="taiwanQualityRows"><tr><td colspan="5">載入中…</td></tr></tbody></table></div>
+      <p class="note">僅顯示台股資料來源、完整有效筆數與最新日期；盤後資料可能尚未公布，快速啟動流程不代表完整資料已更新。</p>
+    </section>
   </div>
 
   <p class="note">研究用途，不構成投資建議。回測績效不代表未來，樣本外表現通常較差。新聞與 AI 分數目前只供參考，沒有納入上面的機率與回測。</p>
@@ -505,6 +510,30 @@ function startQuote() {
   });
   tick(); setInterval(() => { if (!document.hidden) tick(); }, 30000);
 }
+function loadTaiwanQuality() {
+  const labels = {TAIEX:"加權指數",institutional:"三大法人",margin:"融資融券",futures:"期貨"};
+  api("/api/taiwan-data-status").then(s => {
+    if (s.error) {
+      $("taiwanQualityMeta").textContent = s.error;
+      $("taiwanQualityRows").innerHTML = '<tr><td colspan="5">尚無可驗證的完整資料品質紀錄</td></tr>';
+      return;
+    }
+    $("taiwanQualityMeta").textContent = "檢查時間：" + (s.updated_at ? new Date(s.updated_at).toLocaleString("zh-TW", {hour12:false}) : "未提供");
+    $("taiwanQualityRows").innerHTML = Object.entries(labels).map(([key,label]) => {
+      const v = (s.layers || {})[key] || {};
+      const valid = Number(v.valid_rows || 0);
+      const date = v.latest_date || "無資料";
+      const source = v.source || "來源未確認";
+      const age = v.age_calendar_days;
+      const status = !valid ? "無有效資料" : age == null ? "日期未確認" : age > 7 ? "資料可能過期" : "有可用資料";
+      return '<tr><td>' + label + '</td><td>' + esc(source) + '</td><td>' + esc(date) +
+        '</td><td>' + valid.toLocaleString("zh-TW") + '</td><td>' + status + '</td></tr>';
+    }).join("");
+  }).catch(() => {
+    $("taiwanQualityMeta").textContent = "目前無法讀取台股資料品質狀態。";
+    $("taiwanQualityRows").innerHTML = '<tr><td colspan="5">資料暫時無法取得</td></tr>';
+  });
+}
 const poll = () => api("/api/status").then(s => {
   $("job").textContent = s.running
     ? "資料更新中…"
@@ -515,6 +544,7 @@ const poll = () => api("/api/status").then(s => {
 });
 api("/api/status").then(s => {
   $("srv").hidden = false; document.querySelector('[data-t="stock"]').hidden = false;
+  loadTaiwanQuality();
   $("autoMsg").textContent = (s.auto ? "已啟用自動更新：台股交易日早上 8:30 自動抓資料；" : "自動更新未啟用；") + (s.running ? `目前正在執行 ${s.running}…` : "目前閒置。");
   if (s.readonly) {
     document.querySelectorAll("#srv button:not([data-run])").forEach(e => e.disabled = true);
