@@ -341,7 +341,7 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
     from io import StringIO
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    dates = _pending_dates(old, today, days_back, trading_days, required_columns=("margin_bal", "margin_units", "short_units"))
+    dates = _pending_dates(old, today, days_back, trading_days, required_columns=("foreign_oi_net",))
     rows = {}
 
     # The official OpenAPI serves the latest published snapshot. Use it only
@@ -416,7 +416,7 @@ def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
     """證交所市場融資餘額（元），增量寫入 margin.csv（date, margin_bal）。資料約晚上 9 點後公布。"""
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    dates = _pending_dates(old, today, days_back, trading_days, required_columns=("foreign_oi_net",))
+    dates = _pending_dates(old, today, days_back, trading_days, required_columns=("margin_bal", "margin_units", "short_units"))
     rows = {}
     for d in dates:
         url = f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={d:%Y%m%d}&selectType=MS&response=json"
