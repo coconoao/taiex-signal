@@ -502,7 +502,7 @@ function renderPolicyResearch(r) {
     ["歷史正報酬日占比", Number.isFinite(all.positive_days_pct) ? all.positive_days_pct + "%" : "—"],
     ["後段觀察期樣本", (later.sample_count || 0).toLocaleString("zh-TW") + " 天"]
   ];
-  box.innerHTML = '<div class="grid">' + cards.map(([label, value]) => `<div class="mc"><b>${esc(label)}</b><div class="big">${esc(value)}</div></div>`).join("") + '</div>' +
+  box.innerHTML = '<div class="usgrid">' + cards.map(([label, value]) => `<div class="mc"><b>${esc(label)}</b><div class="big">${esc(value)}</div></div>`).join("") + '</div>' +
     `<p class="note">較早 70% 日期：${early.date_start || "—"} 至 ${early.date_end || "—"}，${early.sample_count || 0} 天，平均 ${pct(early.mean_return_pct)}；較後 30% 日期：${later.date_start || "—"} 至 ${later.date_end || "—"}，${later.sample_count || 0} 天，平均 ${pct(later.mean_return_pct)}。</p>` +
     `<p class="note">市場資料：${esc(r.market_date_start || "—")} 至 ${esc(r.market_date_end || "—")}。最近配對日期：${(r.latest_matches || []).map(x => esc(x.date) + "（" + x.headline_count + " 則）").join("、") || "—"}</p>`;
   meta.textContent = `更新時間 ${r.updated_at || "—"}｜官方索引 ${r.archive_date_start || "—"} 至 ${r.archive_date_end || "—"}｜未配對新聞日期 ${r.unmatched_news_date_count || 0} 天｜狀態：歷史描述對照完成，非模型訓練`;
