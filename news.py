@@ -22,6 +22,10 @@ TAIWAN_FEEDS = [
     ("台灣國際", "https://feeds.feedburner.com/rsscna/intworld"),
     ("台灣地方", "https://feeds.feedburner.com/rsscna/local"),
 ]
+POLICY_FEEDS = [
+    ("行政院新聞", "https://www.ey.gov.tw/RSS_Content.aspx?ModuleType=3"),
+    ("經濟部新聞", "https://www.moea.gov.tw/Mns/Populace/news/NewsRSSdetail.aspx?Kind=1"),
+]
 POLICY = [
     ("台灣政府政策", "site:ey.gov.tw OR site:moea.gov.tw OR site:cbc.gov.tw OR site:dgbas.gov.tw OR site:fsc.gov.tw 台灣經濟產業政策 when:7d"),
     ("美國政府政策", "site:whitehouse.gov/news OR site:ustr.gov/about/policy-offices/press-office OR site:federalreserve.gov/newsevents 美國關稅貿易科技貨幣政策 when:7d"),
@@ -60,7 +64,7 @@ def _fetch_feed(url, provider):
         source = (item.findtext("source") or provider).strip()
         description = item.findtext("description") or item.findtext("summary") or ""
         description = html.unescape(re.sub(r"<[^>]+>", " ", description))
-        description = re.sub(r"\\s+", " ", description).strip()[:360]
+        description = re.sub(r"\s+", " ", description).strip()[:360]
         if title:
             items.append({"title": title, "description": description, "link": link,
                           "published": published, "source": source})
@@ -125,6 +129,7 @@ def headlines():
     out, seen = [], set()
     collect(MARKET, 8, "market", out, seen)
     collect(POLICY, 6, "policy", out, seen)
+    collect_rss(POLICY_FEEDS, "policy", out, seen, per=8)
     collect_rss(TAIWAN_FEEDS, "taiwan", out, seen, per=8)
     collect(ANALYSTS, 3, "analyst", out, seen)
     return out
