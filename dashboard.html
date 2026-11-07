@@ -80,6 +80,7 @@ details[open]>summary{margin-bottom:12px}
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="dataQuality">資料來源狀態載入中…</p>
   <p class="note" id="referenceData">獨立備援參考資料載入中…</p>
+  <p class="note" id="taiwanLayers">台股資料層狀態載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
   <div class="banner" id="miss" hidden></div>
@@ -412,6 +413,23 @@ function renderPolicyEvents(n) {
 function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); newsCard(n, "next_week", $("newsW")); renderPolicyEvents(n); renderSummary(); }
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
+function loadTaiwanDataStatus() {
+  return getJSON("taiwan_data_status.json").then(d => {
+    const layers = d.layers || {};
+    const labels = { TAIEX: "加權指數", institutional: "三大法人", margin: "融資融券", futures: "台指期外資未平倉" };
+    const order = ["TAIEX", "institutional", "margin", "futures"];
+    const items = order.map(key => {
+      const x = layers[key] || {};
+      const date = x.latest_date || "無完整資料";
+      const count = Number(x.valid_rows || 0);
+      const age = x.age_calendar_days == null ? "" : "，距今天 " + x.age_calendar_days + " 天";
+      return labels[key] + "：" + date + "（" + (x.source || "來源未確認") + "；完整有效 " + count + " 筆" + age + "）";
+    });
+    $("taiwanLayers").textContent = "台股資料層更新時間 " + (d.updated_at || "未知") + "：" + items.join("；") + "。" + (d.note || "");
+  }).catch(() => {
+    $("taiwanLayers").textContent = "台股資料層狀態尚未產生；待完整更新工作執行後，會顯示三大法人、融資融券與期貨資料的來源及最新日期。";
+  });
+}
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
   .catch(() => { $("err").hidden = false; $("meta").textContent = ""; });
 const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); renderSummary(); }).catch(() => { $("wsig").textContent = "尚無 weekly.json"; });
@@ -420,7 +438,7 @@ let lastSig = null, busy = false;
 function loadAll() {
   if (busy) return Promise.resolve();
   busy = true;
-  return Promise.all([loadDaily(), loadWeekly(), loadNews()]).then(() => {
+  return Promise.all([loadDaily(), loadWeekly(), loadNews(), loadTaiwanDataStatus()]).then(() => {
     const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
     $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
   }).finally(() => { busy = false; });
