@@ -556,6 +556,13 @@ def backtest(prob, fwd):
     p = prob.dropna()
     p = p[fwd.reindex(p.index).notna()]
     f = fwd.loc[p.index]
+    actual = (f > 0).astype(float)
+    # 擴張式基準只使用當時以前已實現的方向比例，避免把未來標籤洩漏進比較基準。
+    baseline_prob = actual.expanding(min_periods=1).mean().shift(1).fillna(0.5)
+    baseline_brier = float(((baseline_prob - actual) ** 2).mean())
+    model_brier = float(((p - actual) ** 2).mean())
+    baseline_direction_acc = float(((baseline_prob > 0.5) == (actual > 0.5)).mean())
+    brier_skill = 1 - model_brier / baseline_brier if baseline_brier > 0 else None
     pos = pd.Series(np.where(p > BUY, 1.0, np.where(p < SELL, 0.0, np.nan)), index=p.index).ffill().fillna(0)
     turnover = pos.diff().abs()
     if len(turnover): turnover.iloc[0] = abs(float(pos.iloc[0]))  # 首筆進場也計入交易成本
@@ -570,7 +577,10 @@ def backtest(prob, fwd):
     return {
         "days": int(len(p)), "trades": int(turnover.fillna(0).sum()),
         "direction_acc": round(float(((p > 0.5) == (f > 0)).mean()) * 100, 1),
-        "brier": round(float(((p - (f > 0).astype(float)) ** 2).mean()), 4),
+        "baseline_direction_acc": round(baseline_direction_acc * 100, 1),
+        "brier": round(model_brier, 4),
+        "baseline_brier": round(baseline_brier, 4),
+        "brier_skill": round(brier_skill, 4) if brier_skill is not None else None,
         "log_loss": round(float(-((f > 0) * np.log(np.clip(p, 1e-6, 1 - 1e-6)) + (f <= 0) * np.log(1 - np.clip(p, 1e-6, 1 - 1e-6))).mean()), 4),
         "hold_win_rate": round(float((held > 0).mean()) * 100, 1) if len(held) else None,
         "strategy": {"annual": a, "max_dd": d}, "buyhold": {"annual": ba, "max_dd": bd},
