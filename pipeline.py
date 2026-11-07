@@ -120,6 +120,7 @@ def _fetch_fred_reference(series_id, now, calendar_days=120):
     })
     raw = _read_with_backoff(req, timeout=25)
     frame = pd.read_csv(io.BytesIO(raw))
+    frame.columns = [str(x).lstrip("\ufeff").strip() for x in frame.columns]
     date_col = next((x for x in ("observation_date", "DATE", "date") if x in frame.columns), None)
     value_col = series_id if series_id in frame.columns else (
         "VALUE" if "VALUE" in frame.columns else None
@@ -294,6 +295,11 @@ def load_live(years=6, cache_path="market_history.csv"):
         _fetch_market_reference_data(now)
         if yahoo_status != "ok" else {}
     )
+    if reference_data:
+        summary = "、".join(f"{key}:{value['date']}" for key, value in reference_data.items())
+        print(f"獨立備援參考資料已取得：{summary}", flush=True)
+    elif yahoo_status != "ok":
+        print("獨立備援參考資料本次未取得；不以空值冒充最新資料。", flush=True)
     source_frame = df.copy()
     df = df.dropna(subset=["TAIEX"]).ffill(limit=3)
     data_status = {
