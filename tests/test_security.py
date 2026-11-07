@@ -163,14 +163,14 @@ class AIProviderRetryTests(unittest.TestCase):
 
     def test_gemini_retries_network_timeout_then_succeeds(self):
         response = self.make_response({
-            "candidates": [{"content": {"parts": [{"text": "{\\"ok\\":true}"}]}}]
+            "candidates": [{"content": {"parts": [{"text": "OK"}]}}]
         })
         with patch.object(
             web_app.urllib.request, "urlopen",
             side_effect=[TimeoutError("timed out"), TimeoutError("timed out"), response],
         ) as urlopen, patch.object(web_app.time, "sleep") as sleep:
             result = web_app.call_ai_provider("Gemini", "test-key", "gemini-2.5-flash", "test")
-        self.assertEqual(result, "{\\"ok\\":true}")
+        self.assertEqual(result, "OK")
         self.assertEqual(urlopen.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
 
