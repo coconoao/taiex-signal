@@ -25,7 +25,7 @@ def load_live(years=6):
     for attempt in range(3):
         try:
             raw = yf.download(list(TICKERS.values()), period=f"{years}y",
-                              auto_adjust=True, progress=False, threads=4, timeout=20)
+                              auto_adjust=True, progress=False, threads=False, timeout=20)
             if raw is None or raw.empty:
                 raise ValueError("Yahoo Finance 沒有回傳行情資料")
             if isinstance(raw.columns, pd.MultiIndex):
