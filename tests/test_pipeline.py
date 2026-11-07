@@ -205,8 +205,10 @@ class FuturesNetworkFailureTests(unittest.TestCase):
                            side_effect=ValueError("OpenAPI unavailable")):
                     with patch("pipeline._read_with_backoff",
                                side_effect=TimeoutError("source timeout")) as read:
-                        with patch("pipeline.time.sleep"):
-                            result = fetch_futures(path=path)
+                        with patch("pipeline._fetch_finmind_data",
+                                   side_effect=TimeoutError("backup unavailable")):
+                            with patch("pipeline.time.sleep"):
+                                result = fetch_futures(path=path)
         self.assertEqual(read.call_count, 1)
         self.assertTrue(result.empty)
 
