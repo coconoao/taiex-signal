@@ -6,7 +6,7 @@
 執行時間：台股交易日早上 8:30 前後（美股已收盤、台股未開盤、前一日籌碼已公布）。
 輸出 signals.json，供 dashboard.html 讀取。僅供研究，非投資建議。
 """
-import os, sys, json, time, datetime as dt, urllib.request, urllib.parse, urllib.error
+import os, sys, json, time, io, datetime as dt, urllib.request, urllib.parse, urllib.error
 import numpy as np, pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -104,6 +104,88 @@ def _fetch_twse_taiex_recent(now, calendar_days=7):
     return rows
 
 
+def _fetch_fred_reference(series_id, now, calendar_days=120):
+    """Fetch a clearly-labelled FRED reference series; never silently substitute its definition."""
+    end_day = pd.Timestamp(now).normalize().tz_localize(None)
+    start_day = end_day - pd.Timedelta(days=calendar_days)
+    params = {
+        "id": series_id,
+        "cosd": str(start_day.date()),
+        "coed": str(end_day.date())
+    }
+    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "TAIEXDataQuality/1.0",
+        "Accept": "text/csv,*/*"
+    })
+    raw = _read_with_backoff(req, timeout=25)
+    frame = pd.read_csv(io.BytesIO(raw))
+    date_col = next((x for x in ("observation_date", "DATE", "date") if x in frame.columns), None)
+    value_col = series_id if series_id in frame.columns else (
+        "VALUE" if "VALUE" in frame.columns else None
+    )
+    if date_col is None or value_col is None:
+        raise ValueError(f"FRED {series_id} CSV 欄位不符合預期")
+    dates = pd.to_datetime(frame[date_col], errors="coerce").dt.normalize()
+    values = pd.to_numeric(frame[value_col], errors="coerce")
+    mask = dates.notna() & values.notna()
+    series = pd.Series(values[mask].to_numpy(), index=pd.DatetimeIndex(dates[mask]))
+    return series[~series.index.duplicated(keep="last")].sort_index()
+
+
+def _fetch_finmind_tsm_reference(now, calendar_days=120):
+    """Fetch adjusted TSM daily close from FinMind for source cross-check only."""
+    end_day = pd.Timestamp(now).normalize().tz_localize(None)
+    start_day = end_day - pd.Timedelta(days=calendar_days)
+    frame = _fetch_finmind_data(
+        "USStockPrice", start_day, end_day, data_id="TSM"
+    )
+    if frame.empty or "date" not in frame or "Adj_Close" not in frame:
+        raise ValueError("FinMind TSM 缺少 date／Adj_Close 欄位")
+    dates = pd.to_datetime(frame["date"], errors="coerce").dt.normalize()
+    values = pd.to_numeric(frame["Adj_Close"], errors="coerce")
+    mask = dates.notna() & values.notna() & (values > 0)
+    series = pd.Series(values[mask].to_numpy(), index=pd.DatetimeIndex(dates[mask]))
+    return series[~series.index.duplicated(keep="last")].sort_index()
+
+
+def _fetch_market_reference_data(now):
+    """Independent daily references for cross-checking; these do not enter model features."""
+    references = {}
+    specs = (
+        ("VIX", "VIXCLS", "點", "FRED／CBOE VIX 日收盤；參考資料"),
+        ("US10Y", "DGS10", "%", "FRED 美國 10 年期固定期限殖利率；定義與 Yahoo ^TNX 略有差異"),
+        ("USDTWD", "DEXTAUS", "TWD/USD", "FRED 紐約中午匯率；不是 Yahoo TWD=X 即時報價")
+    )
+    for key, series_id, unit, note in specs:
+        try:
+            series = _fetch_fred_reference(series_id, now)
+            if len(series):
+                day = pd.Timestamp(series.index[-1]).date()
+                references[key] = {
+                    "source": f"FRED {series_id}",
+                    "date": str(day),
+                    "value": round(float(series.iloc[-1]), 4),
+                    "unit": unit,
+                    "note": note
+                }
+        except Exception as exc:
+            print(f"FRED {series_id} 參考資料暫不可用：{type(exc).__name__}: {exc}", flush=True)
+    try:
+        series = _fetch_finmind_tsm_reference(now)
+        if len(series):
+            references["TSM"] = {
+                "source": "FinMind USStockPrice Adj_Close",
+                "date": str(pd.Timestamp(series.index[-1]).date()),
+                "value": round(float(series.iloc[-1]), 4),
+                "unit": "USD",
+                "note": "還原收盤價；僅供交叉參考，不直接替代模型序列"
+            }
+    except Exception as exc:
+        print(f"FinMind TSM 參考資料暫不可用：{type(exc).__name__}: {exc}", flush=True)
+    return references
+
+
 def load_live(years=6, cache_path="market_history.csv"):
     """Load multi-year market history, persist it, then refresh only the recent window."""
     import yfinance as yf
@@ -199,9 +281,7 @@ def load_live(years=6, cache_path="market_history.csv"):
         except Exception as exc:
             print(f"行情快取 Supabase 保存失敗：{type(exc).__name__}: {exc}", flush=True)
 
-    # Capture freshness before limited forward-fill so stale inputs are visible.
-    source_frame = df.copy()
-    df = df.dropna(subset=["TAIEX"]).ffill(limit=3)
+    # Capture provider coverage before limited forward-fill so stale inputs are visible.
     yahoo_columns = {
         column for column in TICKERS
         if yahoo_available and column in fresh and fresh[column].notna().any()
@@ -210,6 +290,12 @@ def load_live(years=6, cache_path="market_history.csv"):
         "ok" if len(yahoo_columns) == len(TICKERS)
         else "partial" if yahoo_columns else "limited_or_unavailable"
     )
+    reference_data = (
+        _fetch_market_reference_data(now)
+        if yahoo_status != "ok" else {}
+    )
+    source_frame = df.copy()
+    df = df.dropna(subset=["TAIEX"]).ffill(limit=3)
     data_status = {
         "updated_at": now.isoformat(),
         "yahoo_status": yahoo_status,
@@ -218,6 +304,8 @@ def load_live(years=6, cache_path="market_history.csv"):
             "Yahoo Finance" if yahoo_available and "TAIEX" in yahoo_columns else "既有快取"
         ),
         "taiwan_index_official_rows": len(official_taiex),
+        "reference_data": reference_data,
+        "reference_data_note": "備援參考值只供交叉核對，不直接替代模型特徵；各資料有自己的定義與發布時間。",
         "series": {}
     }
     for column in TICKERS:
