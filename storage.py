@@ -13,7 +13,7 @@ import urllib.request
 FILES = (
     "signals.json", "weekly.json", "weekly_prob.csv", "market_history.csv",
     "chips.csv", "margin.csv", "futures.csv",
-    "news.json", "news_history.jsonl",
+    "news.json", "news_history.jsonl", "policy_events.jsonl",
 )
 TABLE = "site_data"
 
