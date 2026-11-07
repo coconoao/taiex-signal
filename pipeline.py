@@ -123,11 +123,24 @@ def _open_with_backoff(req, timeout):
 
 
 def _read_with_backoff(req, timeout):
-    """Retry the complete response read, not only the initial connection."""
+    """Retry opening and reading as one request, avoiding nested retry loops."""
     for attempt in range(4):
         try:
-            with _open_with_backoff(req, timeout=timeout) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 and exc.code < 500:
+                raise
+            if attempt == 3:
+                raise
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = float(retry_after) if retry_after else (5, 15, 30)[attempt]
+            except (TypeError, ValueError):
+                delay = (5, 15, 30)[attempt]
+            delay = max(1, min(60, delay))
+            print(f"資料來源 HTTP {exc.code}，{delay:.0f} 秒後重試（{attempt + 1}/3）", flush=True)
+            time.sleep(delay)
         except (TimeoutError, OSError, urllib.error.URLError) as exc:
             if attempt == 3:
                 raise
