@@ -525,8 +525,25 @@ def model():
 def walk_forward(X, y, start=500, step=20, h=1):
     valid = X.notna().all(axis=1)
     idx = X.index[valid & y.notna()]
-    if len(idx) < max(80, h + 20):
-        raise ValueError(f"有效訓練樣本不足：只有 {len(idx)} 筆；至少需要 {max(80, h + 20)} 筆。")
+    minimum = max(80, h + 20)
+    if len(idx) < minimum:
+        # Diagnostic only: never relax the sample requirement or fill missing
+        # observations. Report the exact feature coverage causing rejection.
+        coverage = X.notna().sum().sort_values()
+        missing = (1 - X.notna().mean()).sort_values(ascending=False)
+        detail = []
+        for col in coverage.index:
+            s = X[col].dropna()
+            detail.append({
+                "feature": str(col),
+                "valid_rows": int(coverage[col]),
+                "missing_pct": round(float(missing[col]) * 100, 1),
+                "first_date": str(s.index.min().date()) if len(s) else None,
+                "last_date": str(s.index.max().date()) if len(s) else None,
+            })
+        print("資料品質診斷（僅列各特徵覆蓋率；不補值、不降低門檻）：" +
+              json.dumps(detail, ensure_ascii=False), flush=True)
+        raise ValueError(f"有效資料不足：完整樣本 {len(idx)} 筆，最低要求 {minimum} 筆；請依上方特徵覆蓋診斷修復來源或日期對齊。")
     prob = pd.Series(np.nan, index=X.index)
     first_test = min(max(start, h + 30), max(h + 30, len(idx) // 2))
     for i in range(first_test, len(idx), step):
