@@ -95,7 +95,7 @@ def _pending_dates(old, today, days_back, trading_days=None):
 
 
 def _open_with_backoff(req, timeout):
-    """Retry transient throttling/server errors without hammering data providers."""
+    """Retry transient throttling, server errors, and network timeouts."""
     for attempt in range(4):
         try:
             return urllib.request.urlopen(req, timeout=timeout)
@@ -111,6 +111,12 @@ def _open_with_backoff(req, timeout):
                 delay = (5, 15, 30)[attempt]
             delay = max(1, min(60, delay))
             print(f"資料來源 HTTP {exc.code}，{delay:.0f} 秒後重試（{attempt + 1}/3）", flush=True)
+            time.sleep(delay)
+        except (TimeoutError, OSError, urllib.error.URLError) as exc:
+            if attempt == 3:
+                raise
+            delay = (5, 15, 30)[attempt]
+            print(f"資料來源連線逾時／網路錯誤（{type(exc).__name__}），{delay} 秒後重試（{attempt + 1}/3）", flush=True)
             time.sleep(delay)
 
 
