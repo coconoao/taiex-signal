@@ -1,9 +1,6 @@
 name: Live market-data smoke test
 
 on:
-  push:
-    branches:
-      - fix/pipeline-incremental-checkpoints
   workflow_dispatch:
 
 permissions:
