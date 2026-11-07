@@ -265,15 +265,80 @@ def scheduler():
             last = now.date(); run_jobs("pipeline", "news")
         time.sleep(20)
 
-def quote():  # 加權指數即時報價（Yahoo，約有數分鐘延遲），快取 20 秒
-    if QUOTE["v"] and time.time() - QUOTE["t"] < 20: return QUOTE["v"]
+def _spot_session(now):
+    return now.weekday() < 5 and (now.hour, now.minute) >= (8, 45) and (now.hour, now.minute) < (13, 45)
+
+def _afterhours_session(now):
+    # 期貨夜盤：交易日 15:00 至次日 05:00（週五夜盤延續至週六清晨）。
+    return ((now.weekday() < 5 and (now.hour, now.minute) >= (15, 0)) or
+            (0 < now.weekday() < 6 and (now.hour, now.minute) < (5, 0)))
+
+def _futures_quote():
+    """Yahoo 台指期近月 WTX& 最新可取得分鐘行情；非期交所官方即時串流，可能延遲。"""
+    import pandas as pd
     import yfinance as yf
-    fi = yf.Ticker("^TWII").fast_info
-    last, prev = float(fi["last_price"]), float(fi["previous_close"])
-    v = {"last": round(last, 2), "change": round(last - prev, 2), "pct": round((last / prev - 1) * 100, 2),
-         "time": dt.datetime.now(TZ).strftime("%H:%M:%S")}
-    QUOTE.update(t=time.time(), v=v)
-    return v
+    raw = yf.download("WTX&", period="5d", interval="1m", prepost=True,
+                      auto_adjust=False, progress=False, threads=False, timeout=12)
+    if raw is None or raw.empty:
+        raise RuntimeError("目前無法取得台指期近月行情")
+    close = raw["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    close = close.dropna()
+    if close.empty:
+        raise RuntimeError("台指期行情沒有有效成交價")
+    stamp = close.index[-1]
+    if getattr(stamp, "tzinfo", None) is None:
+        stamp = stamp.tz_localize(TZ)
+    else:
+        stamp = stamp.tz_convert(TZ)
+    now = dt.datetime.now(TZ)
+    age = (now - stamp.to_pydatetime()).total_seconds()
+    if age < -60 or age > 20 * 60:
+        raise RuntimeError("台指期最新資料已超過 20 分鐘，暫不顯示為即時行情")
+    daily = yf.download("WTX&", period="10d", interval="1d",
+                        auto_adjust=False, progress=False, threads=False, timeout=12)
+    prev = None
+    if daily is not None and not daily.empty:
+        dc = daily["Close"]
+        if isinstance(dc, pd.DataFrame):
+            dc = dc.iloc[:, 0]
+        dc = dc.dropna()
+        if len(dc) >= 2:
+            prev = float(dc.iloc[-2])
+    last = float(close.iloc[-1])
+    if not prev or prev <= 0:
+        raise RuntimeError("目前無法取得台指期前一交易日收盤價")
+    return {"last": round(last, 2), "change": round(last - prev, 2),
+            "pct": round((last / prev - 1) * 100, 2),
+            "time": stamp.strftime("%H:%M:%S"), "market": "futures",
+            "label": "台指期近月（夜盤）", "source": "Yahoo Finance，可能延遲",
+            "delay_note": "非期交所官方即時串流，請以資料時間為準"}
+
+def quote():
+    # 現貨交易時段優先顯示加權指數；夜盤時段改顯示台指期近月。
+    if QUOTE["v"] and time.time() - QUOTE["t"] < 20:
+        return QUOTE["v"]
+    now = dt.datetime.now(TZ)
+    if _spot_session(now):
+        try:
+            import yfinance as yf
+            fi = yf.Ticker("^TWII").fast_info
+            last, prev = float(fi["last_price"]), float(fi["previous_close"])
+            v = {"last": round(last, 2), "change": round(last - prev, 2),
+                 "pct": round((last / prev - 1) * 100, 2),
+                 "time": now.strftime("%H:%M:%S"), "market": "spot",
+                 "label": "加權指數現貨", "source": "Yahoo Finance，可能延遲"}
+            QUOTE.update(t=time.time(), v=v)
+            return v
+        except Exception:
+            if not _afterhours_session(now):
+                raise
+    if _afterhours_session(now):
+        v = _futures_quote()
+        QUOTE.update(t=time.time(), v=v)
+        return v
+    raise RuntimeError("目前沒有交易中的即時行情（現貨 08:45–13:45；期貨夜盤 15:00–次日 05:00）")
 
 def us_market_quote():
     """美股最新可取得的 5 分鐘行情；Yahoo 非官方資料，可能延遲或缺漏，快取 60 秒。"""
