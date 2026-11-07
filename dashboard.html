@@ -79,6 +79,7 @@ details[open]>summary{margin-bottom:12px}
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="dataQuality">資料來源狀態載入中…</p>
+  <p class="note" id="referenceData">獨立備援參考資料載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
   <div class="banner" id="miss" hidden></div>
@@ -271,6 +272,14 @@ function renderDaily(d) {
       ? "Yahoo Finance 僅部分序列更新；其餘欄位依個別來源與資料日期判斷。"
       : "Yahoo Finance 本次未成功更新；國際市場欄位沿用快取，請依各欄資料日期判斷新舊，不能視為即時行情。";
   $("dataQuality").textContent = `${taiwan} ${yahoo} ${items.join("；")}`;
+  const refs = ds.reference_data || {};
+  const refLabels = {VIX:"VIX",US10Y:"美國 10 年債",USDTWD:"美元／台幣",TSM:"TSM 還原收盤"};
+  const refItems = Object.entries(refs).map(([k,x]) =>
+    `${refLabels[k] || k}：${x.value} ${x.unit || ""}（${x.date}，${x.source}）`
+  );
+  $("referenceData").textContent = refItems.length
+    ? `獨立備援參考（僅供交叉核對，不直接替代模型欄位）：${refItems.join("；")}。各來源定義與發布時間可能不同。`
+    : "獨立備援參考資料本次未取得；請以各序列顯示的來源與日期為準。";
   $("demo").hidden = !d.demo;
   const ml = d.missing_layers || [];
   $("miss").hidden = !ml.length;
