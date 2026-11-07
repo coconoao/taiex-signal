@@ -113,8 +113,8 @@ details[open]>summary{margin-bottom:12px}
       <h2>長線歷史統計</h2>
       <p class="note" id="horizonNote">歷史正報酬比例與 95% 信賴區間；這是歷史統計，不是未來預測。</p>
       <div id="longChart" class="chartbox" role="img" aria-label="1、3、6 個月歷史正報酬比例線圖"></div>
-      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>樣本數</th><th>歷史正報酬比例</th><th>Wilson 95% 區間</th><th>平均報酬</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
-      <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。正報酬比例是歷史樣本中報酬大於零的占比；95% 區間反映估計不確定性。歷史統計不代表未來發生機率，也不是投資建議。</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>不重疊樣本／逐日觀察</th><th>歷史正報酬比例（不重疊／逐日）</th><th>不重疊樣本 Wilson 95% 區間</th><th>平均報酬</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
+      <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。每格依序顯示「不重疊樣本／逐日重疊觀察」；正報酬比例亦依此順序。逐日觀察數較多，但相鄰期間高度重疊、彼此相關，不可視為同等數量的獨立樣本；95% 區間只對不重疊樣本計算。歷史統計不代表未來發生機率，也不是投資建議。</p>
     </section>
   </div>
 
@@ -281,7 +281,7 @@ function renderWeekly(w) {
   $("horizonRows").innerHTML = names.map(([key,label]) => {
     const h = hh[key];
     return h && h.n
-      ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}</td><td>${h.positive_rate}%</td><td>${(h.positive_rate_ci95 || [null,null]).join("%～")}%</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
+      ? `<tr><td>${label}（${h.days} 日）</td><td>${h.n}${h.sample_note === "樣本偏少，估計不穩定" ? "（偏少）" : ""}／${h.overlap_n ?? "—"}</td><td>${h.positive_rate}%／${h.overlap_positive_rate ?? "—"}%</td><td>${(h.positive_rate_ci95 || [null,null]).join("%～")}%</td><td>${h.mean}%</td><td>${h.median}%</td><td>${h.p10}% ～ ${h.p90}%</td></tr>`
       : `<tr><td>${label}</td><td colspan="6">歷史樣本不足</td></tr>`;
   }).join("");
   $("horizonNote").textContent = `統計截至 ${w.asof}；呈現過去各期間正報酬比例，並非未來預測。`;
