@@ -264,6 +264,74 @@ def run(name, fn, p):
     except Exception as e:
         return name, {"error": f"{type(e).__name__}: {e}"}
 
+
+def research_features(hl):
+    """方向中立的新聞資料覆蓋特徵；不產生市場方向分數。"""
+    kinds = ("market", "taiwan", "policy", "analyst")
+    counts = {kind: sum(1 for h in hl if h.get("kind") == kind) for kind in kinds}
+    sources = {str(h.get("source") or h.get("tag") or "").strip()
+               for h in hl if str(h.get("source") or h.get("tag") or "").strip()}
+    dated = sum(bool(str(h.get("published") or "").strip()) for h in hl)
+    linked = sum(bool(str(h.get("link") or "").strip()) for h in hl)
+    return {
+        "headline_count": len(hl), "category_counts": counts,
+        "unique_source_count": len(sources),
+        "published_time_coverage_pct": round(100 * dated / len(hl), 1) if hl else 0,
+        "original_link_coverage_pct": round(100 * linked / len(hl), 1) if hl else 0,
+    }
+
+
+def save_research_snapshot(hl):
+    """保存當日新聞快照；以台灣最近已完成交易日作為對齊日期。"""
+    try:
+        market_asof = json.load(open("signals.json", encoding="utf-8")).get("asof")
+    except Exception:
+        market_asof = None
+    try:
+        taipei_today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date().isoformat()
+    except Exception:
+        taipei_today = dt.date.today().isoformat()
+    asof = market_asof or taipei_today
+    path = "news_research_history.jsonl"
+    records = []
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                    if isinstance(row, dict) and row.get("asof") != asof:
+                        records.append(row)
+                except Exception:
+                    continue
+    snapshot = {
+        "asof": asof, "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "features": research_features(hl),
+        "articles": [{
+            "kind": str(h.get("kind", "")), "category": str(h.get("tag", "")),
+            "title": str(h.get("title", ""))[:500],
+            "source": str(h.get("source", ""))[:160],
+            "published": str(h.get("published", ""))[:100],
+            "link": str(h.get("link", ""))[:1000],
+        } for h in hl[:100]],
+        "outcome": None,
+    }
+    records.append(snapshot)
+    records.sort(key=lambda row: str(row.get("asof", "")))
+    with open(path + ".tmp", "w", encoding="utf-8") as stream:
+        for row in records[-1500:]:
+            stream.write(json.dumps(row, ensure_ascii=False) + "\\n")
+    os.replace(path + ".tmp", path)
+    labeled = sum(isinstance(row.get("outcome"), dict) for row in records)
+    summary = {
+        "updated_at": snapshot["captured_at"], "latest": snapshot,
+        "history_count": len(records), "labeled_count": labeled,
+        "note": "新聞特徵僅作資料研究；歷史結果只在後續交易日收盤資料到齊後標記，不回填未來資訊。",
+    }
+    with open("news_research.json.tmp", "w", encoding="utf-8") as stream:
+        json.dump(summary, stream, ensure_ascii=False)
+    os.replace("news_research.json.tmp", "news_research.json")
+
+
 def main():
     load_settings()
     hl = headlines()
@@ -292,6 +360,7 @@ def main():
                 row["stances"][n] = a["stance"]
     vals = [sum(STANCE[s] for s in r["stances"].values()) / len(r["stances"]) for r in rows.values()]
     events = policy_events(hl)
+    save_research_snapshot(hl)
     event_history = save_policy_event_history(events)
     out = {"asof": dt.date.today().isoformat(), "demo": False, "headlines": hl, "policy_events": events,
            "policy_event_history_count": len(event_history), "prompt": p, "models": res, "agg": agg,
