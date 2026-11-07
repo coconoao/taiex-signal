@@ -72,7 +72,7 @@ def load_demo(n=1800, seed=7):
 
 # Keep each scheduled run bounded. Recent dates are always prioritized while
 # older missing dates are backfilled gradually across subsequent runs.
-BACKFILL_DATES_PER_RUN = 40
+BACKFILL_DATES_PER_RUN = 10
 RECENT_DATES_PER_RUN = 5
 CHECKPOINT_EVERY = 5
 
@@ -89,9 +89,11 @@ def _pending_dates(old, today, days_back, trading_days=None):
         dates = dates[~dates.isin(existing)]
     if not len(dates):
         return dates
+    # Keep the newest data fresh first; only then spend the remaining request
+    # budget on older gaps. Failed dates remain absent and are retried later.
     recent = dates[-RECENT_DATES_PER_RUN:]
     older = dates[:-RECENT_DATES_PER_RUN][:BACKFILL_DATES_PER_RUN]
-    return older.append(recent).unique().sort_values()
+    return recent.append(older).unique()
 
 
 def _open_with_backoff(req, timeout):
