@@ -38,6 +38,8 @@ bash build_mac.sh        # 產生「台股訊號.app」（需 Python 3.10+），
 `python export_html.py [檔名]`，或「設定」頁的「匯出單一 HTML 檔」。內嵌目前資料與新聞，不含金鑰，可雙擊開啟或上傳到任何靜態空間；快照不會自動更新。
 
 ## 資料來源與限制
-- Yahoo Finance（行情、即時報價約有數分鐘延遲、財報）、證交所（籌碼、融資券）、期交所（期貨，官方僅近三年）、Google News RSS（標題）。欄位格式若改版，程式會印出警告。
+- Yahoo Finance（國際與大盤歷史行情、即時報價約有數分鐘延遲、財報）、證交所 TWSE（籌碼、融資券）、期交所 TAIFEX（期貨，官方歷史查詢約近三年）、Google News RSS（標題）。
+- TWSE 籌碼／融資券或 TAIFEX 期貨資料缺漏時，Pipeline 會以 FinMind 對應的整體市場資料集補齊缺少日期；官方來源已有的日期不會被備援覆寫。FinMind 是第三方備援，更新時間與統計口徑仍應以交易所公告為準。
+- FinMind 使用免費公開額度即可運作；如自行取得 FinMind Token，可在 Render 環境變數設定 `FINMIND_TOKEN` 提高請求額度。不要把 Token 寫進程式碼、GitHub 或對話。欄位格式若改版，程式會印出警告。
 - 新聞與 AI 分數尚未納入機率與回測，每日紀錄於 `news_history.jsonl`。
 - 預測是機率，不是保證；回測不代表未來。
