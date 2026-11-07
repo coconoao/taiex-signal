@@ -8,15 +8,15 @@ permissions:
 
 jobs:
   live-data-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       # Deliberately local-only: this job has no Supabase credentials and must
       # never read or write the production site_data table.
       TAIEX_STORAGE: local
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install dependencies
