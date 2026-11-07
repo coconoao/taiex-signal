@@ -270,7 +270,8 @@ def stale():
 
 def scheduler():
     last = None
-    if stale(): run_jobs("pipeline-fast", "news")
+    # Recompute once on every process start so restored/repo-bundled outputs cannot mask stale data.
+    run_jobs("pipeline-fast", "news")
     while True:
         now = dt.datetime.now(TZ)
         if now.weekday() < 5 and (now.hour, now.minute) == (8, 30) and last != now.date():
