@@ -1,7 +1,7 @@
 import io
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import app as web_app
 
@@ -152,3 +152,34 @@ class UserAdministrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AIProviderRetryTests(unittest.TestCase):
+    def make_response(self, payload):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = __import__("json").dumps(payload).encode("utf-8")
+        return response
+
+    def test_gemini_retries_network_timeout_then_succeeds(self):
+        response = self.make_response({
+            "candidates": [{"content": {"parts": [{"text": "{\\"ok\\":true}"}]}}]
+        })
+        with patch.object(
+            web_app.urllib.request, "urlopen",
+            side_effect=[TimeoutError("timed out"), TimeoutError("timed out"), response],
+        ) as urlopen, patch.object(web_app.time, "sleep") as sleep:
+            result = web_app.call_ai_provider("Gemini", "test-key", "gemini-2.5-flash", "test")
+        self.assertEqual(result, "{\\"ok\\":true}")
+        self.assertEqual(urlopen.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_gemini_reports_gateway_error_after_network_retries(self):
+        with patch.object(
+            web_app.urllib.request, "urlopen",
+            side_effect=TimeoutError("timed out"),
+        ) as urlopen, patch.object(web_app.time, "sleep"):
+            with self.assertRaises(web_app.AIProviderError) as caught:
+                web_app.call_ai_provider("Gemini", "test-key", "gemini-2.5-flash", "test")
+        self.assertEqual(caught.exception.status, 502)
+        self.assertEqual(urlopen.call_count, 4)
