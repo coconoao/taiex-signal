@@ -37,8 +37,13 @@ class LoadLiveTests(unittest.TestCase):
         raw = pd.DataFrame(values, index=index, columns=columns)
         fake_yfinance = types.SimpleNamespace(download=Mock(return_value=raw))
 
-        with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
-            result = load_live()
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = directory + "/market_history.csv"
+            with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+                result = load_live(cache_path=cache_path)
+            saved = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+
+        self.assertGreaterEqual(len(saved), 500)
 
         self.assertIn("TAIEX", result.columns)
         self.assertGreaterEqual(len(result), 500)
