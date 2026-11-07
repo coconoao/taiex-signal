@@ -272,8 +272,12 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
             net = _tx_foreign_oi_net(pd.read_html(StringIO(html)))
         except urllib.error.HTTPError as e:
             print(f"期交所 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
-            if e.code == 429: break
+            if e.code == 429 or e.code >= 500:
+                break
             time.sleep(1); continue
+        except (TimeoutError, OSError, urllib.error.URLError) as e:
+            print(f"期交所 {d.date()} 連線持續失敗：{type(e).__name__}；停止本次回補，保留已取得資料", flush=True)
+            break
         except Exception as e:
             print(f"期交所 {d.date()} 下載／解析失敗：{type(e).__name__}: {e}", flush=True)
             time.sleep(1); continue
