@@ -9,7 +9,8 @@
 <meta name="apple-mobile-web-app-title" content="台股訊號">
 <meta name="theme-color" content="#14202b">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="/brand-logo.svg">
+<link rel="apple-touch-icon" href="/brand-logo.svg">
 <title>加權指數訊號</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
 <style>
@@ -73,7 +74,7 @@ details[open]>summary{margin-bottom:12px}
 </head>
 <body>
 <main>
-  <h1>加權指數訊號<a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
+  <h1><img src="/brand-logo.svg" alt="" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:8px;filter:drop-shadow(0 0 7px #58cfff)">加權指數訊號<a class="logout" href="/auth/logout">Google 登出</a> <a class="logout" id="adminLink" href="/admin" hidden style="margin-right:14px">使用者管理</a></h1>
   <div class="live" id="live" hidden></div>
   <p class="meta" id="meta">載入中…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
