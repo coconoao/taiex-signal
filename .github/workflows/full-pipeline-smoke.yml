@@ -1,0 +1,58 @@
+name: Full pipeline smoke test
+
+on:
+  push:
+    branches:
+      - fix/pipeline-incremental-checkpoints
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-pipeline-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      # Isolated local run only. No Supabase credentials are provided.
+      TAIEX_STORAGE: local
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run full market-data pipeline in a temporary directory
+        run: |
+          tmpdir=$(mktemp -d)
+          trap 'rm -rf "$tmpdir"' EXIT
+          cd "$tmpdir"
+          python "$GITHUB_WORKSPACE/pipeline.py"
+          python - <<'PY'
+          import json
+          import pathlib
+          import pandas as pd
+
+          required = ["signals.json", "weekly.json", "weekly_prob.csv",
+                      "chips.csv", "margin.csv", "futures.csv"]
+          missing = [name for name in required if not pathlib.Path(name).is_file()]
+          if missing:
+              raise SystemExit("Missing pipeline outputs: " + ", ".join(missing))
+
+          with open("signals.json", encoding="utf-8") as f:
+              signals = json.load(f)
+          with open("weekly.json", encoding="utf-8") as f:
+              weekly = json.load(f)
+
+          for name in ("chips.csv", "margin.csv", "futures.csv", "weekly_prob.csv"):
+              frame = pd.read_csv(name)
+              if frame.empty:
+                  raise SystemExit(f"{name} is empty")
+              print(f"OUTPUT {name}: {len(frame)} rows")
+
+          if not signals.get("asof") or not weekly.get("asof"):
+              raise SystemExit("Signal output is missing its as-of date")
+          print("FULL PIPELINE SMOKE TEST PASSED")
+          PY
