@@ -1,0 +1,58 @@
+name: Live market-data smoke test
+
+on:
+  push:
+    branches:
+      - fix/pipeline-incremental-checkpoints
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-data-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Deliberately local-only: this job has no Supabase credentials and must
+      # never read or write the production site_data table.
+      TAIEX_STORAGE: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Fetch a small real-data sample without persistence
+        run: |
+          tmpdir=$(mktemp -d)
+          trap 'rm -rf "$tmpdir"' EXIT
+          TMPDIR_TEST="$tmpdir" python - <<'PY'
+          import os
+          import pathlib
+          import pandas as pd
+          import pipeline
+
+          root = pathlib.Path(os.environ["TMPDIR_TEST"])
+          dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=5)
+          checks = [
+              ("chips", pipeline.fetch_chips, "chips.csv"),
+              ("margin", pipeline.fetch_margin, "margin.csv"),
+              ("futures", pipeline.fetch_futures, "futures.csv"),
+          ]
+
+          failures = []
+          for name, fetch, filename in checks:
+              path = root / filename
+              print(f"\n=== {name}: requesting up to {len(dates)} recent weekdays ===", flush=True)
+              result = fetch(days_back=10, path=str(path), trading_days=dates)
+              count = len(result)
+              print(f"RESULT {name}: {count} records", flush=True)
+              if count < 1:
+                  failures.append(name)
+
+          if failures:
+              raise SystemExit("No real records received from: " + ", ".join(failures))
+          print("\nLIVE DATA SMOKE TEST PASSED: all three sources returned records.")
+          PY
