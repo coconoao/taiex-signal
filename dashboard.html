@@ -131,6 +131,11 @@ details[open]>summary{margin-bottom:12px}
       <div id="gdeltResearchIndicator"></div>
       <p class="note">資料來源：GDELT Project。此資料為全球新聞報導索引，不等於完整台灣媒體新聞庫；標題分類為字詞規則，歷史關聯不是未來預測或買賣訊號。</p>
     </section>
+    <section><h2>台灣官方歷史新聞資料</h2>
+      <p class="note" id="policyArchiveMeta">載入官方歷史新聞資料中…</p>
+      <div id="policyArchiveItems"></div>
+      <p class="note">來源：行政院 Open API。僅保存標題、發布日期與官方來源連結；這是政府新聞稿子集，不代表完整媒體新聞庫，也不與多來源每日新聞分數混算。</p>
+    </section>
     <section><h2>新聞情緒（既有資料）</h2><div id="newsD"></div><p class="note">此區沿用原本新聞摘要與分析，與下方新聞研究資料分開保存。</p></section>
   </div>
 
@@ -379,7 +384,7 @@ function openChatGPTWindow() {
 $("openChatGPTSettings").addEventListener("click", openChatGPTWindow);
 
 /* ---- 新聞資料：提供複製到 Gemini 或 ChatGPT ---- */
-let NEWS = null, WK = null, NEWS_RESEARCH = null, GDELT_RESEARCH = null;
+let NEWS = null, WK = null, NEWS_RESEARCH = null, GDELT_RESEARCH = null, POLICY_ARCHIVE = null;
 function mergedNews() {
   if (!NEWS) return null;
   const n = JSON.parse(JSON.stringify(NEWS));
@@ -475,7 +480,25 @@ function renderGdeltResearch(r) {
   box.innerHTML = `<div class="mc"><b>${mood}</b><div class="big">${score > 0 ? "+" : ""}${score.toFixed(2)}</div><p class="note">新聞標題 ${f.headline_count || 0} 則｜正面 ${f.positive_headline_count || 0}｜負面 ${f.negative_headline_count || 0}</p></div>${historical}<p class="note">${esc(h.note || "資料不足，暫不顯示歷史統計。")}</p>`;
   meta.textContent = `資料來源 GDELT DOC 2.0｜最近交易日 ${r.latest.asof}｜快照 ${r.history_count || 0} 天｜已標記隔日結果 ${r.labeled_count || 0} 筆｜本次新增 ${r.fetched_this_run || 0} 天｜達查詢上限日期 ${(r.query_capped_dates || []).length} 天`;
 }
-function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); renderSummary(); renderNewsResearch(NEWS_RESEARCH); renderGdeltResearch(GDELT_RESEARCH); }
+function renderPolicyArchive(a) {
+  const meta = $("policyArchiveMeta"), box = $("policyArchiveItems");
+  if (!a || !Array.isArray(a.items) || !a.items.length) {
+    meta.textContent = "尚未匯入可用的官方歷史新聞資料。";
+    box.textContent = "等待歷史資料回補。";
+    return;
+  }
+  meta.textContent = `資料來源：${a.dataset || "官方新聞"}｜${a.date_start} 至 ${a.date_end}｜${a.record_count || a.items.length} 則標題｜涵蓋 ${a.date_count || 0} 個發布日期｜匯入時間 ${a.imported_at || "未提供"}`;
+  const rows = a.items.slice(-12).reverse();
+  box.innerHTML = rows.map(item => {
+    const href = safeNewsHref(item.url);
+    return `<article style="padding:9px 0;border-bottom:1px solid var(--line)">
+      <b>${esc(item.title || "（無標題）")}</b>
+      <p class="note">${esc(item.date || "日期未提供")} · ${esc(item.source || "行政院")}</p>
+      ${href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">查看官方原文</a>` : ""}
+    </article>`;
+  }).join("");
+}
+function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); renderSummary(); renderNewsResearch(NEWS_RESEARCH); renderGdeltResearch(GDELT_RESEARCH); renderPolicyArchive(POLICY_ARCHIVE); }
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
@@ -484,7 +507,8 @@ const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly
 const loadNews = () => Promise.all([
   getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }),
   getJSON("news_research.json").then(r => { NEWS_RESEARCH = r; }).catch(() => { NEWS_RESEARCH = null; }),
-  getJSON("news_gdelt_research.json").then(r => { GDELT_RESEARCH = r; }).catch(() => { GDELT_RESEARCH = null; })
+  getJSON("news_gdelt_research.json").then(r => { GDELT_RESEARCH = r; }).catch(() => { GDELT_RESEARCH = null; }),
+  getJSON("news_policy_archive.json").then(r => { POLICY_ARCHIVE = r; }).catch(() => { POLICY_ARCHIVE = null; })
 ]).then(renderNews);
 let lastSig = null, busy = false;
 function loadAll() {
