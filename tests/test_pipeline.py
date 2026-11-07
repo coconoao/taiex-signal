@@ -15,6 +15,7 @@ from pipeline import (
     _merge_and_save,
     _open_with_backoff,
     _pending_dates,
+    fetch_chips,
 )
 
 
@@ -110,6 +111,40 @@ class CheckpointTests(unittest.TestCase):
             self.assertTrue(__import__("os").path.exists(path))
             self.assertFalse(__import__("os").path.exists(path + ".tmp"))
         self.assertEqual(len(result), 1)
+
+
+class FetchCheckpointIntegrationTests(unittest.TestCase):
+    def test_fetch_chips_persists_checkpoint_during_real_fetch_loop(self):
+        import io
+        import json
+        import os
+
+        dates = pd.bdate_range("2026-10-26", periods=6)
+        payload = {
+            "stat": "OK",
+            "data": [
+                ["外資及陸資買賣超", "", "", "100"],
+                ["投信買賣超", "", "", "50"],
+            ],
+        }
+        responses = [io.BytesIO(json.dumps(payload).encode("utf-8")) for _ in dates]
+        fake_storage = types.SimpleNamespace(
+            enabled=lambda: True,
+            save_data=Mock(return_value=8),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "chips.csv")
+            with patch("pipeline._pending_dates", return_value=dates):
+                with patch("pipeline._open_with_backoff", side_effect=responses):
+                    with patch("pipeline.time.sleep"):
+                        with patch.dict(sys.modules, {"storage": fake_storage}):
+                            result = fetch_chips(path=path)
+            saved = pd.read_csv(path, index_col=0, parse_dates=True)
+
+        self.assertEqual(len(result), 6)
+        self.assertEqual(len(saved), 6)
+        self.assertEqual(fake_storage.save_data.call_count, 2)
 
 
 if __name__ == "__main__":
