@@ -1,8 +1,8 @@
 """Build a small, clearly sampled index of historical Executive Yuan news.
 
-The current OpenAPI endpoint returns HTTP 410, so this importer reads only the
-public listing pages. It stores short headlines, publication dates and links;
-it never downloads or republishes article bodies or summaries.
+The legacy OpenAPI endpoint returns HTTP 410. This importer therefore reads
+only the public listing pages and stores short headlines, dates and source
+links. It never downloads article bodies or summaries.
 """
 import datetime as dt
 from html.parser import HTMLParser
@@ -18,8 +18,11 @@ import urllib.request
 LIST_URL = "https://www.ey.gov.tw/Page/A2EC1FEF9BC39AD0"
 ARTICLE_PREFIX = "/Page/9277F759E41CCD91/"
 PAGE_SIZE = 15
-SAMPLE_PAGES = 24
-DATE_RE = re.compile(r"(?<!\\d)(\\d{2,3})-(\\d{1,2})-(\\d{1,2})")
+SAMPLE_PAGES = [
+    1, 36, 72, 108, 144, 180, 216, 252, 288, 324, 360, 396,
+    432, 468, 504, 540, 576, 612, 648, 684, 720, 756, 792, 830,
+]
+DATE_RE = re.compile(r"(?<!\d)(\d{2,3})-(\d{1,2})-(\d{1,2})")
 
 
 class NewsListParser(HTMLParser):
@@ -29,7 +32,6 @@ class NewsListParser(HTMLParser):
         self.active = False
         self.href = ""
         self.parts = []
-        self.page_text = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -41,13 +43,12 @@ class NewsListParser(HTMLParser):
                 self.parts = []
 
     def handle_data(self, data):
-        self.page_text.append(data)
         if self.active:
             self.parts.append(data)
 
     def handle_endtag(self, tag):
         if tag.lower() == "a" and self.active:
-            text = re.sub(r"\\s+", " ", " ".join(self.parts)).strip()
+            text = re.sub(r"\s+", " ", " ".join(self.parts)).strip()
             self.links.append((self.href, text))
             self.active = False
             self.href = ""
@@ -59,7 +60,7 @@ def fetch_page(page):
     request = urllib.request.Request(
         LIST_URL + "?" + query,
         headers={
-            "User-Agent": "TAIEXSignal/1.0 (personal historical index; contact: none)",
+            "User-Agent": "TAIEXSignal/1.0 (personal historical news index)",
             "Accept": "text/html",
         },
     )
@@ -79,14 +80,14 @@ def parse_item(href, text, page):
     if not match:
         return None
     year, month, day = (int(x) for x in match.groups())
-    if year < 100:
+    if year < 1911:
         year += 1911
     try:
         published = dt.date(year, month, day).isoformat()
     except ValueError:
         return None
-    title = html.unescape(text[:match.start()]).strip(" -　\\t\\r\\n")
-    title = re.sub(r"\\s+", " ", title)
+    title = html.unescape(text[:match.start()]).strip(" -　\t\r\n")
+    title = re.sub(r"\s+", " ", title)
     if not title:
         return None
     url = urllib.parse.urljoin("https://www.ey.gov.tw", href)
@@ -100,35 +101,22 @@ def parse_item(href, text, page):
 
 
 def main():
-    first = fetch_page(1)
-    first_parser = NewsListParser()
-    first_parser.feed(first)
-    page_match = re.search(r"共\\s*(\\d+)\\s*頁", " ".join(first_parser.page_text))
-    if not page_match:
-        raise SystemExit("Could not determine official archive page count; no data written.")
-    page_count = int(page_match.group(1))
-    if page_count < 1:
-        raise SystemExit("Official archive reports no pages.")
-
-    if page_count == 1:
-        pages = [1]
-    else:
-        pages = sorted({
-            1 + round(i * (page_count - 1) / (SAMPLE_PAGES - 1))
-            for i in range(SAMPLE_PAGES)
-        })
-
     items, seen = [], set()
-    for page in pages:
-        raw = first if page == 1 else fetch_page(page)
+    successful_pages = []
+    for page in SAMPLE_PAGES:
+        raw = fetch_page(page)
         parser = NewsListParser()
         parser.feed(raw)
+        page_count = 0
         for href, text in parser.links:
             item = parse_item(href, text, page)
             if not item or item["url"] in seen:
                 continue
             seen.add(item["url"])
             items.append(item)
+            page_count += 1
+        if page_count:
+            successful_pages.append(page)
         time.sleep(0.2)
 
     items.sort(key=lambda x: (x["date"], x["title"]))
@@ -146,9 +134,8 @@ def main():
         "source_url": LIST_URL,
         "rights_note": "僅保存短標題、日期及原文連結；原文及其他內容權利依行政院與原著作權人聲明辦理。",
         "scope": "跨年度分頁抽樣索引，非完整新聞庫；不含新聞全文或摘要。",
-        "sampling": f"從 {page_count} 頁中等距抽取 {len(pages)} 頁，每頁最多 {PAGE_SIZE} 筆。",
-        "page_count": page_count,
-        "sampled_pages": pages,
+        "sampling": f"等距抽取 {len(successful_pages)} 個歷史分頁，每頁最多 {PAGE_SIZE} 筆。",
+        "sampled_pages": successful_pages,
         "date_start": items[0]["date"],
         "date_end": items[-1]["date"],
         "record_count": len(items),
@@ -167,7 +154,7 @@ def main():
         "Official historical news index:",
         len(items), "titles across", len(daily), "dates;",
         items[0]["date"], "to", items[-1]["date"],
-        "| sampled pages", len(pages), "of", page_count,
+        "| sampled pages", len(successful_pages),
         flush=True,
     )
 
