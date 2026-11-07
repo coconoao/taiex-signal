@@ -222,7 +222,7 @@ class FetchCheckpointIntegrationTests(unittest.TestCase):
                 save_data=Mock(side_effect=record_save),
             )
             with patch("pipeline._pending_dates", return_value=dates):
-                with patch("pipeline._open_with_backoff", side_effect=responses):
+                with patch("pipeline.urllib.request.urlopen", side_effect=responses):
                     with patch("pipeline.time.sleep"):
                         with patch.dict(sys.modules, {"storage": fake_storage}):
                             result = fetch_chips(path=path)
