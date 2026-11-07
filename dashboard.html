@@ -375,11 +375,17 @@ $("copyNews").onclick = async () => {
   if (NEWS.demo) {
     msg.textContent = "目前是示範新聞，請先更新成真實新聞資料。"; return;
   }
-  const items = NEWS.headlines.slice(0, 40).map((h, i) =>
-    `${i + 1}. ${h.title || "（無標題）"}\n來源：${h.source || h.tag || "未提供"}\n時間：${h.published || "未提供"}\n連結：${safeNewsHref(h.link) || "未提供"}`
+  const selected = [
+    ...NEWS.headlines.filter(h => h.kind === "market").slice(0, 10),
+    ...NEWS.headlines.filter(h => h.kind === "taiwan").slice(0, 12),
+    ...NEWS.headlines.filter(h => h.kind === "policy").slice(0, 14),
+    ...NEWS.headlines.filter(h => h.kind === "analyst").slice(0, 4)
+  ].slice(0, 40);
+  const items = selected.map((h, i) =>
+    `${i + 1}. [${h.tag || h.kind || "新聞"}] ${h.title || "（無標題）"}\n摘要：${h.description || "未提供"}\n來源：${h.source || h.tag || "未提供"}\n時間：${h.published || "未提供"}\n連結：${safeNewsHref(h.link) || "未提供"}`
   ).join("\n\n");
-  const payload = "請用繁體中文整理以下新聞：先摘要各則新聞，再歸納共同主題、可能存在的不同觀點與資料限制。請區分新聞明確陳述與推論，不要提供股票買賣建議、價格預測或投資策略。\n\n" + items;
-  try { await navigator.clipboard.writeText(payload); msg.textContent = "已複製 " + NEWS.headlines.length + " 則新聞資料。請開啟 Gemini 聊天室並貼上。"; }
+  const payload = "請用繁體中文整理以下資料，分成台灣新聞、政府政策、國際局勢與市場新聞。每則請區分已確認事實、尚待確認資訊及分析推論；說明政策可能經由關稅、出口、供應鏈、能源、匯率或利率傳導的管道。不要提供股票買賣建議、價格預測或投資策略。\n\n" + items;
+  try { await navigator.clipboard.writeText(payload); msg.textContent = "已複製 " + selected.length + " 則新聞資料（含台灣新聞與政策來源）。請開啟 Gemini 聊天室並貼上。"; }
   catch { msg.textContent = "瀏覽器未允許存取剪貼簿，請確認網站使用 HTTPS，或重新點擊複製。"; }
 };
 /* ---- 伺服器功能（用 python app.py 啟動時才有）：報價、個股、手動更新、匯出 ---- */
