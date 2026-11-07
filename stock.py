@@ -55,8 +55,13 @@ def fundamentals(t):
 
 def analyze(code):
     import yfinance as yf
-    code = code.strip().upper().replace(".TWO", "").replace(".TW", "")
-    if not code.isalnum(): raise ValueError("請輸入股票代號，例如 2330")
+    code = str(code or "").strip().upper()
+    for suffix in (".TWO", ".TW"):
+        if code.endswith(suffix):
+            code = code[:-len(suffix)]
+            break
+    if not code or not code[0].isdigit() or not code.isalnum() or len(code) > 12:
+        raise ValueError("請輸入台股代號，例如 2330、0050 或 00679B")
     px = sym = None
     errors = []
     for suf in (".TW", ".TWO"):  # 上市、上櫃；其中一個市場代碼無資料時繼續嘗試另一個
@@ -65,7 +70,8 @@ def analyze(code):
         except RuntimeError as e:
             errors.append(str(e))
             continue
-        if len(h) > 300:
+        # 新上市 ETF 可能沒有五年資料；至少保留 60 個交易日供基本歷史統計。
+        if len(h) >= 60:
             px, sym = h, code + suf
             break
     if px is None:
@@ -112,18 +118,27 @@ def analyze(code):
         stock_expected = buckets.get(market_bucket)
         exp = wk.get("expected")
     r = pd.concat([px.pct_change(), mk.pct_change()], axis=1, keys=["s", "m"]).dropna().tail(252)
+    if len(r) < 30:
+        raise ValueError("此標的與加權指數的共同歷史資料不足 30 個交易日，暫時無法計算 Beta。")
     market_var = float(r["m"].var())
     if not np.isfinite(market_var) or market_var <= 0:
         raise ValueError("無法計算 Beta：大盤報酬資料不足或變異數為零。")
     beta = round(float(r["s"].cov(r["m"]) / market_var), 2)
     exp = wk.get("expected") if wk else None
-    return {"code": code, "symbol": sym, "last": round(float(px.iloc[-1]), 2), "asof": str(px.index[-1].date()),
+    ticker = yf.Ticker(sym)
+    try:
+        quote_type = (ticker.info or {}).get("quoteType", "")
+    except Exception:
+        quote_type = ""
+    asset_type = "ETF" if str(quote_type).upper() == "ETF" else "股票"
+    return {"code": code, "symbol": sym, "asset_type": asset_type,
+            "last": round(float(px.iloc[-1]), 2), "asof": str(px.index[-1].date()),
             "market_bucket": market_bucket, "market_prob": market_prob, "beta": beta,
             "beta_implied": round(beta * exp["avg"], 2) if exp and exp.get("avg") is not None else None,
             "stock_expected": stock_expected, "buckets": buckets,
             "mom20": round(float(px.iloc[-1] / px.iloc[-21] - 1) * 100, 1),
             "vol60": round(float(px.pct_change().tail(60).std() * np.sqrt(252)) * 100, 1),
-            "fundamentals": fundamentals(yf.Ticker(sym))}
+            "fundamentals": [] if asset_type == "ETF" else fundamentals(ticker)}
 
 if __name__ == "__main__":
     print(json.dumps(analyze(sys.argv[1]), ensure_ascii=False, indent=1))
