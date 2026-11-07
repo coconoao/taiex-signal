@@ -4,7 +4,7 @@ API 金鑰：使用者各自填在瀏覽器；分析時透過登入後的 /api/a
   伺服器排程若也要跑 AI 分析，可用環境變數提供營運者自己的金鑰（見 news.py）。
 對外部署（--host 0.0.0.0 或 READONLY=1）：自動唯讀，關閉手動更新與匯出到本機；排程照常執行。
 """
-import datetime as dt, json, os, subprocess, sys, threading, time, urllib.parse
+import datetime as dt, json, os, random, subprocess, sys, threading, time, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import base64, hmac, secrets, urllib.request, urllib.error
 from http.cookies import SimpleCookie
@@ -404,6 +404,14 @@ def trigger_cloud_run_refresh():
         raise
 
 
+class AIProviderError(RuntimeError):
+    """上游 AI HTTP 錯誤，保留狀態碼供 API 正確回傳。"""
+    def __init__(self, provider, status, message):
+        self.provider = provider
+        self.status = status
+        super().__init__(message)
+
+
 def call_ai_provider(provider, api_key, model, prompt):
     """將瀏覽器提供的金鑰即時轉送至供應商；不寫入檔案、環境變數或日誌。"""
     if not isinstance(api_key, str) or not api_key.strip() or len(api_key) > 4096:
@@ -429,17 +437,48 @@ def call_ai_provider(provider, api_key, model, prompt):
     else:
         raise ValueError("不支援的 AI 服務")
     data = json.dumps(body).encode("utf-8")
-    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", **headers})
-    try:
-        with urllib.request.urlopen(request, timeout=90) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:1200]
+    result = None
+    max_retries = 3 if provider == "Gemini" else 0
+    retryable_statuses = (408, 429, 500, 502, 503, 504)
+    for attempt in range(max_retries + 1):
+        request = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json", **headers}
+        )
         try:
-            detail = json.loads(detail).get("error", {}).get("message", detail)
-        except Exception:
-            pass
-        raise RuntimeError(f"{provider} API 回應 {e.code}: {detail}")
+            with urllib.request.urlopen(request, timeout=90) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:1200]
+            try:
+                detail = json.loads(detail).get("error", {}).get("message", detail)
+            except Exception:
+                pass
+            if provider == "Gemini" and e.code in retryable_statuses and attempt < max_retries:
+                # Google 建議對 429/5xx 等暫時性錯誤使用指數退避與 jitter。
+                delay = min(8.0, (2 ** attempt) + random.uniform(0.1, 0.5))
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                if retry_after:
+                    try:
+                        delay = min(8.0, max(delay, float(retry_after)))
+                    except (TypeError, ValueError):
+                        pass
+                print(
+                    f"[api-ai] provider=Gemini retry={attempt + 1}/{max_retries} "
+                    f"status={e.code} wait={delay:.1f}s",
+                    flush=True
+                )
+                time.sleep(delay)
+                continue
+            retry_note = (
+                f"（已自動重試 {max_retries} 次）"
+                if provider == "Gemini" and e.code in retryable_statuses else ""
+            )
+            raise AIProviderError(
+                provider, e.code, f"{provider} API 回應 {e.code}{retry_note}: {detail}"
+            )
+    if result is None:
+        raise RuntimeError(f"{provider} API 沒有回傳結果")
     if provider == "Claude":
         return "".join(x.get("text", "") for x in result.get("content", []) if x.get("type") == "text")
     if provider == "ChatGPT":
@@ -784,7 +823,11 @@ class H(SimpleHTTPRequestHandler):
                     f"status=error type={type(e).__name__}",
                     flush=True
                 )
-                return self.send_json({"error": str(e)}, 502)
+                status = (
+                    e.status if isinstance(e, AIProviderError) and
+                    (e.status == 429 or e.status >= 500) else 502
+                )
+                return self.send_json({"error": str(e)}, status)
         if self.path == "/api/run" and body.get("what") in ("pipeline", "news", "all"):
             if os.environ.get("K_SERVICE"):
                 if JOB.get("running"):
