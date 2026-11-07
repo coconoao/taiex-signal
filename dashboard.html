@@ -557,12 +557,16 @@ function loadTaiwanQuality() {
     $("taiwanQualityRows").innerHTML = Object.entries(labels).map(([key,label]) => {
       const v = (s.layers || {})[key] || {};
       const valid = Number(v.valid_rows || 0);
+      const expected = Number(v.expected_rows || 0);
+      const coverage = v.coverage_pct == null ? "未計算" : (v.coverage_pct + "%");
+      const missing = Number(v.missing_rows || 0);
       const date = v.latest_date || "無資料";
       const source = v.source || "來源未確認";
       const age = v.age_calendar_days;
       const status = !valid ? "無有效資料" : age == null ? "日期未確認" : age > 7 ? "資料可能過期" : "有可用資料";
       return '<tr><td>' + label + '</td><td>' + esc(source) + '</td><td>' + esc(date) +
-        '</td><td>' + valid.toLocaleString("zh-TW") + '</td><td>' + status + '</td></tr>';
+        '</td><td>' + valid.toLocaleString("zh-TW") + ' / ' + expected.toLocaleString("zh-TW") +
+        '（' + esc(coverage) + '）</td><td>' + status + ' · 缺漏 ' + missing.toLocaleString("zh-TW") + ' 日</td></tr>';
     }).join("");
   }).catch(() => {
     $("taiwanQualityMeta").textContent = "目前無法讀取台股資料品質狀態。";
