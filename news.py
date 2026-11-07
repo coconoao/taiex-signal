@@ -206,7 +206,7 @@ def save_policy_event_history(events, path="policy_events.jsonl", limit=1200):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\\n")
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
     os.replace(tmp, path)
     return rows
 
