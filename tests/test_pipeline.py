@@ -71,7 +71,8 @@ class LoadLiveTests(unittest.TestCase):
             )
             with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
                 with patch("pipeline.time.sleep"):
-                    result = load_live(cache_path=cache_path)
+                    with patch("pipeline._fetch_twse_taiex_recent", return_value={}):
+                        result = load_live(cache_path=cache_path)
             self.assertGreaterEqual(len(result), 500)
             self.assertEqual(len(fake_yfinance.download.call_args_list), 3)
             self.assertEqual(result["TAIEX"].dropna().iloc[-1],
@@ -91,7 +92,7 @@ class PendingDatesTests(unittest.TestCase):
         trading_days = pd.bdate_range(end=today, periods=100)
         saved = pd.DataFrame(index=trading_days[:40])
         result = _pending_dates(saved, today, 365, trading_days)
-        self.assertEqual(len(result), BACKFILL_DATES_PER_RUN + RECENT_DATES_PER_RUN)
+        self.assertEqual(len(result), 60)  # only 60 unsaved dates remain
         self.assertEqual(result[:RECENT_DATES_PER_RUN].tolist(), trading_days[-RECENT_DATES_PER_RUN:].tolist())
         self.assertEqual(result[RECENT_DATES_PER_RUN], trading_days[40])
         self.assertFalse(result.isin(saved.index).any())
