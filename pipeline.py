@@ -277,7 +277,7 @@ def fetch_chips(days_back=1460, path="chips.csv", trading_days=None):
             print("欄位名稱與預期不同，請檢查", d.date(), list(diff))
     # TWSE is primary. Fill only missing dates from FinMind market-wide data.
     try:
-        needed = [d for d in dates if d not in old.index and d not in rows]
+        needed = [d for d in dates if d not in rows]
         if needed:
             alt = _fetch_finmind_data("TaiwanStockTotalInstitutionalInvestors", min(needed), max(needed))
             if not alt.empty and {"date", "name", "buy", "sell"}.issubset(alt.columns):
@@ -383,7 +383,7 @@ def fetch_futures(days_back=1095, path="futures.csv", trading_days=None):
             _checkpoint_if_needed(old, rows, path)
     # TAIFEX is primary. Query FinMind once for the missing date range.
     try:
-        needed = [d for d in dates if d not in old.index and d not in rows]
+        needed = [d for d in dates if d not in rows]
         if needed:
             alt = _fetch_finmind_data("TaiwanFuturesInstitutionalInvestors", min(needed), max(needed), data_id="TX")
             required = {"date", "institutional_investors", "long_open_interest_balance_volume",
@@ -448,7 +448,7 @@ def fetch_margin(days_back=1460, path="margin.csv", trading_days=None):
             print("找不到融資／融券欄位，請檢查", d.date(), list(last))
     # TWSE is primary. FinMind separates TWD amounts from share counts.
     try:
-        needed = [d for d in dates if d not in old.index and d not in rows]
+        needed = [d for d in dates if d not in rows]
         if needed:
             alt = _fetch_finmind_data("TaiwanStockTotalMarginPurchaseShortSale", min(needed), max(needed))
             if not alt.empty and {"date", "name", "TodayBalance"}.issubset(alt.columns):
