@@ -233,7 +233,12 @@ def latest_estimate(X, y, horizon, factory, oos_probability, oos_actual):
     model = factory()
     model.fit(X.loc[idx], y.loc[idx].astype(int))
     raw = float(model.predict_proba(X.loc[[asof]])[:, 1][0])
-    matured_oos = oos_probability.index[oos_probability.index <= asof - pd.offsets.BDay(horizon)]
+    # Use the actual Taiwan trading-session calendar, not business-day offsets:
+    # holidays and market closures must not count as forecast sessions.
+    asof_pos = int(X.index.get_indexer([asof])[0])
+    mature_count = max(0, asof_pos - horizon + 1)
+    matured_calendar = X.index[:mature_count]
+    matured_oos = oos_probability.index.intersection(matured_calendar)
     matured_oos = matured_oos.intersection(oos_actual.index)
     matured_oos = matured_oos[oos_probability.loc[matured_oos].notna()]
     cal = _fit_calibrator(oos_probability.loc[matured_oos].to_numpy(),
