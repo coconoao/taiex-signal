@@ -1,0 +1,42 @@
+name: Model improvement research
+
+on:
+  push:
+    paths:
+      - ".github/workflows/model-improvement-research.yml"
+      - "model_improvement_research.py"
+      - "pipeline.py"
+      - "storage.py"
+      - "tests/test_model_improvement_research.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-improvement-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      TAIEX_STORAGE: supabase
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Restore canonical data
+        run: python storage.py restore
+      - name: Test research implementation
+        run: python -m unittest discover -s tests -p "test_model_improvement_research.py"
+      - name: Run isolated challenger experiments
+        run: python model_improvement_research.py
+      - name: Persist research artifact only
+        run: python storage.py save-model-improvement-research
