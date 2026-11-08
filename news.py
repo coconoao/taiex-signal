@@ -232,7 +232,7 @@ NEGATIVE_ZH = ("下跌", "走低", "回落", "下滑", "衰退", "減少", "惡�
 
 TAIWAN_MARKET_RE = re.compile(
     r"(?:台股|台灣股市|台灣股票|台灣加權指數|加權指數|TAIEX|"
-    r"Taiwan(?:ese)?\\s+(?:stocks?|shares?|equities)|Taiwan Weighted)",
+    r"Taiwan(?:ese)?\s+(?:stocks?|shares?|equities)|Taiwan Weighted)",
     re.I,
 )
 ANALYST_ALIASES = {
@@ -279,15 +279,15 @@ def explicit_analyst_view(item):
         return None
     if not TAIWAN_MARKET_RE.search(title):
         return None
-    if re.search(r"(?:not|no longer|isn't|is not)\\s+(?:bullish|bearish|overweight|underweight)|(?:不看多|不看空|並非看多|並非看空|不代表看多|不代表看空)", lower):
+    if re.search(r"(?:not|no longer|isn't|is not)\s+(?:bullish|bearish|overweight|underweight)|(?:不看多|不看空|並非看多|並非看空|不代表看多|不代表看空)", lower):
         return None
     positive = any(term in lower for term in ANALYST_POSITIVE)
     negative = any(term in lower for term in ANALYST_NEGATIVE)
     if positive == negative:
         return None
     attribution = re.search(
-        r"\\b(?:says?|said|sees?|expects?|forecast(?:s|ed)?|recommends?|rates?|"
-        r"bullish|bearish|overweight|underweight|upgrade[sd]?|downgrade[sd]?)\\b|"
+        r"\b(?:says?|said|sees?|expects?|forecast(?:s|ed)?|recommends?|rates?|"
+        r"bullish|bearish|overweight|underweight|upgrade[sd]?|downgrade[sd]?)\b|"
         r"(?:表示|認為|看好|看淡|看多|看空|建議|調升|調降)",
         lower,
     )
@@ -380,7 +380,7 @@ clip = lambda x: round(max(-1.0, min(1.0, float(x))), 2)
 
 def run(name, fn, p, analyst_headlines=None):
     try:
-        d = json.loads(re.search(r"\\{.*\\}", fn(p), re.S).group(0))
+        d = json.loads(re.search(r"\{.*\}", fn(p), re.S).group(0))
         return name, {"next_day": clip(d["next_day"]), "next_week": clip(d["next_week"]), "confidence": clip(abs(float(d.get("confidence", 0)))),
                       "drivers": d.get("drivers", [])[:4], "summary": str(d.get("summary", "")),
                       "analysts": validate_analyst_calls(d.get("analysts", []), analyst_headlines or [])}
