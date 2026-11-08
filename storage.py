@@ -141,7 +141,7 @@ if __name__ == "__main__":
         print("Saved news-enhanced model:", save_data(names=(NEWS_ENHANCED_MODEL_FILE,)))
     elif action == "save-multi-market-research":
         print("Saved multi-market research:", save_data(names=(MULTI_MARKET_RESEARCH_FILE,)))
-    elif action == "save-model-improvement-research|save-strategy-research|save-multi-horizon-model-research":
+    elif action == "save-model-improvement-research":
         print("Saved model improvement research:", save_data(names=(MODEL_IMPROVEMENT_RESEARCH_FILE,)))
     elif action == "save-strategy-research":
         print("Saved strategy research:", save_data(names=(STRATEGY_RESEARCH_FILE,)))
@@ -149,5 +149,5 @@ if __name__ == "__main__":
         print("Saved multi-horizon model research:", save_data(names=(MULTI_HORIZON_MODEL_RESEARCH_FILE,)))
     else:
         raise SystemExit(
-            "Usage: python storage.py restore|save|save-policy-archive|save-policy-research|save-gdelt-research|save-mediacloud-research|save-news-enhanced-model|save-multi-market-research|save-model-improvement-research"
+            "Usage: python storage.py restore|save|save-policy-archive|save-policy-research|save-gdelt-research|save-mediacloud-research|save-news-enhanced-model|save-multi-market-research|save-model-improvement-research|save-strategy-research|save-multi-horizon-model-research"
         )
