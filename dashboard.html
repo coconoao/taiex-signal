@@ -768,6 +768,7 @@ function renderMultiHorizonResearch(r) {
        const gate = exp.promotion_gate?.current_candidate_gate || {};
        const calibrated = v.status === "available"
          && v.calibration_status === "past_oos_calibrated"
+         && v.estimated_positive_return_probability_pct != null
          && Number.isFinite(Number(v.estimated_positive_return_probability_pct));
        const estimate = calibrated
          ? Number(v.estimated_positive_return_probability_pct).toFixed(1) + "%"
