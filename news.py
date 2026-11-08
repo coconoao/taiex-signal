@@ -356,7 +356,7 @@ def save_research_snapshot(hl):
             "source": str(h.get("source", ""))[:160],
             "published": str(h.get("published", ""))[:100],
             "link": str(h.get("link", ""))[:1000],
-        } for h in hl[:100]],
+        } for h in hl],
         "outcome": None,
     }
     records.append(snapshot)
