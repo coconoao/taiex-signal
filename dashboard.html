@@ -120,26 +120,11 @@ details[open]>summary{margin-bottom:12px}
       <div class="charttools" aria-label="歷史回測圖表操作"><button class="btn sm ghost" id="curveZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="curveZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="curvePan" type="button">平移</button><button class="btn sm ghost" id="curveZoom" type="button">框選縮放</button><button class="btn sm ghost" id="curveReset" type="button">重設</button><button class="btn sm ghost" id="curveRange1m" type="button">1 個月</button><button class="btn sm ghost" id="curveRange3m" type="button">3 個月</button><button class="btn sm ghost" id="curveRange6m" type="button">6 個月</button><button class="btn sm ghost" id="curveRangeYtd" type="button">今年</button><button class="btn sm ghost" id="curveRange1y" type="button">1 年</button><button class="btn sm ghost" id="curveRangeAll" type="button">全部</button></div><p class="note">可拖曳下方滑桿選日期；點選「框選縮放」後，在圖表上拖曳選取區域。此圖為歷史滾動樣本外模擬，非實際成交；績效曲線按完整交易日計算，模型無有效預測的日期沿用前次部位；方向與機率指標只計實際樣本外預測日。程式假設每次部位變動成本 0.2%，未必涵蓋所有交易摩擦。</p><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
-    <section hidden id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
-    <section hidden id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
-    <section id="multiHorizonModelResearch"><h2>中長期市場研究</h2>
-      <p class="note" id="multiHorizonMeta">正在更新研究摘要…</p>
-      <div id="multiHorizonLatest" class="mcs"><p class="note">研究資料載入中…</p></div>
-      <p class="note" id="multiHorizonModelNote">暫定實驗候選模型載入中…</p>
-    </section>
-    <section hidden id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
-      <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
-      <div id="modelImprovementSummary" class="mcs"></div><h3>測試模型最新資料日判讀</h3><div id="modelImprovementLive" class="mcs"><p class="note">等待最新研究結果…</p></div>
-      <div style="overflow-x:auto"><table><thead><tr><th>候選實驗</th><th>狀態</th><th>樣本外筆數</th></tr></thead><tbody id="modelImprovementRows"><tr><td colspan="3">載入中…</td></tr></tbody></table></div>
-      <p class="note" id="modelImprovementYearly"></p>
-      <p class="note">各候選模型依自身特徵完整度使用不同樣本日曆；日期區間不同的模型不可直接比較。即時判讀是在最新可用資料日重新訓練後產生的研究分類，不是逐秒盤中預測、未來機率或買賣指示。準確率與 Brier 等指標僅描述歷史樣本外表現。全特徵模型資料不足時會明確標示，不會降低門檻。</p>
-    </section>
-    <section hidden id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
-      <p class="note" id="newsEnhancedModelMeta">載入獨立模型資料中…</p>
-      <div id="newsEnhancedModelSignal"></div>
-      <div id="newsEnhancedModelMetrics"></div>
-      <p class="note" id="newsEnhancedModelNote">此模型結合原始模型當時的市場分數與新聞特徵；樣本不足或未通過時間外測試條件時，不產生方向分類。</p>
-    </section>
+    
+    
+    
+    
+    
     <section><h2>新聞綜合分析</h2>
       <p class="note" id="newsResearchMeta">整合最新新聞、歷史新聞與政策事件資料；載入中…</p>
       <p class="note" id="newsUnifiedMeta">正在合併新聞資料並去除重複標題…</p>
@@ -160,6 +145,34 @@ details[open]>summary{margin-bottom:12px}
       <div id="longChart" class="chartbox" role="img" aria-label="1、3、6 個月歷史正報酬比例點區間圖"></div>
       <div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>期間</th><th>不重疊樣本／逐日觀察</th><th>歷史正報酬比例（不重疊／逐日）</th><th>不重疊樣本 Wilson 95% 參考區間</th><th>平均報酬</th><th>中位數</th><th>歷史 10%～90%</th></tr></thead><tbody id="horizonRows"></tbody></table></div>
       <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。每格依序顯示「不重疊樣本／逐日重疊觀察」；正報酬比例亦依此順序。逐日觀察數較多，但相鄰期間高度重疊、彼此相關，不可視為同等數量的獨立樣本；Wilson 95% 參考區間只用不重疊樣本計算，但未校正時間序列相依性，因此不應視為精確的不確定性界線。歷史統計不代表未來發生機率。</p>
+    </section>
+
+    <section id="longModelResearch">
+      <h2>中長期模型研究</h2>
+      <p class="note">以下分別呈現台股不同持有期間模型、模型改良實驗、新聞增強模型，以及策略與其他市場研究。研究結果與正式隔日訊號分開，不會自動取代正式模型。</p>
+      <section id="multiHorizonModelResearch"><h2>中長期市場研究</h2>
+      <p class="note" id="multiHorizonMeta">正在更新研究摘要…</p>
+      <div id="multiHorizonLatest" class="mcs"><p class="note">研究資料載入中…</p></div>
+      <p class="note" id="multiHorizonModelNote">暫定實驗候選模型載入中…</p>
+    </section>
+      <section hidden id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
+      <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
+      <div id="modelImprovementSummary" class="mcs"></div><h3>測試模型最新資料日判讀</h3><div id="modelImprovementLive" class="mcs"><p class="note">等待最新研究結果…</p></div>
+      <div style="overflow-x:auto"><table><thead><tr><th>候選實驗</th><th>狀態</th><th>樣本外筆數</th></tr></thead><tbody id="modelImprovementRows"><tr><td colspan="3">載入中…</td></tr></tbody></table></div>
+      <p class="note" id="modelImprovementYearly"></p>
+      <p class="note">各候選模型依自身特徵完整度使用不同樣本日曆；日期區間不同的模型不可直接比較。即時判讀是在最新可用資料日重新訓練後產生的研究分類，不是逐秒盤中預測、未來機率或買賣指示。準確率與 Brier 等指標僅描述歷史樣本外表現。全特徵模型資料不足時會明確標示，不會降低門檻。</p>
+    </section>
+      <section hidden id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
+      <p class="note" id="newsEnhancedModelMeta">載入獨立模型資料中…</p>
+      <div id="newsEnhancedModelSignal"></div>
+      <div id="newsEnhancedModelMetrics"></div>
+      <p class="note" id="newsEnhancedModelNote">此模型結合原始模型當時的市場分數與新聞特徵；樣本不足或未通過時間外測試條件時，不產生方向分類。</p>
+    </section>
+    </section>
+    <section id="longStrategyResearch">
+      <h2>策略與跨市場研究</h2>
+      <section hidden id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
+      <section hidden id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
     </section>
   </div>
 
