@@ -4,10 +4,11 @@ on:
   push:
     paths:
       - "news_policy_research.py"
+      - "news_history_import.py"
       - "storage.py"
       - ".github/workflows/refresh-news-research.yml"
   schedule:
-    - cron: "40 1 * * 1-5"
+    - cron: "30 13 * * *"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +21,7 @@ concurrency:
 jobs:
   refresh-news:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 20
     env:
       TAIEX_STORAGE: supabase
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -30,10 +31,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Install analysis dependencies
+        run: pip install -r requirements.txt
       - name: Restore persisted market and news data
         run: python storage.py restore
       - name: Build official policy-news historical alignment
         run: python news_policy_research.py
+      - name: Refresh RSS news sources every calendar day
+        run: python news.py
       - name: Collect daily news snapshot
         run: python news_snapshot.py
       - name: Label completed TAIEX sessions and update research summary
@@ -42,3 +47,7 @@ jobs:
         run: python storage.py save
       - name: Persist official policy-news research
         run: python storage.py save-policy-research
+      - name: Refresh independent GDELT history and current holiday window
+        run: python news_history_import.py --days 30
+      - name: Persist independent GDELT research
+        run: python storage.py save-gdelt-research
