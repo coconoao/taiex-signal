@@ -772,7 +772,11 @@ function loadTaiwanQuality() {
       const v = (s.layers || {})[key] || {};
       const valid = Number(v.valid_rows || 0);
       const expected = Number(v.expected_rows || 0);
-      const coverage = v.coverage_pct == null ? "未計算" : (v.coverage_pct + "%");
+      const fullCoverage = v.full_history_coverage_pct ?? v.coverage_pct;
+      const coverage = fullCoverage == null ? "未計算" : (fullCoverage + "%");
+      const recentCoverage = v.recent_1y_coverage_pct == null ? "未計算" : (v.recent_1y_coverage_pct + "%");
+      const sourceCoverage = v.source_window_coverage_pct == null ? "" :
+        '｜來源近' + Number(v.source_window_years) + '年 ' + v.source_window_coverage_pct + '%';
       const missing = Number(v.missing_rows || 0);
       const date = v.latest_date || "無資料";
       const source = v.source || "來源未確認";
@@ -780,7 +784,8 @@ function loadTaiwanQuality() {
       const status = !valid ? "無有效資料" : age == null ? "日期未確認" : age > 7 ? "資料可能過期" : "有可用資料";
       return '<tr><td>' + label + '</td><td>' + esc(source) + '</td><td>' + esc(date) +
         '</td><td>' + valid.toLocaleString("zh-TW") + ' / ' + expected.toLocaleString("zh-TW") +
-        '（' + esc(coverage) + '）</td><td>' + status + ' · 缺漏 ' + missing.toLocaleString("zh-TW") + ' 日</td></tr>';
+        '（全期間 ' + esc(coverage) + '；近一年 ' + esc(recentCoverage) + esc(sourceCoverage) +
+        '）</td><td>' + status + ' · 缺漏 ' + missing.toLocaleString("zh-TW") + ' 日</td></tr>';
     }).join("");
   }).catch(() => {
     $("taiwanQualityMeta").textContent = "目前無法讀取台股資料品質狀態。";
