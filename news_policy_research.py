@@ -56,8 +56,12 @@ def main():
     closes = read_market()
     if len(closes) < 2:
         raise SystemExit("台股收盤資料不足，未產生研究結果。")
-    close_map = dict(closes)
-    next_close = {closes[i][0]: closes[i + 1] for i in range(len(closes) - 1)}
+    # For each publication date, use the first TAIEX session strictly AFTER
+    # that date as the baseline close. This avoids using a same-day close when
+    # the headline's publication time is unknown (and may be after market close).
+    session_days = [day for day, _ in closes]
+    session_closes = dict(closes)
+    session_index = {day: i for i, day in enumerate(session_days)}
 
     daily = {}
     for item in archive.get("items", []):
@@ -73,14 +77,19 @@ def main():
 
     rows = []
     for day, titles in sorted(daily.items()):
-        following = next_close.get(day)
-        start = close_map.get(day)
-        if start is None or following is None:
+        # bisect_right semantics: first session strictly later than publication date.
+        import bisect
+        baseline_i = bisect.bisect_right(session_days, day)
+        if baseline_i < 0 or baseline_i + 1 >= len(session_days):
             continue
-        next_day, end = following
+        baseline_day = session_days[baseline_i]
+        next_day = session_days[baseline_i + 1]
+        start = session_closes[baseline_day]
+        end = session_closes[next_day]
         rows.append({
             "date": day,
             "headline_count": len(titles),
+            "baseline_session_date": baseline_day,
             "next_session_date": next_day,
             "next_session_return_pct": round((end / start - 1) * 100, 4),
         })
@@ -116,7 +125,7 @@ def main():
         },
         "all_matched": stats(rows),
         "latest_matches": rows[-12:][::-1],
-        "method_note": "以官方索引發布日期聚合標題，配對該日加權指數收盤至下一交易日收盤的已觀察變化。未取得發布時刻，故僅為日期層級描述性對照；抽樣官方政策標題不代表完整新聞環境，不代表因果關係、預測能力或未來機率。",
+        "method_note": "以官方索引發布日期聚合標題，將每個發布日配對至嚴格晚於發布日的第一個台股交易日作為基準，再計算該基準交易日收盤至下一交易日收盤的變化。因未取得發布時刻，此保守規則避免使用可能早於新聞發布的當日收盤價；抽樣官方政策標題不代表完整新聞環境，不代表因果關係、預測能力或未來機率。",
         "model_training": False,
         "forecasting": False,
     }
