@@ -221,7 +221,7 @@ MARKET_RELEVANCE_TERMS = (
     "台股", "台灣股市", "台灣股票", "加權指數", "台積電", "半導體", "晶片", "晶圓",
     "出口", "關稅", "貿易", "央行", "利率", "通膨", "通胀", "匯率", "gdp",
     "經濟成長", "景氣", "供應鏈", "能源", "油價", "科技", "人工智慧", "投資",
-    "預算", "補助", "金融", "semiconductor", "chip", "tsmc", "export", "tariff",
+    "預算", "補助", "金融", "semiconductor", "chip", "tsmc", "taiwan stocks", "taiwan shares", "taiwan weighted", "taiex", "export", "tariff",
     "trade", "central bank", "interest rate", "inflation", "currency", "supply chain",
     "energy", "oil price", "manufacturing", "fiscal", "budget", "subsidy",
 )
