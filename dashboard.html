@@ -1102,9 +1102,17 @@ function renderStock(s, cached=false) {
       : "樣本不足／尚未校準";
     const accuracy = hold.direction_accuracy_pct == null
       ? "尚無足夠樣本" : Number(hold.direction_accuracy_pct).toFixed(1) + "%";
+    const ci = hold.accuracy_95pct_ci;
+    const interval = ci ? `（區塊自助法 95% CI：${ci.lower_95_pct}～${ci.upper_95_pct}%）` : "";
     const period = item.holdout_start && item.holdout_end
       ? esc(item.holdout_start) + "～" + esc(item.holdout_end) : "尚未形成";
-    return `<tr><td>${label}</td><td>${estimate}</td><td>${accuracy}</td><td>${period}</td></tr>`;
+    return `<tr><td>${label}</td><td>${estimate}</td><td>${accuracy} ${interval}</td><td>${period}</td></tr>`;
+  }).join("");
+  const annualRows = keys.flatMap(([key,label]) => {
+    const item = horizons[key] || {};
+    return Object.entries(item.annual_holdout_metrics || {}).map(([year, metric]) =>
+      `<tr><td>${label}</td><td>${esc(year)}</td><td>${metric.sample_count}</td><td>${metric.direction_accuracy_pct}%</td><td>${metric.brier}</td><td>${metric.brier_skill == null ? "—" : metric.brier_skill}</td></tr>`
+    );
   }).join("");
   const historicalRows = keys.map(([key,label]) => {
     const item = historical[key];
@@ -1120,6 +1128,9 @@ function renderStock(s, cached=false) {
       <h2 style="margin-top:16px">個股中長期模型研究</h2>
       <p class="note">目標是指定期間後的累積報酬是否為正，不是價格目標。機率僅在歷史樣本外預測足以校準時顯示；方向準確率來自未參與候選選擇的時間序列保留樣本。</p>
       <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>研究估計</th><th>樣本外方向準確率</th><th>保留測試期間</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <h3 style="margin-top:12px">逐年樣本外穩健性</h3>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>年份</th><th>樣本數</th><th>方向準確率</th><th>Brier</th><th>Brier Skill</th></tr></thead><tbody>${annualRows || '<tr><td colspan="6">尚無足夠的逐年樣本外資料</td></tr>'}</tbody></table></div>
+      <p class="note">95% 信賴區間採移動區塊自助法，考慮相鄰交易日標籤重疊造成的部分相關性；樣本不足時不顯示區間。逐年結果用來檢查模型是否只在少數年份有效。</p>
       <h2 style="margin-top:16px">歷史報酬參考（不是模型預測）</h2>
       <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>歷史樣本</th><th>正報酬比例</th><th>平均報酬</th><th>10%～90%區間</th></tr></thead><tbody>${historicalRows}</tbody></table></div>
       <p class="note">歷史報酬統計採重疊視窗，樣本彼此並非獨立；不得解讀為未來機率。模型以價格、成交量與大盤相對特徵進行時間序列驗證；歷史財報未具備完整公告時點資料，因此不納入模型訓練。</p>
