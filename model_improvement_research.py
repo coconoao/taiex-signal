@@ -91,7 +91,7 @@ def evaluate_predictions(prob, actual, baseline_prob):
     }
 
 
-def walk_forward_candidate(X, y, factory, step=STEP):
+def walk_forward_candidate(X, y, factory, step=STEP, train_window=None):
     valid = X.notna().all(axis=1) & y.notna()
     idx = X.index[valid]
     n = len(idx)
@@ -105,7 +105,8 @@ def walk_forward_candidate(X, y, factory, step=STEP):
     pred = pd.Series(np.nan, index=idx, dtype=float)
     baseline = pd.Series(np.nan, index=idx, dtype=float)
     for i in range(first_test, n, step):
-        train_idx = idx[:i]
+        train_start = max(0, i - int(train_window)) if train_window else 0
+        train_idx = idx[train_start:i]
         test_idx = idx[i:i + step]
         y_train = y.loc[train_idx].astype(int)
         if len(y_train) < 30 or y_train.nunique() < 2:
@@ -126,6 +127,7 @@ def walk_forward_candidate(X, y, factory, step=STEP):
         "sample_end": str(pred.index.max().date()),
         "refit_every_sessions": int(step),
         "training_minimum_target": int(MIN_TRAIN),
+        "training_window_sessions": int(train_window) if train_window else None,
         "yearly": {},
     })
     for year in sorted(set(pred.index.year)):
@@ -324,6 +326,37 @@ def run():
             str(paired_y.index.max().date()) if len(paired_y) else None
         )
         paired_experiments[paired_name] = paired_result
+
+    # Test whether a finite rolling training history adapts better than the
+    # expanding window. All variants use the same complete-case dates, labels,
+    # test folds and refit cadence; only the amount of training history differs.
+    rolling_specs = {
+        "all_features_rolling_252": (paired_sets["all_features"], specs["logistic_current_step5"], 252),
+        "all_features_rolling_504": (paired_sets["all_features"], specs["logistic_current_step5"], 504),
+        "market_only_rolling_252": (paired_sets["market_only"], specs["logistic_market_features_only"], 252),
+        "market_only_rolling_504": (paired_sets["market_only"], specs["logistic_market_features_only"], 504),
+    }
+    for rolling_name, (rolling_X, rolling_factory, window) in rolling_specs.items():
+        rolling_pred, _, rolling_result = walk_forward_candidate(
+            rolling_X, paired_y, rolling_factory, step=STEP, train_window=window
+        )
+        if rolling_pred is not None and incumbent_pred is not None:
+            common_pred = rolling_pred.index.intersection(incumbent_pred.index)
+            rolling_result["paired_uncertainty_vs_expanding_incumbent"] = paired_block_bootstrap(
+                rolling_pred.loc[common_pred],
+                incumbent_pred.loc[common_pred],
+                paired_y.loc[common_pred],
+            )
+        rolling_result["feature_count"] = int(rolling_X.shape[1])
+        rolling_result["sample_calendar"] = "identical_all_features_complete_case_calendar"
+        rolling_result["training_window_sessions"] = int(window)
+        rolling_result["comparison_start"] = (
+            str(paired_y.index.min().date()) if len(paired_y) else None
+        )
+        rolling_result["comparison_end"] = (
+            str(paired_y.index.max().date()) if len(paired_y) else None
+        )
+        paired_experiments[rolling_name] = rolling_result
 
     # Production-cadence reference uses the same full-feature sample calendar.
     _, _, production_result = walk_forward_candidate(
