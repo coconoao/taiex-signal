@@ -29,7 +29,7 @@ class ModelImprovementResearchTests(unittest.TestCase):
         pred, baseline, result = walk_forward_candidate(X, y, FixedClassifier, step=5)
         self.assertEqual(result["status"], "available")
         self.assertTrue((pred.index > dates[0]).all())
-        self.assertEqual(pred.index.min(), dates[80])
+        self.assertEqual(pred.index.min(), dates[100])
         self.assertTrue(pred.index.equals(baseline.index))
 
 
