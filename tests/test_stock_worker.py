@@ -29,6 +29,28 @@ class AnalyzeCodeTests(unittest.TestCase):
         self.assertIn("稍後重試", result["error"])
         self.assertNotIn("private provider detail", result["error"])
 
+    def test_redirect_diagnostic_logs_only_allowlisted_host_and_path(self):
+        error = MarketDataError(
+            "官方行情來源連線失敗：www.twse.com.tw "
+            "HTTPError(http=307)(redirect=www.twse.com.tw/new/path)"
+        )
+        with patch("builtins.print") as log:
+            result, status = self._run(error)
+        self.assertEqual(status, 503)
+        logged = " ".join(str(call) for call in log.call_args_list)
+        self.assertIn("redirect=www.twse.com.tw/new/path", logged)
+        self.assertNotIn("?", logged)
+
+    def test_redirect_diagnostic_rejects_untrusted_redirect_host(self):
+        error = MarketDataError(
+            "官方行情來源連線失敗：www.twse.com.tw "
+            "HTTPError(http=307)(redirect=evil.example/private)"
+        )
+        with patch("builtins.print") as log:
+            self._run(error)
+        logged = " ".join(str(call) for call in log.call_args_list)
+        self.assertNotIn("evil.example", logged)
+
     def test_analysis_value_error_returns_422(self):
         result, status = self._run(ValueError("歷史資料不足"))
         self.assertEqual(status, 422)
