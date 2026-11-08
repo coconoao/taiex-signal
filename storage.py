@@ -134,7 +134,7 @@ if __name__ == "__main__":
         print("Saved GDELT research files:", save_data(names=GDELT_RESEARCH_FILES))
     elif action == "save-mediacloud-research":
         print("Saved Media Cloud research files:", save_data(names=MEDIACLOUD_RESEARCH_FILES))
-    elif action == "save-news-enhanced-model|save-multi-market-research":
+    elif action == "save-news-enhanced-model":
         print("Saved news-enhanced model:", save_data(names=(NEWS_ENHANCED_MODEL_FILE,)))
     elif action == "save-multi-market-research":
         print("Saved multi-market research:", save_data(names=(MULTI_MARKET_RESEARCH_FILE,)))
