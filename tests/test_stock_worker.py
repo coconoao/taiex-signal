@@ -44,6 +44,18 @@ class AnalyzeCodeTests(unittest.TestCase):
         self.assertNotIn("secret", logged)
         self.assertNotIn("private detail", logged)
 
+    def test_structured_history_diagnostic_accepts_provider_shape_category(self):
+        error = MarketDataError(
+            "private detail",
+            diagnostic_code="history_fetch_failed:provider_invalid_json_shape",
+        )
+        with patch("builtins.print") as log:
+            result, status = self._run(error)
+        self.assertEqual(status, 503)
+        logged = " ".join(str(call) for call in log.call_args_list)
+        self.assertIn("history_fetch_failed:provider_invalid_json_shape", logged)
+        self.assertNotIn("private detail", logged)
+
     def test_structured_diagnostic_rejects_untrusted_text(self):
         error = MarketDataError(
             "private detail",
