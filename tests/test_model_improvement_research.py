@@ -2,10 +2,23 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from model_improvement_research import evaluate_predictions, walk_forward_candidate, current_research_judgment, prepare_market_frame
+from model_improvement_research import evaluate_predictions, walk_forward_candidate, current_research_judgment, prepare_market_frame, common_calendar_feature_sets
 
 
 class ModelImprovementResearchTests(unittest.TestCase):
+    def test_paired_comparison_uses_identical_calendar(self):
+        dates = pd.bdate_range("2020-01-01", periods=10)
+        X = pd.DataFrame({"market": np.arange(10, dtype=float),
+                          "chip": np.arange(10, dtype=float)}, index=dates)
+        X.loc[dates[4], "chip"] = np.nan
+        y = pd.Series(np.arange(10) % 2, index=dates, dtype=float)
+        valid = X.notna().all(axis=1) & y.notna()
+        paired_index = X.index[valid]
+        market_only = X.loc[paired_index, ["market"]]
+        all_features = X.loc[paired_index]
+        self.assertTrue(market_only.index.equals(all_features.index))
+        self.assertNotIn(dates[4], market_only.index)
+
     def test_metrics_compare_against_baseline(self):
         result = evaluate_predictions(
             [0.8, 0.2, 0.7, 0.3],
