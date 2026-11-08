@@ -169,8 +169,10 @@ def _fetch_months(fetcher, code: str, months):
                 collected.extend(future.result())
             except Exception as exc:
                 errors.append(str(exc))
-    if errors and not collected:
-        raise MarketDataError(errors[0])
+    if errors:
+        raise MarketDataError(
+            "官方歷史行情有月份下載失敗，為避免不完整資料進入模型，已停止分析：" + errors[0]
+        )
     collected.sort(key=lambda row: row["date"])
     deduped = {}
     for row in collected:
@@ -288,8 +290,12 @@ def load_taiex_history(years: int = 10):
                 records.extend(future.result())
             except Exception as exc:
                 errors.append(str(exc))
+    if errors:
+        raise MarketDataError(
+            "官方加權指數歷史資料有月份下載失敗，為避免基準資料不完整，已停止分析：" + errors[0]
+        )
     if not records:
-        raise MarketDataError(errors[0] if errors else "無法取得官方加權指數歷史資料")
+        raise MarketDataError("無法取得官方加權指數歷史資料")
     by_date = {}
     for day, close in records:
         by_date[day] = close
