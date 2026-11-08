@@ -28,7 +28,7 @@ class TestTaiwanMarketData(unittest.TestCase):
         with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
             with self.assertRaisesRegex(
                 tw_market_data.MarketDataError,
-                r"twse\\.com\\.tw HTTPError\\(http=403\\)",
+                r"twse\.com\.tw HTTPError\(http=403\)",
             ):
                 tw_market_data._request_json(
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
