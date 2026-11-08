@@ -104,20 +104,24 @@ jobs:
       - name: Verify official listed, OTC and TAIEX history adapters
         run: |
           python - <<'PY'
+          import pandas as pd
           import tw_market_data
 
           checks = [
-              ("TWSE listed 2330", lambda: tw_market_data.load_stock_history("2330", "TWSE", years=1)),
-              ("TPEx OTC 6488", lambda: tw_market_data.load_stock_history("6488", "TPEX", years=1)),
-              ("TWSE TAIEX", lambda: tw_market_data.load_taiex_history(years=2)),
+              ("TWSE listed 2330", lambda: tw_market_data.load_stock_history("2330", "TWSE", years=10)),
+              ("TPEx OTC 6488", lambda: tw_market_data.load_stock_history("6488", "TPEX", years=10)),
+              ("TWSE TAIEX", lambda: tw_market_data.load_taiex_history(years=10)),
           ]
           failures = []
           for name, fetch in checks:
               print(f"\\n=== {name} ===", flush=True)
               try:
                   frame = fetch()
-                  if len(frame) < 60:
-                      raise RuntimeError(f"only {len(frame)} observations")
+                  if len(frame) < 1800:
+                      raise RuntimeError(f"only {len(frame)} observations for requested 10-year history")
+                  earliest_acceptable = pd.Timestamp.today().normalize() - pd.DateOffset(years=9)
+                  if frame.index[0] > earliest_acceptable:
+                      raise RuntimeError(f"history starts too late: {frame.index[0]}")
                   print(
                       f"PASS: rows={len(frame)}, first={frame.index[0]}, "
                       f"last={frame.index[-1]}",
