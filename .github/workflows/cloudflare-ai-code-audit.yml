@@ -184,7 +184,9 @@ jobs:
               encoding="utf-8"
           )
           PY
-          read -r PROBE_HTTP PROBE_CURL < <(invoke_cloudflare cloudflare_probe.json cloudflare_probe_response.json 45)
+          probe_result="$(invoke_cloudflare cloudflare_probe.json cloudflare_probe_response.json 45)"
+          PROBE_HTTP="${probe_result%% *}"
+          PROBE_CURL="${probe_result#* }"
           if [[ ! "$PROBE_HTTP" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error::Cloudflare preflight failed (HTTP ${PROBE_HTTP:-000}, curl exit ${PROBE_CURL}). The full source bundle was not submitted."
             if [[ -s cloudflare_probe_response.json ]]; then
@@ -201,11 +203,13 @@ jobs:
           HTTP_CODE="000"
           CURL_STATUS=0
           for attempt in 1 2; do
-            read -r HTTP_CODE CURL_STATUS < <(invoke_cloudflare source/cloudflare_request.json cloudflare_response.json 180)
+            full_result="$(invoke_cloudflare source/cloudflare_request.json cloudflare_response.json 180)"
+            HTTP_CODE="${full_result%% *}"
+            CURL_STATUS="${full_result#* }"
             if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
               break
             fi
-            if [[ "$attempt" -eq 1 && ( "$HTTP_CODE" == "000" || "$HTTP_CODE" == "408" || "$HTTP_CODE" == "429" || "$HTTP_CODE" == "500" || "$HTTP_CODE" == "502" || "$HTTP_CODE" == "503" || "$HTTP_CODE" == "504" ) ]]; then
+            if [[ "$attempt" -eq 1 && ( "$HTTP_CODE" == "000" || "$HTTP_CODE" =~ ^(408|429|50[0-4])$ ) ]]; then
               echo "Cloudflare returned HTTP ${HTTP_CODE:-000} (curl exit ${CURL_STATUS}); retrying once after 10 seconds."
               sleep 10
               continue
