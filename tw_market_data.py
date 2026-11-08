@@ -60,14 +60,16 @@ def _request_json(url: str) -> dict:
     # request payloads. The adapter only calls fixed public exchange hosts.
     host = urllib.parse.urlparse(url).hostname or "unknown-host"
     reason = getattr(last_error, "reason", None)
-    if reason is not None:
+    # HTTPError is also a URLError and exposes its human-readable message as
+    # .reason. Prefer its numeric status code so logs distinguish 403/429/5xx.
+    if code is not None:
+        detail = f"{type(last_error).__name__}(http={code})"
+    elif reason is not None:
         reason_type = type(reason).__name__
         reason_errno = getattr(reason, "errno", None)
         detail = f"{type(last_error).__name__}/{reason_type}"
         if reason_errno is not None:
             detail += f"(errno={reason_errno})"
-    elif code is not None:
-        detail = f"{type(last_error).__name__}(http={code})"
     else:
         detail = type(last_error).__name__
     raise MarketDataError(f"官方行情來源連線失敗：{host} {detail}")
