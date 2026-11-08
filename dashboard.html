@@ -120,6 +120,7 @@ details[open]>summary{margin-bottom:12px}
       <div class="charttools" aria-label="歷史回測圖表操作"><button class="btn sm ghost" id="curveZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="curveZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="curvePan" type="button">平移</button><button class="btn sm ghost" id="curveZoom" type="button">框選縮放</button><button class="btn sm ghost" id="curveReset" type="button">重設</button><button class="btn sm ghost" id="curveRange1m" type="button">1 個月</button><button class="btn sm ghost" id="curveRange3m" type="button">3 個月</button><button class="btn sm ghost" id="curveRange6m" type="button">6 個月</button><button class="btn sm ghost" id="curveRangeYtd" type="button">今年</button><button class="btn sm ghost" id="curveRange1y" type="button">1 年</button><button class="btn sm ghost" id="curveRangeAll" type="button">全部</button></div><p class="note">可拖曳下方滑桿選日期；點選「框選縮放」後，在圖表上拖曳選取區域。此圖為歷史滾動樣本外模擬，非實際成交；績效曲線按完整交易日計算，模型無有效預測的日期沿用前次部位；方向與機率指標只計實際樣本外預測日。程式假設每次部位變動成本 0.2%，未必涵蓋所有交易摩擦。</p><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
+    <section id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI 與台灣加權指數對照。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
     <section id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
       <p class="note" id="newsEnhancedModelMeta">載入獨立模型資料中…</p>
       <div id="newsEnhancedModelSignal"></div>
@@ -643,7 +644,7 @@ function renderNews() {
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
   .catch(() => { $("err").hidden = false; $("meta").textContent = ""; });
 const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); }).catch(() => { $("horizonNote").textContent = "目前無法載入長線歷史統計。"; $("horizonRows").innerHTML = "<tr><td colspan=\"7\">資料暫時無法取得</td></tr>"; $("longChart").textContent = "資料暫時無法取得。"; });
-const loadNews = () => Promise.all([
+const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then(r => {\n  const names = {SP500:"美國 S&P 500",NASDAQ:"美國 Nasdaq Composite",NIKKEI225:"日本 Nikkei 225",KOSPI:"韓國 KOSPI",TAIEX:"台灣加權指數（對照）"};\n  const rows = Object.entries(r.markets || {}).map(([key,v]) => `<div class="mc"><b>${names[key] || key}</b><div class="big">${v.status === "available" ? v.direction_accuracy_pct + "%" : v.status === "insufficient" ? "資料累積中" : "暫不可用"}</div><p class="note">樣本外 ${v.sample_count || 0} 筆｜基準 ${v.baseline_direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}（基準 ${v.baseline_brier ?? "—"}）｜Log loss ${v.log_loss ?? "—"}</p><p class="note">${v.sample_start || "—"}～${v.sample_end || "—"}｜覆蓋率 ${v.signal_coverage_pct ?? "—"}%</p></div>`).join("");\n  $("multiMarketRows").innerHTML = rows || "<p class=\\"note\\">尚無研究結果。</p>";\n  $("multiMarketMeta").textContent = `更新時間 ${r.computed_at || "—"}｜資料來源 ${r.data_source || "—"}`;\n}).catch(() => { $("multiMarketMeta").textContent = "目前尚無其他市場研究結果，或資料來源暫時不可用。"; });\nconst loadNews = () => Promise.all([
   getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }),
   getJSON("news_research.json").then(r => { NEWS_RESEARCH = r; }).catch(() => { NEWS_RESEARCH = null; }),
   getJSON("news_gdelt_research.json").then(r => { GDELT_RESEARCH = r; }).catch(() => { GDELT_RESEARCH = null; }),
@@ -656,7 +657,7 @@ let lastSig = null, busy = false;
 function loadAll() {
   if (busy) return Promise.resolve();
   busy = true;
-  return Promise.all([loadDaily(), loadWeekly(), loadNews()]).then(() => {
+  return Promise.all([loadDaily(), loadWeekly(), loadMultiMarketResearch(), loadNews()]).then(() => {
     const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
     $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
   }).finally(() => { busy = false; });
