@@ -34,6 +34,67 @@ class TestTaiwanMarketData(unittest.TestCase):
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
                 )
 
+    def test_request_json_attaches_safe_http_diagnostic_code(self):
+        from urllib.error import HTTPError
+        error = HTTPError(
+            "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=SECRET",
+            403, "Forbidden", {}, None,
+        )
+        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data._request_json(
+                    "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=SECRET"
+                )
+        self.assertEqual(caught.exception.diagnostic_code, "twse_http_403")
+        self.assertNotIn("SECRET", caught.exception.diagnostic_code)
+
+    def test_fetch_months_preserves_provider_diagnostic_category(self):
+        def fail(*args):
+            raise tw_market_data.MarketDataError(
+                "private detail", diagnostic_code="provider_invalid_json_shape"
+            )
+
+        with self.assertRaises(tw_market_data.MarketDataError) as caught:
+            tw_market_data._fetch_months(fail, "2330", [dt.date(2026, 11, 1)])
+        self.assertEqual(
+            caught.exception.diagnostic_code,
+            "history_fetch_failed:provider_invalid_json_shape",
+        )
+        self.assertNotIn("2330", caught.exception.diagnostic_code)
+
+    def test_exchange_probe_preserves_safe_provider_failure_categories(self):
+        def twse_failure(*args):
+            raise tw_market_data.MarketDataError(
+                "private detail 2330", diagnostic_code="twse_http_403"
+            )
+
+        def tpex_failure(*args):
+            raise tw_market_data.MarketDataError(
+                "private detail 2330", diagnostic_code="tpex_network_errno_101"
+            )
+
+        months = [dt.date(2026, 9, 1), dt.date(2026, 10, 1), dt.date(2026, 11, 1)]
+        with (
+            patch.object(tw_market_data, "_twse_month", side_effect=twse_failure),
+            patch.object(tw_market_data, "_tpex_month", side_effect=tpex_failure),
+        ):
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data._identify_exchange("2330", None, months)
+        self.assertIn("twse_http_403", caught.exception.diagnostic_code)
+        self.assertIn("tpex_network_errno_101", caught.exception.diagnostic_code)
+        self.assertNotIn("2330", caught.exception.diagnostic_code)
+        self.assertNotIn("private detail", caught.exception.diagnostic_code)
+
+    def test_exchange_probe_without_provider_errors_is_no_recent_history(self):
+        months = [dt.date(2026, 11, 1)]
+        with (
+            patch.object(tw_market_data, "_twse_month", return_value=[]),
+            patch.object(tw_market_data, "_tpex_month", return_value=[]),
+        ):
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data._identify_exchange("2330", None, months)
+        self.assertEqual(caught.exception.diagnostic_code, "no_recent_history")
+
     def test_roc_date_converts_taiwan_calendar(self):
         self.assertEqual(
             tw_market_data._roc_date("115/11/06"), dt.date(2026, 11, 6)

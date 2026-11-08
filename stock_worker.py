@@ -12,6 +12,13 @@ from tw_market_data import MarketDataError
 
 TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
 MAX_BODY = 4096
+_SAFE_DIAGNOSTIC = re.compile(
+    r"(?:no_recent_history|provider_invalid_json_shape|provider_error|"
+    r"(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_invalid_json_shape|provider_error)|"
+    r"(?:exchange_probe_failed|history_fetch_failed):"
+    r"(?:(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_invalid_json_shape|provider_error)|provider_invalid_json_shape|provider_error)"
+    r"(?:,(?:(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_invalid_json_shape|provider_error)|provider_invalid_json_shape|provider_error)){0,11})"
+)
 
 
 def analyze_code(code):
@@ -20,15 +27,19 @@ def analyze_code(code):
         import stock
         return stock.analyze(code), 200
     except MarketDataError as exc:
-        # Extract only allowlisted exchange host + error class/errno. The
-        # broader exception may also contain a symbol or data-validation text.
-        match = re.search(
-            r"(?:www\.)?(?:twse\.com\.tw|tpex\.org\.tw) "
-            r"[A-Za-z]+(?:/[A-Za-z]+)?(?:\(errno=\d+\))?(?:\(http=\d+\))?"
-            r"(?:\(redirect=(?:www\.)?(?:twse\.com\.tw|tpex\.org\.tw)/[A-Za-z0-9_./-]*\))?",
-            str(exc),
-        )
-        detail = match.group(0) if match else "provider_or_data_validation_error"
+        # Prefer structured, allowlisted diagnostic categories. Fall back to
+        # parsing legacy messages only when no structured category is present.
+        diagnostic = getattr(exc, "diagnostic_code", None)
+        if isinstance(diagnostic, str) and _SAFE_DIAGNOSTIC.fullmatch(diagnostic):
+            detail = diagnostic
+        else:
+            match = re.search(
+                r"(?:www\.)?(?:twse\.com\.tw|tpex\.org\.tw) "
+                r"[A-Za-z]+(?:/[A-Za-z]+)?(?:\(errno=\d+\))?(?:\(http=\d+\))?"
+                r"(?:\(redirect=(?:www\.)?(?:twse\.com\.tw|tpex\.org\.tw)/[A-Za-z0-9_./-]*\))?",
+                str(exc),
+            )
+            detail = match.group(0) if match else "provider_or_data_validation_error"
         print("[stock-worker] official_market_data_unavailable: " + detail, flush=True)
         return {
             "error": "官方行情來源暫時無法連線或資料不足，請稍後重試"
