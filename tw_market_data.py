@@ -344,7 +344,8 @@ def load_yahoo_quote(code: str, exchange: str):
         quote_time = meta.get("regularMarketTime")
         if price is None or quote_time is None:
             raise MarketDataError("Yahoo Finance 缺少最新一般交易時段價格或時間")
-        quote_dt = dt.datetime.fromtimestamp(int(quote_time), tz=dt.timezone.utc)
+        taiwan_tz = dt.timezone(dt.timedelta(hours=8))
+        quote_dt = dt.datetime.fromtimestamp(int(quote_time), tz=dt.timezone.utc).astimezone(taiwan_tz)
         market_state = str(meta.get("marketState") or "UNKNOWN").upper()
         closed_states = {"CLOSED", "POST", "POSTPOST", "PRE", "PREPRE"}
         is_closed = market_state in closed_states
