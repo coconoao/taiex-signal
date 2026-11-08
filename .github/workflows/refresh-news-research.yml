@@ -26,6 +26,7 @@ jobs:
       TAIEX_STORAGE: supabase
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      MEDIACLOUD_API_KEY: ${{ secrets.MEDIACLOUD_API_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -51,3 +52,7 @@ jobs:
         run: python news_history_import.py --current-only --days 30
       - name: Persist independent GDELT research
         run: python storage.py save-gdelt-research
+      - name: Refresh independent Media Cloud news metadata
+        run: python news_mediacloud.py
+      - name: Persist independent Media Cloud research
+        run: python storage.py save-mediacloud-research
