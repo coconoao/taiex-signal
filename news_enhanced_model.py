@@ -48,7 +48,7 @@ def write_history(rows):
     tmp = HISTORY + ".tmp"
     with open(tmp, "w", encoding="utf-8") as stream:
         for row in rows[-1500:]:
-            stream.write(json.dumps(row, ensure_ascii=False) + "\\n")
+            stream.write(json.dumps(row, ensure_ascii=False) + "\n")
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(tmp, HISTORY)
@@ -101,8 +101,12 @@ def write_output(payload):
 
 def main():
     history = read_history()
+    signals = read_json(SIGNALS)
+    signal_asof = str(signals.get("asof") or "")
     training_x, training_y, training_dates, original_scores = [], [], [], []
     for row in history:
+        if str(row.get("asof") or "") == signal_asof:
+            continue
         outcome = row.get("outcome") or {}
         market_context = row.get("market_context") or {}
         features = row.get("features") or {}
@@ -119,8 +123,6 @@ def main():
         training_dates.append(str(row.get("asof", "")))
         original_scores.append(float(market_context["prob_up"]))
 
-    signals = read_json(SIGNALS)
-    signal_asof = str(signals.get("asof") or "")
     current_context = {}
     try:
         probability = float(signals.get("prob_up"))
