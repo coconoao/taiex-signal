@@ -1,0 +1,44 @@
+import sys
+import types
+import unittest
+from unittest.mock import Mock, patch
+
+import stock_worker
+from tw_market_data import MarketDataError
+
+
+class AnalyzeCodeTests(unittest.TestCase):
+    def _run(self, outcome):
+        fake_stock = types.ModuleType("stock")
+        if isinstance(outcome, BaseException):
+            fake_stock.analyze = Mock(side_effect=outcome)
+        else:
+            fake_stock.analyze = Mock(return_value=outcome)
+        with patch.dict(sys.modules, {"stock": fake_stock}):
+            return stock_worker.analyze_code("2330")
+
+    def test_success_returns_200(self):
+        payload = {"code": "2330", "name": "測試"}
+        result, status = self._run(payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(result, payload)
+
+    def test_official_market_data_error_returns_503(self):
+        result, status = self._run(MarketDataError("private provider detail"))
+        self.assertEqual(status, 503)
+        self.assertIn("稍後重試", result["error"])
+        self.assertNotIn("private provider detail", result["error"])
+
+    def test_analysis_value_error_returns_422(self):
+        result, status = self._run(ValueError("歷史資料不足"))
+        self.assertEqual(status, 422)
+        self.assertEqual(result["error"], "歷史資料不足")
+
+    def test_unexpected_error_returns_500_without_raw_detail(self):
+        result, status = self._run(RuntimeError("private internal detail"))
+        self.assertEqual(status, 500)
+        self.assertNotIn("private internal detail", result["error"])
+
+
+if __name__ == "__main__":
+    unittest.main()
