@@ -1,0 +1,138 @@
+name: Diagnostic - 2330 ten-year stock analysis
+
+on:
+  push:
+    branches:
+      - diagnostic/2330-ten-year-e2e
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stock-analysis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install worker dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Run full isolated 2330 analysis
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          import os
+          import pathlib
+          import sys
+          import tempfile
+          import time
+
+          repo_root = str(pathlib.Path.cwd())
+          sys.path.insert(0, repo_root)
+
+          # Match stock_worker.py: isolate the analysis from the dashboard's
+          # local signals.json and never read/write production storage.
+          temp_dir = tempfile.TemporaryDirectory(prefix="stock-worker-diagnostic-")
+          os.chdir(temp_dir.name)
+
+          import stock
+          import tw_market_data
+
+          def stage(name, operation):
+              started = time.perf_counter()
+              print(f"STAGE_START {name}", flush=True)
+              try:
+                  result = operation()
+              except Exception as exc:
+                  elapsed = round(time.perf_counter() - started, 2)
+                  print(
+                      f"STAGE_FAIL {name} elapsed_seconds={elapsed} "
+                      f"exception={type(exc).__name__} message={str(exc)[:700]}",
+                      flush=True,
+                  )
+                  raise
+              elapsed = round(time.perf_counter() - started, 2)
+              print(f"STAGE_PASS {name} elapsed_seconds={elapsed}", flush=True)
+              return result
+
+          stock_history = stage(
+              "TWSE_2330_ten_year_history",
+              lambda: tw_market_data.load_stock_history("2330", "TWSE", years=10),
+          )
+          print(
+              "STOCK_HISTORY "
+              + json.dumps({
+                  "rows": len(stock_history),
+                  "first_date": str(stock_history.index.min().date()),
+                  "last_date": str(stock_history.index.max().date()),
+                  "source": stock_history.attrs.get("source"),
+                  "price_basis": stock_history.attrs.get("price_basis"),
+              }, ensure_ascii=False),
+              flush=True,
+          )
+          if len(stock_history) < 1500:
+              raise SystemExit("FAIL: ten-year 2330 history has fewer than 1500 sessions")
+
+          market_history = stage(
+              "TAIEX_ten_year_history",
+              lambda: tw_market_data.load_taiex_history(years=10),
+          )
+          print(
+              "MARKET_HISTORY "
+              + json.dumps({
+                  "rows": len(market_history),
+                  "first_date": str(market_history.index.min().date()),
+                  "last_date": str(market_history.index.max().date()),
+              }, ensure_ascii=False),
+              flush=True,
+          )
+          if len(market_history) < 1500:
+              raise SystemExit("FAIL: ten-year TAIEX history has fewer than 1500 sessions")
+
+          result = stage("stock_analyze_2330_full_pipeline", lambda: stock.analyze("2330"))
+          required = ("beta", "historical_horizons", "long_term_model")
+          missing = [key for key in required if key not in result]
+          if missing:
+              raise SystemExit("FAIL: analysis response missing keys: " + ", ".join(missing))
+          horizons = result.get("historical_horizons") or {}
+          long_term = result.get("long_term_model") or {}
+          expected_horizons = ("1m", "3m", "6m")
+          absent_horizons = [key for key in expected_horizons if key not in horizons]
+          absent_research = [key for key in expected_horizons if key not in (long_term.get("horizons") or {})]
+          if absent_horizons or absent_research:
+              raise SystemExit(
+                  "FAIL: horizon outputs incomplete; historical="
+                  + repr(absent_horizons) + " research=" + repr(absent_research)
+              )
+          if not math.isfinite(float(result["beta"])):
+              raise SystemExit("FAIL: Beta is not finite")
+
+          summary = {
+              "code": result.get("code"),
+              "asof": result.get("asof"),
+              "history_sessions": result.get("history_sessions"),
+              "history_start": result.get("history_start"),
+              "beta_computed": True,
+              "historical_horizons_present": list(expected_horizons),
+              "research_horizons": {
+                  key: (long_term["horizons"][key] or {}).get("status")
+                  for key in expected_horizons
+              },
+          }
+          print("FULL_ANALYSIS_RESULT " + json.dumps(summary, ensure_ascii=False), flush=True)
+          print("DIAGNOSTIC_PASS: full isolated 2330 ten-year analysis completed.", flush=True)
+          temp_dir.cleanup()
+          PY
