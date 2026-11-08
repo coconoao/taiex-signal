@@ -1,5 +1,7 @@
 name: Model improvement research
 
+# Runs the same-calendar paired challenger comparison and persists research-only results.
+
 on:
   push:
     paths:
