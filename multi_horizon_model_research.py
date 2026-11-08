@@ -256,38 +256,70 @@ def run():
     latest = {}
     for horizon_name, horizon in HORIZONS.items():
         Xh, yh, fwd = pipeline.build(market, chips, margin, futures=futures, h=horizon)
+        market_cols = [col for col in Xh.columns
+                       if not col.startswith(("籌碼:", "信用:", "期貨:"))]
+        feature_sets = {
+            "market_only": Xh[market_cols],
+        }
+        for layer, prefix in [
+            ("market_plus_chips", "籌碼:"),
+            ("market_plus_margin", "信用:"),
+            ("market_plus_futures", "期貨:"),
+        ]:
+            extra = [col for col in Xh.columns if col.startswith(prefix)]
+            if extra:
+                feature_sets[layer] = Xh[market_cols + extra]
+        if len(Xh.columns) > len(market_cols):
+            feature_sets["all_features"] = Xh
+
         candidates_result = {}
-        candidate_results = {}
-        for name, factory in factories().items():
-            result = evaluate_candidate(Xh, yh, fwd, horizon, name, factory)
-            candidates_result[name] = result
-            candidate_results[name] = result
-        viable = {k: v for k, v in candidate_results.items()
-                  if v.get("status") == "evaluated"}
-        if not viable:
+        market_candidates = {}
+        model_factories = factories()
+        for feature_set_name, X_candidate in feature_sets.items():
+            candidate_factories = (model_factories if feature_set_name == "market_only"
+                                   else {"logistic": model_factories["logistic_baseline"]})
+            for model_name, factory in candidate_factories.items():
+                name = feature_set_name + "__" + model_name
+                result = evaluate_candidate(X_candidate, yh, fwd, horizon, name, factory)
+                result["feature_set"] = feature_set_name
+                result["feature_count"] = int(X_candidate.shape[1])
+                result["available_complete_samples"] = int(
+                    (X_candidate.notna().all(axis=1) & yh.notna()).sum()
+                )
+                candidates_result[name] = result
+                if feature_set_name == "market_only":
+                    market_candidates[name] = result
+
+        viable_market = {k: v for k, v in market_candidates.items()
+                         if v.get("status") == "evaluated"}
+        if not viable_market:
             experiments[horizon_name] = {
                 "status": "insufficient", "horizon_sessions": horizon,
                 "candidates": candidates_result, "selected_candidate": None,
             }
-            latest[horizon_name] = {"status": "insufficient", "note": "候選模型樣本不足。"}
+            latest[horizon_name] = {"status": "insufficient", "note": "市場特徵完整樣本不足，尚不能選出候選模型。"}
             continue
+
+        # Select only within the identical market-only calendar. Layer-specific
+        # results are reported separately and are never ranked against a
+        # different complete-case calendar.
         selected_name = min(
-            viable,
-            key=lambda k: viable[k]["development"]["brier"]
+            viable_market,
+            key=lambda k: viable_market[k]["development"]["brier"]
         )
-        selected = viable[selected_name]
-        # Reconstruct selected candidate's full walk-forward OOS series for
-        # current calibration, still only using matured historical outcomes.
-        wf = walk_forward(Xh, yh, horizon, factories()[selected_name])
+        selected = viable_market[selected_name]
+        selected_factory_name = selected_name.split("__", 1)[1]
+        wf = walk_forward(Xh[market_cols], yh, horizon, model_factories[selected_factory_name])
         current = latest_estimate(
-            Xh, yh, horizon, factories()[selected_name],
+            Xh[market_cols], yh, horizon, model_factories[selected_factory_name],
             wf["probability"], wf["actual"]
         ) if wf else {"status": "insufficient"}
         experiments[horizon_name] = {
             "status": "evaluated",
             "horizon_sessions": horizon,
             "selected_candidate": selected_name,
-            "selection_basis": "development Brier only; final chronological holdout not used for candidate selection",
+            "selection_basis": "market-only candidates selected on development Brier; final chronological holdout not used for candidate selection",
+            "calendar_warning": "Layer-specific models use different complete-case calendars and are not directly ranked against market-only models.",
             "selected_candidate_results": selected,
             "candidates": candidates_result,
             "promotion_gate": {
