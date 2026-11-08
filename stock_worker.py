@@ -23,8 +23,8 @@ def analyze_code(code):
         # Extract only allowlisted exchange host + error class/errno. The
         # broader exception may also contain a symbol or data-validation text.
         match = re.search(
-            r"(?:www\\.)?(?:twse\\.com\\.tw|tpex\\.org\\.tw) "
-            r"[A-Za-z]+(?:/[A-Za-z]+)?(?:\\(errno=\\d+\\))?(?:\\(http=\\d+\\))?",
+            r"(?:www\.)?(?:twse\.com\.tw|tpex\.org\.tw) "
+            r"[A-Za-z]+(?:/[A-Za-z]+)?(?:\(errno=\\d+\))?(?:\(http=\\d+\))?",
             str(exc),
         )
         detail = match.group(0) if match else "provider_or_data_validation_error"
