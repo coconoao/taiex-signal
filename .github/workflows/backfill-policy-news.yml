@@ -2,6 +2,8 @@ name: Backfill official historical policy news
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "news_policy_archive_backfill.py"
       - "storage.py"
@@ -18,6 +20,7 @@ concurrency:
 
 jobs:
   backfill:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
