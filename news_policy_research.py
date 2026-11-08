@@ -3,6 +3,7 @@
 This is not an ML training or forecasting job. It pairs publication dates with the
 following observed TAIEX session close-to-close return, without inferring causality.
 """
+import bisect
 import csv
 import datetime as dt
 import json
@@ -78,7 +79,6 @@ def main():
     rows = []
     for day, titles in sorted(daily.items()):
         # bisect_right semantics: first session strictly later than publication date.
-        import bisect
         baseline_i = bisect.bisect_right(session_days, day)
         if baseline_i < 0 or baseline_i + 1 >= len(session_days):
             continue
