@@ -262,7 +262,8 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", 
 const pct = v => (v * 100).toFixed(1) + "%", sc = v => (v > 0 ? "+" : "") + v.toFixed(2);
 const tone = v => v > 0.1 ? "var(--up)" : v < -0.1 ? "var(--down)" : "var(--hold)";
 const SNAP = window.__SNAPSHOT__ || null, seen = {};
-const FETCH_TIMEOUT_MS = 12000;
+// Render 免費執行個體在同時傳送多份研究資料時可能較慢；避免 12 秒過早取消主要行情請求。
+const FETCH_TIMEOUT_MS = 45000;
 function fetchTimed(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
