@@ -472,8 +472,12 @@ function renderNewsResearch(r) {
 function renderGdeltResearch(r) {
   const meta = $("gdeltResearchMeta"), box = $("gdeltResearchIndicator");
   if (!r || !(r.current && r.current.features) && !(r.latest && r.latest.features)) {
-    meta.textContent = "尚未取得 GDELT 新聞資料。";
-    box.textContent = "目前沒有可用的 GDELT 新聞快照。";
+    meta.textContent = r && r.current_error
+      ? "GDELT DOC 2.0 更新受限｜最近嘗試 " + (r.current_attempted_at || "—") + "｜" + r.current_error
+      : "尚未取得 GDELT 新聞資料。";
+    box.textContent = r && r.current_error
+      ? "目前沒有成功取得的 GDELT 新聞快照；系統保留既有資料，待來源恢復後再更新。"
+      : "目前沒有可用的 GDELT 新聞快照。";
     return;
   }
   const active = r.current && r.current.features ? r.current : r.latest;
