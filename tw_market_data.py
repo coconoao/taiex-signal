@@ -31,7 +31,7 @@ _HEADERS = {
 }
 _CACHE_LOCK = threading.Lock()
 _STOCK_CACHE = {}
-_INDEX_CACHE = None
+_INDEX_CACHE = {}
 _CACHE_TTL_SECONDS = 4 * 60 * 60
 
 
@@ -281,8 +281,9 @@ def load_taiex_history(years: int = 10):
     global _INDEX_CACHE
     now = time.time()
     with _CACHE_LOCK:
-        if _INDEX_CACHE and now - _INDEX_CACHE[0] < _CACHE_TTL_SECONDS:
-            return _INDEX_CACHE[1].copy()
+        cached = _INDEX_CACHE.get(years)
+        if cached and now - cached[0] < _CACHE_TTL_SECONDS:
+            return cached[1].copy()
 
     months = _month_starts(years)
     records = []
@@ -312,6 +313,6 @@ def load_taiex_history(years: int = 10):
     if len(series) < 252:
         raise MarketDataError("官方加權指數歷史資料不足 252 個交易日")
     with _CACHE_LOCK:
-        _INDEX_CACHE = (now, series.copy())
+        _INDEX_CACHE[years] = (now, series.copy())
     return series
 
