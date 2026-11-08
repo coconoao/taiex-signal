@@ -540,7 +540,28 @@ def fetch_chips(days_back=3650, path="chips.csv", trading_days=None):
     dates = _pending_dates(old, today, days_back, trading_days, required_columns=("foreign_net", "trust_net"))
     rows = {}
 
+    # FinMind first for historical gaps; TWSE remains the official fallback.
+    try:
+        if len(dates):
+            alt = _fetch_finmind_data_for_dates("TaiwanStockTotalInstitutionalInvestors", dates)
+            if not alt.empty and {"date", "name", "buy", "sell"}.issubset(alt.columns):
+                alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
+                alt["net"] = pd.to_numeric(alt["buy"], errors="coerce") - pd.to_numeric(alt["sell"], errors="coerce")
+                for date, group in alt.dropna(subset=["date", "net"]).groupby("date"):
+                    if date not in dates:
+                        continue
+                    by_name = group.groupby("name")["net"].sum()
+                    foreign = float(by_name.get("Foreign_Investor", 0)) + float(by_name.get("Foreign_Dealer_Self", 0))
+                    trust = by_name.get("Investment_Trust")
+                    if trust is not None:
+                        rows[date] = {"foreign_net": foreign, "trust_net": float(trust)}
+                print(f"FinMind 三大法人歷史資料先行補入 {len(rows)} 個日期", flush=True)
+    except Exception as exc:
+        print(f"FinMind 三大法人主備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
+
     for d in dates:
+        if d in rows:
+            continue
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -629,74 +650,102 @@ def _fetch_taifex_openapi_latest():
 
 
 def fetch_futures(days_back=3650, path="futures.csv", trading_days=None):
-    """期交所三大法人「臺股期貨」外資未平倉淨口數，增量寫入 futures.csv（date, foreign_oi_net）。官方僅提供近三年。"""
+    """臺指期外資未平倉淨口數；FinMind 自 2018-06-05 起優先回補，TAIFEX 官方資料作近期備援。"""
     from io import StringIO
     old = pd.read_csv(path, index_col=0, parse_dates=True) if os.path.exists(path) else pd.DataFrame()
     today = pd.Timestamp.today().normalize()
-    dates = _pending_dates(old, today, days_back, trading_days, required_columns=("foreign_oi_net",))
+    source_start = pd.Timestamp("2018-06-05")
+    if trading_days is None:
+        eligible_days = pd.bdate_range(today - pd.Timedelta(days=days_back), today)
+    else:
+        eligible_days = pd.DatetimeIndex(trading_days).tz_localize(None).normalize().unique().sort_values()
+    eligible_days = eligible_days[eligible_days >= source_start]
+    dates = _pending_dates(old, today, days_back, eligible_days,
+                           required_columns=("foreign_oi_net",))
     rows = {}
 
-    # The official OpenAPI serves the latest published snapshot. Use it only
-    # when its own Date exactly matches a pending trading day; never backfill
-    # historical dates with a current snapshot.
+    # FinMind has a documented TX institutional futures history from 2018-06-05.
+    # Query it first so dates outside TAIFEX's ordinary three-year web window
+    # are not repeatedly sent to the exchange's rate-limited historical form.
     try:
-        latest_date, latest_net = _fetch_taifex_openapi_latest()
-        if latest_date in dates:
-            old = _merge_and_save(old, {latest_date: {"foreign_oi_net": latest_net}}, path)
-            dates = dates[dates != latest_date]
-            print(f"期交所 OpenAPI 已保存最新交易日：{latest_date.date()}", flush=True)
-    except Exception as exc:
-        print(f"期交所 OpenAPI 備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
-    for d in dates:
-        time.sleep(0.7)
-        body = urllib.parse.urlencode({"queryType": "1", "goDay": "", "doQuery": "1", "dateaddcnt": "",
-                                       "queryDate": f"{d:%Y/%m/%d}", "commodityId": ""}).encode()
-        try:
-            req = urllib.request.Request("https://www.taifex.com.tw/cht/3/futContractsDate", body, {"User-Agent": "Mozilla/5.0"})
-            html = _read_with_backoff(req, timeout=20).decode("utf-8", "ignore")
-            time.sleep(0.7)  # Respect TAIFEX request rate limits.
-            if "臺股期貨" not in html: continue  # 休市日或尚未公布
-            net = _tx_foreign_oi_net(pd.read_html(StringIO(html)))
-        except urllib.error.HTTPError as e:
-            print(f"期交所 {d.date()} HTTP {e.code}：略過本次剩餘回補，保留下次執行", flush=True)
-            if e.code == 429 or e.code >= 500:
-                break
-            time.sleep(1); continue
-        except (TimeoutError, OSError, urllib.error.URLError) as e:
-            print(f"期交所 {d.date()} 連線持續失敗：{type(e).__name__}；停止本次回補，保留已取得資料", flush=True)
-            break
-        except Exception as e:
-            print(f"期交所 {d.date()} 下載／解析失敗：{type(e).__name__}: {e}", flush=True)
-            time.sleep(1); continue
-        if net is None:
-            print("解析不到臺股期貨外資列，請檢查", d.date())
-        else:
-            rows[d] = {"foreign_oi_net": net}
-            _checkpoint_if_needed(old, rows, path)
-    # TAIFEX is primary. Query FinMind once for the missing date range.
-    try:
-        needed = [d for d in dates if d not in rows]
-        if needed:
-            alt = _fetch_finmind_data_for_dates("TaiwanFuturesInstitutionalInvestors", needed, data_id="TX")
-            required = {"date", "institutional_investors", "long_open_interest_balance_volume",
+        if len(dates):
+            alt = _fetch_finmind_data_for_dates(
+                "TaiwanFuturesInstitutionalInvestors", dates, data_id="TX"
+            )
+            required = {"date", "institutional_investors",
+                        "long_open_interest_balance_volume",
                         "short_open_interest_balance_volume"}
             if not alt.empty and required.issubset(alt.columns):
                 alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
-                for col in ("long_open_interest_balance_volume", "short_open_interest_balance_volume"):
+                for col in ("long_open_interest_balance_volume",
+                            "short_open_interest_balance_volume"):
                     alt[col] = pd.to_numeric(alt[col], errors="coerce")
-                foreign = alt[alt["institutional_investors"].astype(str).isin(["Foreign_Investor", "外資", "外資及陸資"])]
-                foreign = foreign.dropna(subset=["date", "long_open_interest_balance_volume",
-                                                 "short_open_interest_balance_volume"])
-                foreign = foreign.assign(net=foreign["long_open_interest_balance_volume"] -
-                                         foreign["short_open_interest_balance_volume"])
+                foreign = alt[
+                    alt["institutional_investors"].astype(str).isin(
+                        ["Foreign_Investor", "外資", "外資及陸資"]
+                    )
+                ].dropna(subset=[
+                    "date", "long_open_interest_balance_volume",
+                    "short_open_interest_balance_volume"
+                ])
+                foreign = foreign.assign(
+                    net=foreign["long_open_interest_balance_volume"] -
+                        foreign["short_open_interest_balance_volume"]
+                )
                 for date, group in foreign.groupby("date"):
-                    if date in needed:
+                    if date in dates:
                         rows[date] = {"foreign_oi_net": float(group["net"].sum())}
-                print(f"FinMind 期貨備援補入 {sum(d in rows for d in needed)} 個日期", flush=True)
+                print(f"FinMind 臺指期歷史資料先行補入 {len(rows)} 個日期", flush=True)
     except Exception as exc:
-        print(f"FinMind 期貨備援暫不可用：{type(exc).__name__}", flush=True)
+        print(f"FinMind 臺指期歷史資料暫不可用：{type(exc).__name__}: {exc}", flush=True)
+
+    # TAIFEX's public historical query is used only for recent dates.
+    recent_cutoff = today - pd.DateOffset(years=3)
+    try:
+        latest_date, latest_net = _fetch_taifex_openapi_latest()
+        if latest_date in dates and latest_date not in rows:
+            rows[latest_date] = {"foreign_oi_net": latest_net}
+            print(f"期交所 OpenAPI 已取得最新交易日：{latest_date.date()}", flush=True)
+    except Exception as exc:
+        print(f"期交所 OpenAPI 備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
+
+    for d in dates:
+        if d in rows or d < recent_cutoff:
+            continue
+        time.sleep(0.7)
+        body = urllib.parse.urlencode({
+            "queryType": "1", "goDay": "", "doQuery": "1",
+            "dateaddcnt": "", "queryDate": f"{d:%Y/%m/%d}",
+            "commodityId": ""
+        }).encode()
+        try:
+            req = urllib.request.Request(
+                "https://www.taifex.com.tw/cht/3/futContractsDate",
+                body, {"User-Agent": "Mozilla/5.0"}
+            )
+            html = _read_with_backoff(req, timeout=20).decode("utf-8", "ignore")
+            time.sleep(0.7)
+            if "臺股期貨" not in html:
+                continue
+            net = _tx_foreign_oi_net(pd.read_html(StringIO(html)))
+        except urllib.error.HTTPError as exc:
+            print(f"期交所 {d.date()} HTTP {exc.code}：停止本次剩餘回補，保留已取得資料", flush=True)
+            if exc.code == 429 or exc.code >= 500:
+                break
+            time.sleep(1)
+            continue
+        except (TimeoutError, OSError, urllib.error.URLError) as exc:
+            print(f"期交所 {d.date()} 連線失敗：{type(exc).__name__}；停止本次回補", flush=True)
+            break
+        except Exception as exc:
+            print(f"期交所 {d.date()} 解析失敗：{type(exc).__name__}: {exc}", flush=True)
+            time.sleep(1)
+            continue
+        if net is not None:
+            rows[d] = {"foreign_oi_net": net}
+
     if not rows and not len(old):
-        print("期貨：本次沒有取得資料，將在下次執行重試")
+        print("期貨：本次沒有取得資料，將在下次執行重試", flush=True)
     return _merge_and_save(old, rows, path)
 
 def demo_futures(df, seed=9):  # 合成期貨淨未平倉，僅供示範
@@ -710,7 +759,31 @@ def fetch_margin(days_back=3650, path="margin.csv", trading_days=None):
     today = pd.Timestamp.today().normalize()
     dates = _pending_dates(old, today, days_back, trading_days, required_columns=("margin_bal", "margin_units", "short_units"))
     rows = {}
+
+    # FinMind first for historical gaps; TWSE remains the official fallback.
+    try:
+        if len(dates):
+            alt = _fetch_finmind_data_for_dates("TaiwanStockTotalMarginPurchaseShortSale", dates)
+            if not alt.empty and {"date", "name", "TodayBalance"}.issubset(alt.columns):
+                alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
+                alt["TodayBalance"] = pd.to_numeric(alt["TodayBalance"], errors="coerce")
+                for date, group in alt.dropna(subset=["date", "TodayBalance"]).groupby("date"):
+                    if date not in dates:
+                        continue
+                    balances = group.groupby("name")["TodayBalance"].last()
+                    money, margin_units, short_units = (balances.get("MarginPurchaseMoney"),
+                                                        balances.get("MarginPurchase"),
+                                                        balances.get("ShortSale"))
+                    if all(v is not None and pd.notna(v) for v in (money, margin_units, short_units)):
+                        rows[date] = {"margin_bal": float(money), "margin_units": float(margin_units),
+                                      "short_units": float(short_units)}
+                print(f"FinMind 融資融券歷史資料先行補入 {len(rows)} 個日期", flush=True)
+    except Exception as exc:
+        print(f"FinMind 融資融券主備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
+
     for d in dates:
+        if d in rows:
+            continue
         url = f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={d:%Y%m%d}&selectType=MS&response=json"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -1104,7 +1177,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
         "margin": coverage(margin, ("margin_bal", "margin_units", "short_units"),
                            "TWSE 官方資料（缺漏日期由 FinMind 補入）"),
         "futures": coverage(futures, ("foreign_oi_net",),
-                            "TAIFEX 官方資料（缺漏日期由 FinMind 補入）", source_window_years=3)
+                            "TAIFEX 官方資料 + FinMind（FinMind 臺指期自 2018-06-05 起）", source_window_years=8)
     }
     payload = {
         "updated_at": now.isoformat(),
