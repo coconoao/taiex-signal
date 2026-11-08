@@ -86,7 +86,8 @@ class PendingDatesTests(unittest.TestCase):
         result = _pending_dates(pd.DataFrame(), today, 500, trading_days)
         self.assertEqual(len(result), BACKFILL_DATES_PER_RUN + RECENT_DATES_PER_RUN)
         self.assertEqual(result[:RECENT_DATES_PER_RUN].tolist(), trading_days[-RECENT_DATES_PER_RUN:].tolist())
-        self.assertEqual(result[RECENT_DATES_PER_RUN:].tolist(), trading_days[:BACKFILL_DATES_PER_RUN].tolist())
+        expected_backfill = trading_days[-(BACKFILL_DATES_PER_RUN + RECENT_DATES_PER_RUN):-RECENT_DATES_PER_RUN]
+        self.assertEqual(result[RECENT_DATES_PER_RUN:].tolist(), expected_backfill.tolist())
 
     def test_excludes_dates_already_saved_and_fills_oldest_gaps_next(self):
         today = pd.Timestamp("2026-11-06")
