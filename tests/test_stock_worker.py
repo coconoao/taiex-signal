@@ -100,5 +100,65 @@ class AnalyzeCodeTests(unittest.TestCase):
         self.assertNotIn("private internal detail", result["error"])
 
 
+class SafeDiagnosticAllowlistTests(unittest.TestCase):
+    def test_accepts_all_documented_single_categories(self):
+        accepted = [
+            "no_recent_history",
+            "provider_invalid_json_shape",
+            "provider_error",
+            "twse_http_403",
+            "tpex_http_503",
+            "twse_network_errno_101",
+            "tpex_network_errno_-1",
+            "twse_timeout",
+            "tpex_invalid_json",
+            "twse_request_error",
+            "tpex_provider_status",
+            "twse_provider_invalid_json_shape",
+            "tpex_provider_error",
+        ]
+        for diagnostic in accepted:
+            with self.subTest(diagnostic=diagnostic):
+                self.assertIsNotNone(stock_worker._SAFE_DIAGNOSTIC.fullmatch(diagnostic))
+
+    def test_accepts_bounded_aggregated_categories(self):
+        accepted = [
+            "history_fetch_failed:twse_http_403",
+            "history_fetch_failed:provider_invalid_json_shape",
+            "exchange_probe_failed:twse_http_403,tpex_network_errno_101",
+            "exchange_probe_failed:tpex_provider_error,twse_timeout",
+        ]
+        for diagnostic in accepted:
+            with self.subTest(diagnostic=diagnostic):
+                self.assertIsNotNone(stock_worker._SAFE_DIAGNOSTIC.fullmatch(diagnostic))
+
+    def test_rejects_truncated_or_unbounded_aggregates(self):
+        rejected = [
+            "history_fetch_failed:twse_http_",
+            "exchange_probe_failed:twse_http_403,",
+            "exchange_probe_failed:" + ",".join(["twse_http_403"] * 13),
+            "history_fetch_failed:" + "a" * 160,
+            "twse_http_403?symbol=2330",
+            "twse_http_403 token=secret",
+        ]
+        for diagnostic in rejected:
+            with self.subTest(diagnostic=diagnostic):
+                self.assertIsNone(stock_worker._SAFE_DIAGNOSTIC.fullmatch(diagnostic))
+
+    def test_long_untrusted_diagnostic_falls_back_without_logging_payload(self):
+        secret = "secret_symbol_2330"
+        error = MarketDataError(
+            "private detail " + secret,
+            diagnostic_code="history_fetch_failed:" + ("a" * 180) + secret,
+        )
+        with patch("builtins.print") as log:
+            result, status = AnalyzeCodeTests()._run(error)
+        self.assertEqual(status, 503)
+        logged = " ".join(str(call) for call in log.call_args_list)
+        self.assertIn("provider_or_data_validation_error", logged)
+        self.assertNotIn(secret, logged)
+        self.assertNotIn("private detail", logged)
+
+
 if __name__ == "__main__":
     unittest.main()
