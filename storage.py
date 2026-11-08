@@ -143,5 +143,5 @@ if __name__ == "__main__":
         print("Saved model improvement research:", save_data(names=(MODEL_IMPROVEMENT_RESEARCH_FILE,)))
     else:
         raise SystemExit(
-            "Usage: python storage.py restore|save|save-policy-archive|save-policy-research|save-gdelt-research|save-mediacloud-research|save-news-enhanced-model"
+            "Usage: python storage.py restore|save|save-policy-archive|save-policy-research|save-gdelt-research|save-mediacloud-research|save-news-enhanced-model|save-multi-market-research|save-model-improvement-research"
         )
