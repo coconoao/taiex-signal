@@ -87,8 +87,10 @@ def _number(value):
     raw = raw.replace(",", "").replace("＋", "+").replace("－", "-")
     if raw in ("", "--", "—", "-", "X", "x"):
         return None
-    if raw.startswith("X"):
-        raw = raw[1:]
+    # X-prefixed exchange values (for example X0.00) indicate a non-comparable
+    # reference-price day; they are not a numeric zero change.
+    if raw.startswith(("X", "x")):
+        return None
     try:
         return float(raw)
     except (TypeError, ValueError):
