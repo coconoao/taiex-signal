@@ -306,9 +306,11 @@ def _fetch_months(fetcher, code: str, months):
     if errors:
         diagnostic_codes = []
         for exc in errors:
-            code = getattr(exc, "diagnostic_code", None)
+            diagnostic_code = getattr(exc, "diagnostic_code", None)
             diagnostic_codes.append(
-                code if isinstance(code, str) and code.replace("_", "").isalnum()
+                diagnostic_code
+                if isinstance(diagnostic_code, str)
+                and diagnostic_code.replace("_", "").isalnum()
                 else "provider_error"
             )
         safe_codes = ",".join(dict.fromkeys(diagnostic_codes))[:160]
@@ -338,7 +340,10 @@ def _identify_exchange(code: str, hint: str | None, months):
                 category = getattr(exc, "diagnostic_code", None)
                 if not isinstance(category, str) or not category.replace("_", "").isalnum():
                     category = "provider_error"
-                probe_failures.append(f"{name.lower()}_{category}")
+                probe_failures.append(
+                    category if category.startswith(name.lower() + "_")
+                    else f"{name.lower()}_{category}"
+                )
                 continue
     if probe_failures:
         diagnostic = "exchange_probe_failed:" + ",".join(dict.fromkeys(probe_failures))[:160]
