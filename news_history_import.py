@@ -295,6 +295,8 @@ def main():
             previous_summary = {}
     current = previous_summary.get("current")
     current_context = previous_summary.get("current_historical_context")
+    current_error = previous_summary.get("current_error")
+    current_attempted_at = dt.datetime.now(dt.timezone.utc).isoformat()
     now_local = dt.datetime.now(TZ)
     latest_market_date = dates[-1]
     current_start = dt.datetime.combine(latest_market_date, CUTOFF, TZ)
@@ -310,6 +312,7 @@ def main():
                 "query_capped": bool(current_capped),
             }
             current_context = build_context(rows, current)
+            current_error = None
             print(
                 f"GDELT 最新新聞環境（基準交易日 {latest_market_date}）："
                 f"{len(current_articles)} 篇標題；"
@@ -319,9 +322,9 @@ def main():
         except Exception as exc:
             # Preserve the last successful current window; do not replace it with
             # an empty snapshot during a transient API error or rate limit.
+            current_error = f"{type(exc).__name__}: {str(exc)[:160]}"
             print(
-                f"GDELT 最新新聞環境更新失敗，保留上次資料："
-                f"{type(exc).__name__}: {str(exc)[:160]}",
+                f"GDELT 最新新聞環境更新失敗，保留上次資料：{current_error}",
                 flush=True,
             )
     summary = {
@@ -337,6 +340,8 @@ def main():
         "historical_context": context,
         "current": current,
         "current_historical_context": current_context,
+        "current_error": current_error,
+        "current_attempted_at": current_attempted_at,
         "note": "新聞分數是標題字詞研究特徵；歷史報酬僅為事後描述統計，不代表未來結果。",
     }
     atomic_json("news_gdelt_research.json", summary)
