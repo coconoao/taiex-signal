@@ -32,4 +32,4 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run response parser tests
-        run: python -m unittest discover -s .github/scripts -p 'test_cloudflare_ai_response.py' -v
+        run: python .github/scripts/test_cloudflare_ai_response.py
