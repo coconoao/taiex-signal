@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
 
 from multi_horizon_model_research import (
     _metrics, _fit_calibrator, _apply_calibrator, build_macro_proxy_features, latest_estimate,
@@ -74,7 +75,7 @@ class MultiHorizonModelResearchTests(unittest.TestCase):
         oos_actual = pd.Series((np.arange(len(oos_index)) % 2).astype(int), index=oos_index)
         result = latest_estimate(
             X, y, 5,
-            lambda: __import__("sklearn.linear_model").linear_model.LogisticRegression(max_iter=300),
+            lambda: LogisticRegression(max_iter=300),
             oos_probability, oos_actual,
         )
         self.assertEqual(result["asof"], str(index[-1].date()))
