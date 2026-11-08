@@ -279,7 +279,11 @@ def explicit_analyst_view(item):
         return None
     if not TAIWAN_MARKET_RE.search(title):
         return None
-    if re.search(r"(?:not|no longer|isn't|is not)\s+(?:bullish|bearish|overweight|underweight)|(?:不看多|不看空|並非看多|並非看空|不代表看多|不代表看空)", lower):
+    if re.search(
+        r"(?:not|no longer|isn't|is not)\s+(?:a\s+|an\s+)?(?:bullish|bearish|overweight|underweight)"
+        r"|(?:not a bearish signal|not a bullish signal|不看多|不看空|並非看多|並非看空|不代表看多|不代表看空)",
+        lower,
+    ):
         return None
     positive = any(term in lower for term in ANALYST_POSITIVE)
     negative = any(term in lower for term in ANALYST_NEGATIVE)
@@ -287,8 +291,8 @@ def explicit_analyst_view(item):
         return None
     attribution = re.search(
         r"\b(?:says?|said|sees?|expects?|forecast(?:s|ed)?|recommends?|rates?|"
-        r"bullish|bearish|overweight|underweight|upgrade[sd]?|downgrade[sd]?)\b|"
-        r"(?:表示|認為|看好|看淡|看多|看空|建議|調升|調降)",
+        r"calls?|maintains?|initiates?|names?)\b|"
+        r"(?:表示|認為|建議|調升|調降)",
         lower,
     )
     if not attribution:
