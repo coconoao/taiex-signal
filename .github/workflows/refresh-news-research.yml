@@ -38,5 +38,7 @@ jobs:
         run: python news_snapshot.py
       - name: Label completed TAIEX sessions and update research summary
         run: python news_research_maintenance.py
-      - name: Persist news research
+      - name: Persist routine news research
         run: python storage.py save
+      - name: Persist official policy-news research
+        run: python storage.py save-policy-research
