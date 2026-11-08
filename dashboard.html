@@ -155,14 +155,17 @@ details[open]>summary{margin-bottom:12px}
       <div id="multiHorizonLatest" class="mcs"><p class="note">研究資料載入中…</p></div>
       <p class="note" id="multiHorizonModelNote">暫定實驗候選模型載入中…</p>
     </section>
-      <section hidden id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
+      <section id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
       <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
-      <div id="modelImprovementSummary" class="mcs"></div><h3>測試模型最新資料日判讀</h3><div id="modelImprovementLive" class="mcs"><p class="note">等待最新研究結果…</p></div>
+      <div id="modelImprovementSummary" class="mcs"></div>
+      <h3>同日期模型比較與穩健性</h3>
+      <div id="modelImprovementPaired" class="mcs"><p class="note">配對比較資料載入中…</p></div>
+      <h3>測試資料完整性</h3><div id="modelImprovementLive" class="mcs"><p class="note">等待最新研究結果…</p></div>
       <div style="overflow-x:auto"><table><thead><tr><th>候選實驗</th><th>狀態</th><th>樣本外筆數</th></tr></thead><tbody id="modelImprovementRows"><tr><td colspan="3">載入中…</td></tr></tbody></table></div>
       <p class="note" id="modelImprovementYearly"></p>
       <p class="note">各候選模型依自身特徵完整度使用不同樣本日曆；日期區間不同的模型不可直接比較。即時判讀是在最新可用資料日重新訓練後產生的研究分類，不是逐秒盤中預測、未來機率或買賣指示。準確率與 Brier 等指標僅描述歷史樣本外表現。全特徵模型資料不足時會明確標示，不會降低門檻。</p>
     </section>
-      <section hidden id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
+      <section id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
       <p class="note" id="newsEnhancedModelMeta">載入獨立模型資料中…</p>
       <div id="newsEnhancedModelSignal"></div>
       <div id="newsEnhancedModelMetrics"></div>
@@ -171,7 +174,7 @@ details[open]>summary{margin-bottom:12px}
     </section>
     <section id="longStrategyResearch">
       <h2>策略與跨市場研究</h2>
-      <section hidden id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
+      <section id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
       <section hidden id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
     </section>
   </div>
@@ -732,20 +735,55 @@ function renderModelImprovementResearch(r) {
   const experiments = r.experiments || {};
   const entries = Object.entries(experiments);
   const available = entries.filter(([, v]) => v.status === "available");
-  const statusText = v => v.status === "available" ? "可評估" : v.status === "insufficient" ? "資料不足" : "未執行";
+  const statusText = v => v.status === "available" ? "已完成樣本外評估" : v.status === "insufficient" ? "資料不足" : "尚未執行";
+  const labels = {
+    logistic_current_step5: "正式模型基準（每 5 日更新）",
+    production_cadence_step20: "正式更新頻率對照",
+    logistic_market_features_only: "市場特徵 Logistic",
+    logistic_market_plus_chips: "市場＋籌碼 Logistic",
+    logistic_market_plus_margin: "市場＋融資融券 Logistic",
+    logistic_market_plus_futures: "市場＋期貨 Logistic",
+    random_forest_conservative: "全特徵 Random Forest",
+    hist_gradient_boosting_conservative: "全特徵 Gradient Boosting",
+    logistic_weaker_regularization: "較弱正則化 Logistic",
+    logistic_stronger_regularization: "較強正則化 Logistic"
+  };
+  const labelOf = name => labels[name] || name;
   $("modelImprovementMeta").textContent = `報告時間 ${r.computed_at || "—"}｜全部特徵完整樣本 ${r.available_complete_samples ?? "—"} 筆｜市場特徵完整樣本 ${r.market_only_complete_samples ?? "—"} 筆`;
   $("modelImprovementSummary").innerHTML = available.map(([name, v]) => {
-    const label = name === "logistic_market_features_only" ? "僅市場特徵模型" : name;
+    const label = labelOf(name);
     return `<div class="mc"><b>${label}</b><div class="big">${Number.isFinite(Number(v.direction_accuracy_pct)) ? Number(v.direction_accuracy_pct).toFixed(2) + "%" : "—"}</div><p class="note">樣本外 ${v.sample_count ?? 0} 筆｜基準 ${v.baseline_direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}（基準 ${v.baseline_brier ?? "—"}）｜Log loss ${v.log_loss ?? "—"}</p><p class="note">${v.sample_start || "—"}～${v.sample_end || "—"}｜特徵數 ${v.feature_count ?? "—"}｜每 ${v.refit_every_sessions ?? "—"} 個交易日重新訓練</p></div>`;
   }).join("") || '<p class="note">目前尚無足夠樣本可進行樣本外比較。</p>';
+  const paired = r.same_calendar_comparison || {};
+  const pairedModels = paired.experiments || {};
+  const pairedLabels = {
+    incumbent_all_features_logistic: "正式模型（全特徵）",
+    market_only_logistic: "市場特徵 Logistic",
+    market_only_random_forest: "市場特徵 Random Forest",
+    market_only_hist_gradient_boosting: "市場特徵 Gradient Boosting",
+    market_plus_chips_logistic: "市場＋籌碼 Logistic",
+    market_plus_margin_logistic: "市場＋融資融券 Logistic",
+    market_plus_futures_logistic: "市場＋期貨 Logistic"
+  };
+  const pairedRows = Object.entries(pairedModels).map(([key, v]) => {
+    const u = v.paired_uncertainty_vs_incumbent || {};
+    const ci = u.brier_delta_95pct_ci || [];
+    const acc = u.accuracy_delta_95pct_ci || [];
+    const ciText = ci.length === 2 ? `${ci[0]} 至 ${ci[1]}` : "尚無";
+    const accText = acc.length === 2 ? `${acc[0]} 至 ${acc[1]}` : "尚無";
+    return `<div class="mc"><b>${pairedLabels[key] || key}</b><p class="note">樣本外 ${v.sample_count ?? "—"} 筆｜方向分類正確率 ${v.direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}</p><p class="note">相較正式模型的 Brier 差異：${u.brier_delta_candidate_minus_incumbent ?? "—"}；95% 區間：${ciText}</p><p class="note">方向分類正確率差異：${u.accuracy_delta_percentage_points ?? "—"} 個百分點；95% 區間：${accText}</p></div>`;
+  }).join("");
+  $("modelImprovementPaired").innerHTML = pairedRows
+    ? `<p class="note">共同日期區間 ${paired.comparison_start || "—"} 至 ${paired.comparison_end || "—"}。配對區塊 Bootstrap：${pairedModels.market_only_logistic?.paired_uncertainty_vs_incumbent?.bootstrap_repeats || 1000} 次、每區塊 20 個交易日。區間若包含 0，代表目前不能排除差異來自抽樣波動。</p>${pairedRows}`
+    : '<p class="note">目前尚無同日期配對比較結果。</p>';
   $("modelImprovementLive").innerHTML = entries.map(([name, v]) => {
     const j = v.current_judgment || {};
-    const label = name === "logistic_market_features_only" ? "僅市場特徵模型" : name === "production_cadence_step20" ? "正式模型頻率參考" : name;
-    const state = j.status === "available" ? j.category : "資料不足";
-    return `<div class="mc"><b>${label}</b><div class="big">${state}</div><p class="note">資料日 ${j.asof || "—"}｜訓練樣本 ${j.training_samples ?? 0} 筆</p><p class="note">${j.note || "尚無判讀資料"}</p></div>`;
+    const label = labelOf(name);
+    const state = j.status === "available" ? "資料完整，可供研究檢視" : "資料不足";
+    return `<div class="mc"><b>${label}</b><div class="big">${state}</div><p class="note">資料日 ${j.asof || "—"}｜訓練樣本 ${j.training_samples ?? 0} 筆</p><p class="note">此為歷史資料完整性檢查，不是未來市場方向或買賣訊號。</p></div>`;
   }).join("") || '<p class="note">尚無測試模型判讀資料。</p>';
   $("modelImprovementRows").innerHTML = entries.map(([name, v]) =>
-    `<tr><td>${name === "logistic_market_features_only" ? "僅市場特徵模型" : name === "production_cadence_step20" ? "正式模型頻率參考" : name}</td><td>${statusText(v)}</td><td>${v.sample_count ?? v.available_samples ?? 0}</td></tr>`
+    `<tr><td>${labelOf(name)}</td><td>${statusText(v)}</td><td>${v.sample_count ?? v.available_samples ?? 0}</td></tr>`
   ).join("") || '<tr><td colspan="3">尚無實驗紀錄</td></tr>';
   const market = experiments.logistic_market_features_only;
   const years = market && market.yearly ? Object.entries(market.yearly) : [];
