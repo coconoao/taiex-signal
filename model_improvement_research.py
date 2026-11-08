@@ -153,6 +153,21 @@ def run():
         result["sample_calendar"] = "market_features_only" if name == "logistic_market_features_only" else "all_features_complete_cases"
         experiments[name] = result
 
+    # Test each Taiwan data layer separately so sparse sources do not
+    # force every other source onto the same complete-case date calendar.
+    layer_cols = {
+        "logistic_market_plus_chips": market_cols + [c for c in X_raw.columns if c.startswith("籌碼:")],
+        "logistic_market_plus_margin": market_cols + [c for c in X_raw.columns if c.startswith("信用:")],
+        "logistic_market_plus_futures": market_cols + [c for c in X_raw.columns if c.startswith("期貨:")],
+    }
+    for name, cols in layer_cols.items():
+        _, _, result = walk_forward_candidate(
+            X_raw[cols], y_raw, specs["logistic_market_features_only"], step=STEP
+        )
+        result["feature_count"] = len(cols)
+        result["sample_calendar"] = name.removeprefix("logistic_")
+        experiments[name] = result
+
     # Production-cadence reference uses the same full-feature sample calendar.
     _, _, production_result = walk_forward_candidate(
         X_raw, y_raw, specs["logistic_current_step5"], step=20
