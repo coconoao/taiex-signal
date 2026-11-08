@@ -125,6 +125,9 @@ def _return_context(prob, fwd):
 
 
 def walk_forward(X, y, horizon, factory):
+    # Feature-set comparisons may intentionally use a strict common-date
+    # subset. Align labels to that exact index before building the mask.
+    y = y.reindex(X.index)
     valid = X.notna().all(axis=1) & y.notna()
     idx = X.index[valid]
     if len(idx) < MIN_TRAIN + horizon + 100:
