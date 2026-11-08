@@ -40,6 +40,13 @@ def analyze(code):
         raise ValueError("請輸入台股代號，例如 2330、0050 或 00679B")
 
     stock_data = tw_market_data.load_stock_history(code, exchange_hint, years=10)
+    exchange = stock_data.attrs.get("source", exchange_hint or "TWSE")
+    try:
+        yahoo_quote = tw_market_data.load_yahoo_quote(code, exchange)
+        quote_error = None
+    except Exception as exc:
+        yahoo_quote = None
+        quote_error = str(exc)
 
     import os
     if os.path.exists("signals.json"):
@@ -96,16 +103,26 @@ def analyze(code):
         "code": code,
         "symbol": code,
         "asset_type": asset_type,
-        "last": round(float(raw_px.iloc[-1]), 2),
+        "last": round(float(yahoo_quote["price"] if yahoo_quote else raw_px.iloc[-1]), 2),
+        "last_close": round(float(raw_px.iloc[-1]), 2),
         "adjusted_last": round(float(px.iloc[-1]), 4),
-        "asof": str(raw_px.index[-1].date()),
+        "asof": str(yahoo_quote["quote_date"] if yahoo_quote else raw_px.index[-1].date()),
+        "history_asof": str(raw_px.index[-1].date()),
+        "quote_time": yahoo_quote.get("quote_time") if yahoo_quote else None,
+        "previous_close": yahoo_quote.get("previous_close") if yahoo_quote else None,
+        "quote_source": yahoo_quote.get("quote_source") if yahoo_quote else "TWSE/TPEx official history fallback",
+        "market_state": yahoo_quote.get("market_state") if yahoo_quote else "UNAVAILABLE",
         "history_start": str(px.index[0].date()),
         "history_sessions": int(len(px)),
         "history_years_requested": 10,
         "market_data_source": stock_data.attrs.get("source", "TWSE/TPEx official"),
         "price_basis": "official_reference_price_chained_adjusted",
         "quote_realtime": False,
-        "quote_status": "目前為交易所官方日線資料；盤中即時行情尚未接入授權資料流。",
+        "quote_status": (
+            yahoo_quote["quote_status"] if yahoo_quote
+            else "Yahoo Finance 報價暫時無法取得，顯示交易所最近一個完整收盤日線價格。"
+        ),
+        "quote_error": quote_error,
         "beta": beta,
         "stock_expected": stock_expected,
         "historical_horizons": historical_horizons,
