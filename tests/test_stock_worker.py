@@ -29,6 +29,32 @@ class AnalyzeCodeTests(unittest.TestCase):
         self.assertIn("稍後重試", result["error"])
         self.assertNotIn("private provider detail", result["error"])
 
+    def test_structured_diagnostic_logs_category_without_exception_message(self):
+        error = MarketDataError(
+            "private detail with symbol 2330 and query token=secret",
+            diagnostic_code="exchange_probe_failed:twse_http_403,tpex_network_errno_101",
+        )
+        with patch("builtins.print") as log:
+            result, status = self._run(error)
+        self.assertEqual(status, 503)
+        logged = " ".join(str(call) for call in log.call_args_list)
+        self.assertIn("twse_http_403", logged)
+        self.assertIn("tpex_network_errno_101", logged)
+        self.assertNotIn("2330", logged)
+        self.assertNotIn("secret", logged)
+        self.assertNotIn("private detail", logged)
+
+    def test_structured_diagnostic_rejects_untrusted_text(self):
+        error = MarketDataError(
+            "private detail",
+            diagnostic_code="bad category; symbol=2330",
+        )
+        with patch("builtins.print") as log:
+            self._run(error)
+        logged = " ".join(str(call) for call in log.call_args_list)
+        self.assertNotIn("symbol=2330", logged)
+        self.assertIn("provider_or_data_validation_error", logged)
+
     def test_redirect_diagnostic_logs_only_allowlisted_host_and_path(self):
         error = MarketDataError(
             "官方行情來源連線失敗：www.twse.com.tw "
