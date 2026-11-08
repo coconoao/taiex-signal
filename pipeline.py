@@ -1117,10 +1117,11 @@ def historical_horizons(series):
 def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     """Persist Taiwan-only source coverage before any international/model validation."""
     now = pd.Timestamp.now(tz="Asia/Taipei")
-    expected = pd.DatetimeIndex(pd.to_datetime(df.index, errors="coerce")).dropna()
+    taiex = df["TAIEX"].dropna() if isinstance(df, pd.DataFrame) and "TAIEX" in df else pd.Series(dtype=float)
+    expected = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
     expected = expected.tz_localize(None).normalize().unique().sort_values() if len(expected) else pd.DatetimeIndex([])
 
-    def coverage(frame, columns, source, source_window_years=None):
+    def coverage(frame, columns, source, source_window_years=None, source_window_start=None):
         recent_start = now.normalize().tz_localize(None) - pd.Timedelta(days=365)
         recent_expected = expected[expected >= recent_start]
         empty = {
@@ -1134,6 +1135,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "observed_period_expected_rows": 0,
             "observed_period_coverage_pct": None,
             "source_window_years": source_window_years,
+            "source_window_start": source_window_start,
             "source_window_expected_rows": None,
             "source_window_valid_rows": None,
             "source_window_coverage_pct": None,
@@ -1155,9 +1157,11 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
         recent_valid = recent_expected.intersection(valid_index)
         source_expected = source_valid = None
         source_pct = None
-        if source_window_years and len(expected):
-            source_start = now.normalize().tz_localize(None) - pd.DateOffset(years=source_window_years)
-            source_expected_dates = expected[expected >= source_start]
+        source_start_date = (pd.Timestamp(source_window_start) if source_window_start else
+                             now.normalize().tz_localize(None) - pd.DateOffset(years=source_window_years)
+                             if source_window_years else None)
+        if source_start_date is not None and len(expected):
+            source_expected_dates = expected[expected >= source_start_date]
             source_valid_dates = source_expected_dates.intersection(valid_index)
             source_expected, source_valid = len(source_expected_dates), len(source_valid_dates)
             source_pct = round(source_valid / source_expected * 100, 1) if source_expected else None
@@ -1175,6 +1179,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "observed_period_expected_rows": int(len(observed_expected)),
             "observed_period_coverage_pct": round(len(observed_expected.intersection(valid_index)) / len(observed_expected) * 100, 1) if len(observed_expected) else None,
             "source_window_years": source_window_years,
+            "source_window_start": str(source_start_date.date()) if source_start_date is not None else None,
             "source_window_expected_rows": source_expected,
             "source_window_valid_rows": source_valid,
             "source_window_coverage_pct": source_pct,
@@ -1187,7 +1192,6 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
         }
 
     market_status = df.attrs.get("data_status", {}) if isinstance(df, pd.DataFrame) else {}
-    taiex = df["TAIEX"].dropna() if isinstance(df, pd.DataFrame) and "TAIEX" in df else pd.Series(dtype=float)
     latest_taiex = pd.Timestamp(taiex.index[-1]) if len(taiex) else None
     taiex_index = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
     taiex_index = taiex_index.tz_localize(None).normalize().unique().sort_values()
@@ -1218,12 +1222,12 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
         "margin": coverage(margin, ("margin_bal", "margin_units", "short_units"),
                            "TWSE 官方資料（缺漏日期由 FinMind 補入）"),
         "futures": coverage(futures, ("foreign_oi_net",),
-                            "TAIFEX 官方資料 + FinMind（FinMind 臺指期自 2018-06-05 起）", source_window_years=8)
+                            "TAIFEX 官方資料 + FinMind（FinMind 臺指期自 2018-06-05 起）", source_window_start="2018-06-05")
     }
     payload = {
         "updated_at": now.isoformat(),
         "demo": False,
-        "note": "完整期間覆蓋率以指數歷史日期為分母；另列近一年覆蓋率。期貨另列近三年來源期間覆蓋率；實際資料起訖不等於來源保證可用期間。此報表不代表即時報價。",
+        "note": "籌碼／信用／期貨覆蓋率以加權指數實際有收盤資料的台股交易日為分母；期貨另列自來源可用起始日 2018-06-05 起的覆蓋率。此報表不代表即時報價。",
         "layers": layers
     }
     tmp = "taiwan_data_status.json.tmp"
@@ -1330,6 +1334,9 @@ if __name__ == "__main__":
     if not demo:
         update_news_research_outcomes(df["TAIEX"])
     skip_backfill = "--skip-backfill" in sys.argv
+    # Yahoo's cross-market index includes dates when Taiwan is closed.
+    # Backfill only sessions with an actual TAIEX close.
+    taiwan_trading_days = df["TAIEX"].dropna().index
     def read_existing(name):
         if not os.path.exists(name) or os.path.getsize(name) == 0:
             return None
@@ -1350,17 +1357,17 @@ if __name__ == "__main__":
     else:
         chips = demo_chips(df) if demo else (
             read_existing("chips.csv") if "--no-chips" in sys.argv
-            else fetch_chips(trading_days=df.index)
+            else fetch_chips(trading_days=taiwan_trading_days)
         )
         if os.path.exists("margin.csv") and "short_units" not in pd.read_csv("margin.csv", nrows=1):
             print("舊版融資資料缺少融券欄位：保留既有歷史融資資料，融券欄位從本次開始累積。")
         margin = demo_margin(df) if demo else (
             read_existing("margin.csv") if "--no-margin" in sys.argv
-            else fetch_margin(trading_days=df.index)
+            else fetch_margin(trading_days=taiwan_trading_days)
         )
         futures = demo_futures(df) if demo else (
             read_existing("futures.csv") if "--no-futures" in sys.argv
-            else fetch_futures(trading_days=df.index)
+            else fetch_futures(trading_days=taiwan_trading_days)
         )
     if not demo and not skip_backfill:
         # Fast startup must not recompute or persist a quality report from a
