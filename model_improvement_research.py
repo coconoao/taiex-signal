@@ -129,21 +129,33 @@ def walk_forward_candidate(X, y, factory, step=STEP):
 
 
 def current_research_judgment(X, y, factory):
-    """Fit on labels strictly before latest feature date; infer latest snapshot."""
-    valid = X.notna().all(axis=1) & y.notna()
-    current_date = X.index.max()
-    train_idx = X.index[valid & (X.index < current_date)]
+    """Fit on labels strictly before the latest complete feature snapshot."""
+    feature_complete = X.notna().all(axis=1)
+    if not feature_complete.any():
+        return {"status": "insufficient", "asof": None, "training_samples": 0,
+                "note": "目前沒有完整的最新特徵列。"}
+    # The raw calendar can contain trailing rows with unavailable source layers.
+    # Select the latest row that this candidate can actually evaluate.
+    current_date = X.index[feature_complete].max()
     current = X.loc[[current_date]]
-    if current.isna().any(axis=None) or len(train_idx) < MIN_TRAIN:
-        return {"status": "insufficient", "asof": str(current_date.date()), "training_samples": int(len(train_idx)), "note": "最新特徵不完整或歷史標記樣本未達門檻。"}
+    valid = feature_complete & y.notna()
+    train_idx = X.index[valid & (X.index < current_date)]
+    if len(train_idx) < MIN_TRAIN:
+        return {"status": "insufficient", "asof": str(current_date.date()),
+                "training_samples": int(len(train_idx)),
+                "note": "截至最新完整特徵日，歷史標記樣本尚未達訓練門檻。"}
     y_train = y.loc[train_idx].astype(int)
     if y_train.nunique() < 2:
-        return {"status": "insufficient", "asof": str(current_date.date()), "training_samples": int(len(train_idx)), "note": "歷史標記僅包含單一類別。"}
+        return {"status": "insufficient", "asof": str(current_date.date()),
+                "training_samples": int(len(train_idx)),
+                "note": "歷史標記僅包含單一類別。"}
     model = factory()
     model.fit(X.loc[train_idx], y_train)
     p = float(model.predict_proba(current)[:, 1][0])
     category = "偏正向研究分類" if p >= 0.55 else "偏負向研究分類" if p <= 0.45 else "中性研究分類"
-    return {"status": "available", "asof": str(current_date.date()), "training_samples": int(len(train_idx)), "category": category, "note": "最新已完成資料日的研究分類；非盤中即時行情、非買賣指示。"}
+    return {"status": "available", "asof": str(current_date.date()),
+            "training_samples": int(len(train_idx)), "category": category,
+            "note": "以最新完整特徵日判讀；訓練標籤僅取該日之前的資料，非盤中即時行情、非買賣指示。"}
 
 
 def run():
