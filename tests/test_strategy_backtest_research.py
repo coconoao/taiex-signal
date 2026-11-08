@@ -9,7 +9,7 @@ class StrategyBacktestResearchTests(unittest.TestCase):
     def test_profit_target_enters_next_close_and_exits_at_threshold(self):
         dates = pd.bdate_range("2024-01-01", periods=41)
         close = pd.Series(100.0, index=dates)
-        close.iloc[11] = 102.0
+        close.iloc[12] = 102.0
         prob = pd.Series(0.7, index=dates[10:40])
         result = simulate_profit_target(prob, close, 0.02)
         self.assertEqual(result["status"], "available")
