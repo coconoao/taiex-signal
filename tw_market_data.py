@@ -53,6 +53,8 @@ def _request_json(url: str) -> dict:
                     diagnostic_code="provider_invalid_json_shape",
                 )
             return parsed
+        except MarketDataError:
+            raise
         except Exception as exc:
             last_error = exc
             code = getattr(exc, "code", None)
