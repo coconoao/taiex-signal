@@ -1086,6 +1086,13 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "start_date": str(taiex_index.min().date()) if len(taiex_index) else None,
             "expected_rows": int(len(expected)),
             "coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) else None,
+            "full_history_coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) else None,
+            "recent_1y_expected_rows": int(len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)])),
+            "recent_1y_valid_rows": int(len(taiex_index.intersection(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]))),
+            "recent_1y_coverage_pct": round(
+                len(taiex_index.intersection(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)])) /
+                len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]) * 100, 1
+            ) if len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]) else None,
             "missing_rows": int(len(taiex_missing)),
             "missing_dates": [str(x.date()) for x in taiex_missing[:20]],
             "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
@@ -1097,7 +1104,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
         "margin": coverage(margin, ("margin_bal", "margin_units", "short_units"),
                            "TWSE 官方資料（缺漏日期由 FinMind 補入）"),
         "futures": coverage(futures, ("foreign_oi_net",),
-                            "TAIFEX 官方資料（缺漏日期由 FinMind 補入）")
+                            "TAIFEX 官方資料（缺漏日期由 FinMind 補入）", source_window_years=3)
     }
     payload = {
         "updated_at": now.isoformat(),
