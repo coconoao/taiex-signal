@@ -6,6 +6,88 @@ from unittest.mock import patch
 import app as web_app
 
 
+class StockWorkerRoutingTests(unittest.TestCase):
+    def test_readonly_site_fails_closed_without_worker_configuration(self):
+        with patch.multiple(
+            web_app,
+            READONLY=True,
+            STOCK_WORKER_URL="",
+            STOCK_WORKER_TOKEN="",
+        ):
+            with self.assertRaises(web_app.StockServiceUnavailable):
+                web_app.analyze_stock("2330")
+
+    def test_readonly_site_routes_to_configured_worker(self):
+        with patch.multiple(
+            web_app,
+            READONLY=True,
+            STOCK_WORKER_URL="https://worker.example",
+            STOCK_WORKER_TOKEN="test-token",
+        ), patch.object(web_app, "request_stock_worker", return_value={"code": "2330"}) as worker:
+            self.assertEqual(web_app.analyze_stock("2330"), {"code": "2330"})
+            worker.assert_called_once_with("2330")
+
+    def test_local_development_keeps_legacy_local_analysis_fallback(self):
+        import types
+        fake_stock = types.SimpleNamespace(analyze=lambda code: {"code": code, "local": True})
+        with patch.multiple(
+            web_app,
+            READONLY=False,
+            STOCK_WORKER_URL="",
+            STOCK_WORKER_TOKEN="",
+        ), patch.dict("sys.modules", {"stock": fake_stock}):
+            self.assertEqual(web_app.analyze_stock("2330"), {"code": "2330", "local": True})
+
+
+    def _worker_http_error(self, status):
+        return web_app.urllib.error.HTTPError(
+            "https://worker.example/analyze",
+            status,
+            "worker error",
+            None,
+            io.BytesIO(b'{"error":"worker failed"}'),
+        )
+
+    def test_worker_upstream_503_is_gateway_failure(self):
+        with patch.multiple(
+            web_app,
+            STOCK_WORKER_URL="https://worker.example",
+            STOCK_WORKER_TOKEN="test-token",
+        ), patch.object(
+            web_app.urllib.request,
+            "urlopen",
+            side_effect=self._worker_http_error(503),
+        ):
+            with self.assertRaises(web_app.StockWorkerGatewayError):
+                web_app.request_stock_worker("2330")
+
+    def test_worker_validation_422_is_preserved_as_value_error(self):
+        with patch.multiple(
+            web_app,
+            STOCK_WORKER_URL="https://worker.example",
+            STOCK_WORKER_TOKEN="test-token",
+        ), patch.object(
+            web_app.urllib.request,
+            "urlopen",
+            side_effect=self._worker_http_error(422),
+        ):
+            with self.assertRaisesRegex(ValueError, "worker failed"):
+                web_app.request_stock_worker("2330")
+
+    def test_worker_network_timeout_is_gateway_failure(self):
+        with patch.multiple(
+            web_app,
+            STOCK_WORKER_URL="https://worker.example",
+            STOCK_WORKER_TOKEN="test-token",
+        ), patch.object(
+            web_app.urllib.request,
+            "urlopen",
+            side_effect=TimeoutError("private timeout detail"),
+        ):
+            with self.assertRaises(web_app.StockWorkerGatewayError):
+                web_app.request_stock_worker("2330")
+
+
 class ProductionAuthConfigurationTests(unittest.TestCase):
     def test_public_deployment_requires_oauth_and_supabase(self):
         with patch.multiple(
