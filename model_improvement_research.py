@@ -22,9 +22,18 @@ MIN_TRAIN = 100
 RANDOM_STATE = 42
 
 
+def prepare_market_frame(market):
+    """Match the production pipeline's trading-calendar and limited-fill preprocessing."""
+    market = market[~market.index.duplicated(keep="last")].sort_index()
+    if "TAIEX" in market:
+        market = market.dropna(subset=["TAIEX"]).ffill(limit=3)
+    return market
+
+
 def load_inputs():
     market = pd.read_csv("market_history.csv", index_col=0, parse_dates=True).sort_index()
     market.index = pd.to_datetime(market.index).normalize()
+    market = prepare_market_frame(market)
     def optional(name):
         try:
             frame = pd.read_csv(name, index_col=0, parse_dates=True).sort_index()
