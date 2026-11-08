@@ -21,10 +21,11 @@ FILES = (
 # These two artifacts are maintained by dedicated research workflows. Exclude
 # them from routine Render saves so stale process-local copies cannot overwrite
 # freshly computed research data in Supabase.
-MANAGED_RESEARCH_FILES = ("news_policy_archive.json", "news_policy_research.json")
+MANAGED_RESEARCH_FILES = ("news_policy_archive.json", "news_policy_research.json", "news_gdelt_history.jsonl", "news_gdelt_research.json")
 AUTO_SAVE_FILES = tuple(name for name in FILES if name not in MANAGED_RESEARCH_FILES)
 POLICY_ARCHIVE_FILE = "news_policy_archive.json"
 POLICY_RESEARCH_FILE = "news_policy_research.json"
+GDELT_RESEARCH_FILES = ("news_gdelt_history.jsonl", "news_gdelt_research.json")
 TABLE = "site_data"
 
 
@@ -124,7 +125,9 @@ if __name__ == "__main__":
         print("Saved policy archive files:", save_data(names=(POLICY_ARCHIVE_FILE,)))
     elif action == "save-policy-research":
         print("Saved policy research files:", save_data(names=(POLICY_RESEARCH_FILE,)))
+    elif action == "save-gdelt-research":
+        print("Saved GDELT research files:", save_data(names=GDELT_RESEARCH_FILES))
     else:
         raise SystemExit(
-            "Usage: python storage.py restore|save|save-policy-archive|save-policy-research"
+            "Usage: python storage.py restore|save|save-policy-archive|save-policy-research|save-gdelt-research"
         )
