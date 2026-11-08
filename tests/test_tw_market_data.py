@@ -48,6 +48,20 @@ class TestTaiwanMarketData(unittest.TestCase):
         self.assertEqual(caught.exception.diagnostic_code, "twse_http_403")
         self.assertNotIn("SECRET", caught.exception.diagnostic_code)
 
+    def test_fetch_months_preserves_provider_diagnostic_category(self):
+        def fail(*args):
+            raise tw_market_data.MarketDataError(
+                "private detail", diagnostic_code="provider_invalid_json_shape"
+            )
+
+        with self.assertRaises(tw_market_data.MarketDataError) as caught:
+            tw_market_data._fetch_months(fail, "2330", [dt.date(2026, 11, 1)])
+        self.assertEqual(
+            caught.exception.diagnostic_code,
+            "history_fetch_failed:provider_invalid_json_shape",
+        )
+        self.assertNotIn("2330", caught.exception.diagnostic_code)
+
     def test_exchange_probe_preserves_safe_provider_failure_categories(self):
         def twse_failure(*args):
             raise tw_market_data.MarketDataError(
