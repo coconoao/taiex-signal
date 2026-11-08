@@ -122,18 +122,13 @@ details[open]>summary{margin-bottom:12px}
     </section>
     <section><h2>新聞綜合分析</h2>
       <p class="note" id="newsResearchMeta">整合最新新聞、歷史新聞與政策事件資料；載入中…</p>
+      <p class="note" id="newsUnifiedMeta">正在合併新聞資料並去除重複標題…</p>
       <div id="newsD"></div>
       <div id="newsResearchIndicator"></div>
       <div id="newsResearchFeatures"></div>
-      <div id="gdeltResearchIndicator"></div>
-      <div id="mediaCloudResearchIndicator"></div>
       <div id="mediaCloudResearchItems"></div>
       <div id="policyResearchStats"></div>
-      <div id="policyArchiveItems"></div>
-      <p class="note" id="gdeltResearchMeta" hidden></p>
-      <p class="note" id="mediaCloudResearchMeta" hidden></p>
       <p class="note" id="policyResearchMeta" hidden></p>
-      <p class="note" id="policyArchiveMeta" hidden></p>
       <p class="note" id="newsResearchNote">新聞內容以整體主題、事件脈絡及歷史資料作綜合整理。不同資料集不直接相加成單一分數，以避免重複新聞與不同統計口徑造成誤差。歷史關聯僅為描述統計，不代表因果、未來機率或買賣訊號。</p>
     </section>
   </div>
@@ -569,7 +564,43 @@ function renderPolicyArchive(a) {
     </article>`;
   }).join("");
 }
-function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); renderSummary(); renderNewsResearch(NEWS_RESEARCH); renderGdeltResearch(GDELT_RESEARCH); renderMediaCloudResearch(MEDIACLOUD_RESEARCH); renderPolicyResearch(POLICY_RESEARCH); renderPolicyArchive(POLICY_ARCHIVE); }
+function renderUnifiedNews() {
+  const items = [];
+  const add = (title, date, url) => {
+    title = String(title || "").trim();
+    if (!title) return;
+    items.push({title, date:String(date || ""), url:safeNewsHref(url) || ""});
+  };
+  (NEWS?.headlines || []).forEach(x => add(x.title, x.published, x.link));
+  const gd = GDELT_RESEARCH?.current?.articles || GDELT_RESEARCH?.latest?.articles || [];
+  gd.forEach(x => add(x.title, x.published || x.date || x.seendate, x.url || x.link));
+  const mc = MEDIACLOUD_RESEARCH?.current?.stories || [];
+  mc.forEach(x => add(x.title, x.published_date || x.publish_date, x.url));
+  (POLICY_ARCHIVE?.items || []).forEach(x => add(x.title, x.date, x.url));
+  const norm = s => s.toLocaleLowerCase().replace(/[\\s\\p{P}\\p{S}]+/gu, "");
+  const unique = new Map();
+  for (const item of items) {
+    const key = norm(item.title);
+    if (key && !unique.has(key)) unique.set(key, item);
+  }
+  const rows = [...unique.values()].sort((a,b) => {
+    const da = Date.parse(a.date) || 0, db = Date.parse(b.date) || 0;
+    return db - da;
+  });
+  $("newsUnifiedMeta").textContent = `合併後共 ${rows.length.toLocaleString("zh-TW")} 則不重複標題｜已合併最新新聞、歷史索引與政策新聞｜標題重複已去除`;
+  $("mediaCloudResearchItems").innerHTML = rows.slice(0,30).map(x => {
+    const href = x.url;
+    return `<article style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(x.title)}</b><p class="note">${esc(x.date || "日期未提供")}</p>${href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">查看原文</a>` : ""}</article>`;
+  }).join("") || '<p class="note">目前沒有可合併的新聞標題。</p>';
+}
+function renderNews() {
+  const n = mergedNews();
+  newsCard(n, "next_day", $("newsD"));
+  renderSummary();
+  renderNewsResearch(NEWS_RESEARCH);
+  renderUnifiedNews();
+  renderPolicyResearch(POLICY_RESEARCH);
+}
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
