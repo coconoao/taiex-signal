@@ -249,8 +249,8 @@ def _official_cash_dividend_references(code: str, source: str, rows):
 def _fetch_months(fetcher, code: str, months):
     collected = []
     errors = []
-    # Keep concurrency modest to avoid overloading public exchange endpoints.
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    # Two concurrent requests balance throughput with public exchange rate limits.
+    with ThreadPoolExecutor(max_workers=2) as pool:
         futures = {pool.submit(fetcher, code, month): month for month in months}
         for future in as_completed(futures):
             try:
@@ -376,7 +376,7 @@ def load_taiex_history(years: int = 10):
 
     months = _month_starts(years)
     records = []
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(_taiex_month, month) for month in months]
         errors = []
         for future in as_completed(futures):
