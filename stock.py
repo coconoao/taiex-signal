@@ -12,9 +12,11 @@ import pandas as pd
 
 def _hist(yf, sym):
     last_error = None
-    for attempt in range(3):
+    for attempt in range(2):
         try:
-            raw = yf.Ticker(sym).history(period="10y", auto_adjust=True)
+            # Bound each provider request so a stalled Yahoo response cannot occupy
+            # the web worker indefinitely. Retry once for transient failures only.
+            raw = yf.Ticker(sym).history(period="10y", auto_adjust=True, timeout=10)
             if raw is not None and not raw.empty and "Close" in raw:
                 columns = ["Close"] + (["Volume"] if "Volume" in raw.columns else [])
                 frame = raw[columns].dropna(subset=["Close"]).copy()
@@ -25,9 +27,12 @@ def _hist(yf, sym):
             last_error = ValueError("Yahoo Finance 回傳空行情")
         except Exception as exc:
             last_error = exc
-        if attempt < 2:
+            # Authentication/permission failures will not recover by retrying.
+            if getattr(exc, "code", None) in (401, 403) or "HTTP Error 401" in str(exc) or "HTTP Error 403" in str(exc):
+                break
+        if attempt < 1:
             import time
-            time.sleep(3 * (attempt + 1))
+            time.sleep(1.5)
     raise RuntimeError(
         f"{sym} 行情下載失敗；可能遇到 Yahoo Finance 限流（HTTP 429）。最後錯誤：{last_error}"
     )
