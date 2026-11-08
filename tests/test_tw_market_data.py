@@ -47,3 +47,42 @@ def test_adjusted_series_fails_closed_on_unparsed_change():
         assert "無法解析" in str(exc)
     else:
         raise AssertionError("Unparsed adjustment must not silently enter model data")
+
+
+
+def test_twse_rejects_unexpected_status_even_if_rows_exist(monkeypatch):
+    row = ["115/11/06", "1,000", "100,000", "100", "100", "100", "100", "0"]
+    monkeypatch.setattr(
+        tw_market_data, "_request_json",
+        lambda url: {"stat": "invalid ticker", "data": [row]},
+    )
+    try:
+        tw_market_data._twse_month("2330", dt.date(2026, 11, 1))
+    except tw_market_data.MarketDataError as exc:
+        assert "非成功狀態" in str(exc)
+    else:
+        raise AssertionError("Unexpected TWSE response status must fail closed")
+
+
+def test_twse_no_data_status_returns_empty_rows(monkeypatch):
+    monkeypatch.setattr(
+        tw_market_data, "_request_json",
+        lambda url: {"stat": "很抱歉，沒有符合條件的資料!", "data": []},
+    )
+    assert tw_market_data._twse_month("2330", dt.date(2026, 11, 1)) == []
+
+
+def test_taiex_uses_official_indices_report_path(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        tw_market_data, "_request_json",
+        lambda url: (
+            seen.append(url)
+            or {"data": [["115/11/06", "100", "101", "99", "100.5"]]}
+        ),
+    )
+    rows = tw_market_data._taiex_month(dt.date(2026, 11, 1))
+    assert rows == [(dt.date(2026, 11, 6), 100.5)]
+    assert seen[0].startswith(
+        "https://www.twse.com.tw/indicesReport/MI_5MINS_HIST?"
+    )
