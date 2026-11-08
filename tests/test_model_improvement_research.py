@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from model_improvement_research import evaluate_predictions, walk_forward_candidate, current_research_judgment, prepare_market_frame, common_calendar_feature_sets
+from model_improvement_research import evaluate_predictions, walk_forward_candidate, current_research_judgment, prepare_market_frame
 
 
 class ModelImprovementResearchTests(unittest.TestCase):
