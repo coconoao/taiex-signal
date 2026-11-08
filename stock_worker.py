@@ -5,11 +5,34 @@ The worker runs stock research independently from the main dashboard service.
 """
 import json
 import os
-import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from tw_market_data import MarketDataError
 
 TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
 MAX_BODY = 4096
+
+
+def analyze_code(code):
+    """Return a safe payload/status pair; upstream failures are not client errors."""
+    try:
+        import stock
+        return stock.analyze(code), 200
+    except MarketDataError:
+        # Keep provider details and request identifiers out of public responses/logs.
+        print("[stock-worker] official_market_data_unavailable", flush=True)
+        return {
+            "error": "官方行情來源暫時無法連線或資料不足，請稍後重試"
+        }, 503
+    except ValueError as exc:
+        return {"error": str(exc)[:1000]}, 422
+    except Exception as exc:
+        # Log only the exception class; never log tokens, headers, or stock payloads.
+        print(
+            "[stock-worker] analysis_failed: " + type(exc).__name__,
+            flush=True,
+        )
+        return {"error": "個股分析暫時無法完成，請稍後重試"}, 500
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -47,16 +70,9 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return self._json({"error": "請求格式錯誤"}, 400)
 
-        try:
-            # The worker computes from official TWSE/TPEx history; it must not
-            # depend on the main site's local signals.json snapshot or demo-data guard.
-            os.chdir("/tmp")
-            import stock
-            result = stock.analyze(code)
-            return self._json(result)
-        except Exception as exc:
-            # Do not log secrets or request headers.
-            return self._json({"error": str(exc)[:1000]}, 400)
+        os.chdir("/tmp")
+        result, status = analyze_code(code)
+        return self._json(result, status)
 
     def log_message(self, fmt, *args):
         # Avoid logging request payloads and user-supplied symbols.
