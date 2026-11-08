@@ -127,7 +127,7 @@ jobs:
           Path("cloudflare_request.json").write_text(
               json.dumps({"messages": [{"role": "user", "content": prompt}],
                           "max_completion_tokens": 4096, "n": 1, "modalities": ["text"],
-                          "chat_template_kwargs": {"enable_thinking": False, "clear_thinking": True},
+                          "chat_template_kwargs": {"enable_thinking": False},
                           "temperature": 0.1},
                          ensure_ascii=False),
               encoding="utf-8"
@@ -183,7 +183,7 @@ jobs:
           Path("cloudflare_probe.json").write_text(
               json.dumps({"messages": [{"role": "user", "content": "請只回覆 OK。"}],
                           "max_completion_tokens": 16, "n": 1, "modalities": ["text"],
-                          "chat_template_kwargs": {"enable_thinking": False, "clear_thinking": True},
+                          "chat_template_kwargs": {"enable_thinking": False},
                           "temperature": 0}),
               encoding="utf-8"
           )
