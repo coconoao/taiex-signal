@@ -310,3 +310,64 @@ def load_taiex_history(years: int = 10):
     with _CACHE_LOCK:
         _INDEX_CACHE = (now, series.copy())
     return series
+
+
+def load_yahoo_quote(code: str, exchange: str):
+    """Fetch Yahoo Finance chart metadata on demand; no background polling/cache.
+
+    Yahoo's chart endpoint is unofficial and may be delayed or unavailable.
+    The regularMarketPrice/Time fields provide the latest regular-session quote
+    when the market is closed; intraday bars are included for the active session.
+    """
+    suffix = ".TWO" if exchange == "TPEX" else ".TW"
+    symbol = f"{code}{suffix}"
+    query = urllib.parse.urlencode({"range": "5d", "interval": "1m", "events": "div,splits"})
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/" + urllib.parse.quote(symbol, safe="") + "?" + query
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        chart = payload.get("chart") or {}
+        if chart.get("error"):
+            raise MarketDataError("Yahoo Finance chart 回傳錯誤")
+        result = (chart.get("result") or [None])[0]
+        if not result:
+            raise MarketDataError("Yahoo Finance 沒有回傳報價")
+        meta = result.get("meta") or {}
+        price = meta.get("regularMarketPrice")
+        quote_time = meta.get("regularMarketTime")
+        if price is None or quote_time is None:
+            raise MarketDataError("Yahoo Finance 缺少最新一般交易時段價格或時間")
+        quote_dt = dt.datetime.fromtimestamp(int(quote_time), tz=dt.timezone.utc)
+        market_state = str(meta.get("marketState") or "UNKNOWN").upper()
+        closed_states = {"CLOSED", "POST", "POSTPOST", "PRE", "PREPRE"}
+        is_closed = market_state in closed_states
+        return {
+            "price": float(price),
+            "previous_close": (
+                float(meta["chartPreviousClose"])
+                if meta.get("chartPreviousClose") is not None
+                else None
+            ),
+            "quote_time": quote_dt.isoformat(),
+            "quote_date": quote_dt.date().isoformat(),
+            "market_state": market_state,
+            "market_open": not is_closed,
+            "quote_source": "Yahoo Finance chart",
+            "quote_realtime": False,
+            "quote_status": (
+                "休市中：顯示 Yahoo Finance 最近一個一般交易時段的最新價格；可能延遲。"
+                if is_closed
+                else "交易時段：顯示 Yahoo Finance 最新可取得行情；可能延遲，非保證即時。"
+            ),
+        }
+    except Exception as exc:
+        if isinstance(exc, MarketDataError):
+            raise
+        raise MarketDataError(f"Yahoo Finance 報價暫時無法取得：{type(exc).__name__}") from exc
