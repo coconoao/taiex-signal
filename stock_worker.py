@@ -18,9 +18,10 @@ def analyze_code(code):
     try:
         import stock
         return stock.analyze(code), 200
-    except MarketDataError:
-        # Keep provider details and request identifiers out of public responses/logs.
-        print("[stock-worker] official_market_data_unavailable", flush=True)
+    except MarketDataError as exc:
+        # Logs contain only fixed exchange host + exception class/errno;
+        # never expose stock symbols, query strings, credentials, or payloads.
+        print("[stock-worker] official_market_data_unavailable: " + str(exc), flush=True)
         return {
             "error": "官方行情來源暫時無法連線或資料不足，請稍後重試"
         }, 503
