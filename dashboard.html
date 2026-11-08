@@ -500,6 +500,7 @@ function renderPolicyResearch(r) {
     ["配對標題數", (r.matched_headline_count || 0).toLocaleString("zh-TW") + " 則"],
     ["日期配對後隔日平均變化", pct(all.mean_return_pct)],
     ["歷史正報酬日占比", Number.isFinite(all.positive_days_pct) ? all.positive_days_pct + "%" : "—"],
+    ["不重複交易日樣本", (r.matched_session_count || all.sample_count || 0).toLocaleString("zh-TW") + " 天"],
     ["後段觀察期樣本", (later.sample_count || 0).toLocaleString("zh-TW") + " 天"]
   ];
   box.innerHTML = '<div class="usgrid">' + cards.map(([label, value]) => `<div class="mc"><b>${esc(label)}</b><div class="big">${esc(value)}</div></div>`).join("") + '</div>' +
