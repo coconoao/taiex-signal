@@ -183,6 +183,35 @@ def walk_forward(X, y, horizon, factory):
     }
 
 
+def _promotion_quality_check(hold_metrics, yearly_blocks, holdout_count, horizon):
+    """Conservative gate accounting for overlapping forward-return labels."""
+    independent_windows = int(holdout_count // horizon)
+    year_skills = [
+        item.get("brier_skill_vs_prevalence")
+        for item in yearly_blocks.values()
+        if item.get("brier_skill_vs_prevalence") is not None
+    ]
+    reasons = []
+    if (hold_metrics.get("brier_skill_vs_prevalence") or 0) <= 0:
+        reasons.append("整體樣本外 Brier Skill 未優於基準")
+    if independent_windows < 20:
+        reasons.append("扣除重疊視窗後的獨立期間少於 20")
+    if len(year_skills) < 3:
+        reasons.append("可評估年度區塊少於 3 個")
+    if year_skills and any(value <= 0 for value in year_skills):
+        reasons.append("至少一個年度區塊未優於基準")
+    return {
+        "eligible": not reasons,
+        "effective_nonoverlap_windows": independent_windows,
+        "minimum_nonoverlap_windows": 20,
+        "evaluated_year_blocks": len(year_skills),
+        "minimum_year_blocks": 3,
+        "positive_year_blocks": sum(value > 0 for value in year_skills),
+        "reasons": reasons,
+        "note": "同一交易日的多日遠期報酬標籤高度重疊；原始預測筆數不等於獨立樣本數。",
+    }
+
+
 def evaluate_candidate(X, y, fwd, horizon, name, factory):
     result = walk_forward(X, y, horizon, factory)
     if result is None:
@@ -195,6 +224,18 @@ def evaluate_candidate(X, y, fwd, horizon, name, factory):
     hold_metrics = _metrics(prob.loc[hold], actual.loc[hold], base.loc[hold])
     baseline_metrics = _metrics(base.loc[hold], actual.loc[hold], base.loc[hold])
     hold_fwd = fwd.reindex(hold)
+    yearly_blocks = {
+        str(year): _metrics(
+            prob.loc[hold][prob.loc[hold].index.year == year],
+            actual.loc[hold][actual.loc[hold].index.year == year],
+            base.loc[hold][base.loc[hold].index.year == year],
+        )
+        for year in sorted(set(hold.year))
+        if int((hold.year == year).sum()) >= 20
+    }
+    quality_check = _promotion_quality_check(
+        hold_metrics, yearly_blocks, len(hold), horizon
+    )
     return {
         "status": "evaluated",
         "candidate": name,
@@ -209,15 +250,8 @@ def evaluate_candidate(X, y, fwd, horizon, name, factory):
         "holdout_end": str(hold.max().date()),
         "holdout_prediction_count": int(len(hold)),
         "holdout_brier_skill_vs_prevalence": hold_metrics["brier_skill_vs_prevalence"],
-        "holdout_yearly_blocks": {
-            str(year): _metrics(
-                prob.loc[hold][prob.loc[hold].index.year == year],
-                actual.loc[hold][actual.loc[hold].index.year == year],
-                base.loc[hold][base.loc[hold].index.year == year],
-            )
-            for year in sorted(set(hold.year))
-            if int((hold.year == year).sum()) >= 20
-        },
+        "holdout_yearly_blocks": yearly_blocks,
+        "promotion_quality_check": quality_check,
     }
 
 
@@ -428,9 +462,11 @@ def run():
             "promotion_gate": {
                 "requires_positive_holdout_brier_skill": True,
                 "requires_reliability_bins_to_track_estimated_probabilities": True,
-                "requires_multiple_year_blocks": True,
+                "requires_at_least_3_year_blocks_all_positive": True,
+                "requires_at_least_20_effective_nonoverlap_windows": True,
                 "requires_comparison_to_existing_strategy_on_same_horizon": True,
                 "requires_untouched_followup_period": True,
+                "current_candidate_gate": selected.get("promotion_quality_check", {}),
             },
         }
         latest[horizon_name] = current
