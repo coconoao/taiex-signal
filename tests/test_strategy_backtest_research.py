@@ -20,7 +20,7 @@ class StrategyBacktestResearchTests(unittest.TestCase):
 
     def test_profit_target_requires_next_session_price(self):
         dates = pd.bdate_range("2024-01-01", periods=36)
-        close = pd.Series(np.linspace(100, 110, 35), index=dates)
+        close = pd.Series(np.linspace(100, 110, 36), index=dates)
         prob = pd.Series(0.7, index=dates[5:35])
         result = simulate_profit_target(prob, close, 0.01)
         self.assertEqual(result["status"], "available")
