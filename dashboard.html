@@ -121,6 +121,13 @@ details[open]>summary{margin-bottom:12px}
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
     <section id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
+    <section id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
+      <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
+      <div id="modelImprovementSummary" class="mcs"></div>
+      <div style="overflow-x:auto"><table><thead><tr><th>候選實驗</th><th>狀態</th><th>樣本外筆數</th></tr></thead><tbody id="modelImprovementRows"><tr><td colspan="3">載入中…</td></tr></tbody></table></div>
+      <p class="note" id="modelImprovementYearly"></p>
+      <p class="note">各候選模型依自身特徵完整度使用不同樣本日曆；日期區間不同的模型不可直接比較。準確率與 Brier 等指標僅描述歷史樣本外表現，不代表未來機率、因果關係或交易建議。全特徵模型資料不足時會明確標示，不會降低門檻。</p>
+    </section>
     <section id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
       <p class="note" id="newsEnhancedModelMeta">載入獨立模型資料中…</p>
       <div id="newsEnhancedModelSignal"></div>
@@ -652,6 +659,28 @@ const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then
   else $("multiMarketRows").textContent = "尚無研究結果。";
   $("multiMarketMeta").textContent = `更新時間 ${r.computed_at || "—"}｜資料來源 ${r.data_source || "—"}`;
 }).catch(() => { $("multiMarketMeta").textContent = "目前尚無其他市場研究結果，或資料來源暫時不可用。"; });
+function renderModelImprovementResearch(r) {
+  const experiments = r.experiments || {};
+  const entries = Object.entries(experiments);
+  const available = entries.filter(([, v]) => v.status === "available");
+  const statusText = v => v.status === "available" ? "可評估" : v.status === "insufficient" ? "資料不足" : "未執行";
+  $("modelImprovementMeta").textContent = `報告時間 ${r.computed_at || "—"}｜全部特徵完整樣本 ${r.available_complete_samples ?? "—"} 筆｜市場特徵完整樣本 ${r.market_only_complete_samples ?? "—"} 筆`;
+  $("modelImprovementSummary").innerHTML = available.map(([name, v]) => {
+    const label = name === "logistic_market_features_only" ? "僅市場特徵模型" : name;
+    return `<div class="mc"><b>${label}</b><div class="big">${Number.isFinite(Number(v.direction_accuracy_pct)) ? Number(v.direction_accuracy_pct).toFixed(2) + "%" : "—"}</div><p class="note">樣本外 ${v.sample_count ?? 0} 筆｜基準 ${v.baseline_direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}（基準 ${v.baseline_brier ?? "—"}）｜Log loss ${v.log_loss ?? "—"}</p><p class="note">${v.sample_start || "—"}～${v.sample_end || "—"}｜特徵數 ${v.feature_count ?? "—"}｜每 ${v.refit_every_sessions ?? "—"} 個交易日重新訓練</p></div>`;
+  }).join("") || '<p class="note">目前尚無足夠樣本可進行樣本外比較。</p>';
+  $("modelImprovementRows").innerHTML = entries.map(([name, v]) =>
+    `<tr><td>${name === "logistic_market_features_only" ? "僅市場特徵模型" : name === "production_cadence_step20" ? "正式模型頻率參考" : name}</td><td>${statusText(v)}</td><td>${v.sample_count ?? v.available_samples ?? 0}</td></tr>`
+  ).join("") || '<tr><td colspan="3">尚無實驗紀錄</td></tr>';
+  const market = experiments.logistic_market_features_only;
+  const years = market && market.yearly ? Object.entries(market.yearly) : [];
+  $("modelImprovementYearly").textContent = years.length
+    ? "市場特徵模型年度分段： " + years.map(([year, v]) => `${year}：${v.direction_accuracy_pct}%（${v.sample_count} 筆，Brier skill ${v.brier_skill}）`).join("；")
+    : "目前沒有足夠的年度分段樣本。";
+}
+const loadModelImprovementResearch = () => getJSON("model_improvement_research.json")
+  .then(renderModelImprovementResearch)
+  .catch(() => { $("modelImprovementMeta").textContent = "目前尚無模型改良實驗報告，或資料來源暫時不可用。"; });
 const loadNews = () => Promise.all([
   getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }),
   getJSON("news_research.json").then(r => { NEWS_RESEARCH = r; }).catch(() => { NEWS_RESEARCH = null; }),
@@ -665,7 +694,7 @@ let lastSig = null, busy = false;
 function loadAll() {
   if (busy) return Promise.resolve();
   busy = true;
-  return Promise.all([loadDaily(), loadWeekly(), loadMultiMarketResearch(), loadNews()]).then(() => {
+  return Promise.all([loadDaily(), loadWeekly(), loadMultiMarketResearch(), loadModelImprovementResearch(), loadNews()]).then(() => {
     const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
     $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
   }).finally(() => { busy = false; });
