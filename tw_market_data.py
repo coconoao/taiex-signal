@@ -455,13 +455,27 @@ def load_taiex_history(years: int = 10):
             try:
                 records.extend(future.result())
             except Exception as exc:
-                errors.append(str(exc))
+                errors.append(exc)
     if errors:
+        diagnostic_codes = []
+        for exc in errors:
+            diagnostic_code = getattr(exc, "diagnostic_code", None)
+            diagnostic_codes.append(
+                diagnostic_code
+                if isinstance(diagnostic_code, str)
+                and diagnostic_code.replace("_", "").isalnum()
+                else "provider_error"
+            )
+        safe_codes = ",".join(dict.fromkeys(diagnostic_codes))[:160]
         raise MarketDataError(
-            "官方加權指數歷史資料有月份下載失敗，為避免基準資料不完整，已停止分析：" + errors[0]
+            "官方加權指數歷史資料有月份下載失敗，為避免基準資料不完整，已停止分析：" + str(errors[0]),
+            diagnostic_code="history_fetch_failed:" + safe_codes,
         )
     if not records:
-        raise MarketDataError("無法取得官方加權指數歷史資料")
+        raise MarketDataError(
+            "無法取得官方加權指數歷史資料",
+            diagnostic_code="twse_provider_error",
+        )
     by_date = {}
     for day, close in records:
         by_date[day] = close
@@ -472,7 +486,10 @@ def load_taiex_history(years: int = 10):
         dtype=float,
     )
     if len(series) < 252:
-        raise MarketDataError("官方加權指數歷史資料不足 252 個交易日")
+        raise MarketDataError(
+            "官方加權指數歷史資料不足 252 個交易日",
+            diagnostic_code="twse_provider_error",
+        )
     with _CACHE_LOCK:
         _INDEX_CACHE[years] = (now, series.copy())
     return series
