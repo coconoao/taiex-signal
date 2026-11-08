@@ -122,6 +122,12 @@ details[open]>summary{margin-bottom:12px}
     </section>
     <section id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
     <section id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
+    <section id="multiHorizonModelResearch"><h2>中長期報酬機率研究模型</h2>
+      <p class="note" id="multiHorizonMeta">載入 1／3／6 個月研究結果中…</p>
+      <div id="multiHorizonLatest" class="mcs"><p class="note">等待研究結果…</p></div>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>候選模型</th><th>開發期 Brier</th><th>未觸碰測試期 Brier</th><th>Brier Skill</th><th>測試樣本</th></tr></thead><tbody id="multiHorizonRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div>
+      <p class="note">目標為未來 21／63／126 個交易日正報酬。採時間順序 walk-forward、依預測期間清除重疊標籤、過去樣本外預測校準，並保留最後 20% 時序樣本作候選選擇以外的測試。未通過校準條件時不顯示機率數字。這是大盤統計研究，不是個人化持有／賣出建議，也不保證未來結果。</p>
+    </section>
     <section id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
       <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
       <div id="modelImprovementSummary" class="mcs"></div><h3>測試模型最新資料日判讀</h3><div id="modelImprovementLive" class="mcs"><p class="note">等待最新研究結果…</p></div>
@@ -689,6 +695,30 @@ const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then
   else $("multiMarketRows").textContent = "尚無研究結果。";
   $("multiMarketMeta").textContent = `更新時間 ${r.computed_at || "—"}｜資料來源 ${r.data_source || "—"}`;
 }).catch(() => { $("multiMarketMeta").textContent = "目前尚無其他市場研究結果，或資料來源暫時不可用。"; });
+function renderMultiHorizonResearch(r) {
+  $("multiHorizonMeta").textContent = `報告時間 ${r.computed_at || "—"}｜預測目標：未來 1／3／6 個月正報酬｜訓練最低樣本 ${r.minimum_training_samples ?? "—"}`;
+  const latest = r.latest_estimates || {};
+  const labels = { "1m": "1 個月", "3m": "3 個月", "6m": "6 個月" };
+  $("multiHorizonLatest").innerHTML = Object.entries(latest).map(([h, v]) => {
+    const calibrated = v.calibration_status === "past_oos_calibrated";
+    const value = v.status === "available" && calibrated
+      ? Number(v.estimated_positive_return_probability_pct).toFixed(1) + "%"
+      : v.status === "available" ? "尚未可靠校準" : "資料不足";
+    return `<div class="mc"><b>${labels[h] || h}正報酬估計</b><div class="big">${value}</div><p class="note">資料日 ${v.asof || "—"}｜成熟訓練樣本 ${v.training_samples ?? 0} 筆</p><p class="note">${v.note || ""}</p></div>`;
+  }).join("") || '<p class="note">尚無多期間研究判讀。</p>';
+  const rows = [];
+  for (const [h, item] of Object.entries(r.experiments || {})) {
+    const label = labels[h] || h;
+    for (const [name, v] of Object.entries(item.candidates || {})) {
+      const hold = v.untouched_holdout || {};
+      rows.push(`<tr><td>${label}</td><td>${name}</td><td>${v.development?.brier ?? "—"}</td><td>${hold.brier ?? "—"}</td><td>${hold.brier_skill_vs_prevalence ?? "—"}</td><td>${hold.sample_count ?? 0}</td></tr>`);
+    }
+  }
+  $("multiHorizonRows").innerHTML = rows.join("") || '<tr><td colspan="6">目前尚無足夠樣本完成比較。</td></tr>';
+}
+const loadMultiHorizonResearch = () => getJSON("multi_horizon_model_research.json")
+  .then(renderMultiHorizonResearch)
+  .catch(() => { $("multiHorizonMeta").textContent = "多期間研究報告尚未產生或暫時無法載入。"; });
 function renderModelImprovementResearch(r) {
   const experiments = r.experiments || {};
   const entries = Object.entries(experiments);
@@ -742,7 +772,7 @@ let lastSig = null, busy = false;
 function loadAll() {
   if (busy) return Promise.resolve();
   busy = true;
-  return Promise.all([loadDaily(), loadWeekly(), loadMultiMarketResearch(), loadModelImprovementResearch(), loadStrategyResearch(), loadNews()]).then(() => {
+  return Promise.all([loadDaily(), loadWeekly(), loadMultiMarketResearch(), loadMultiHorizonResearch(), loadModelImprovementResearch(), loadStrategyResearch(), loadNews()]).then(() => {
     const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
     $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
     if (dailyLoadFailed && !SNAP && !retryTimer) retryTimer = setTimeout(() => { retryTimer = null; loadAll(); }, 15000);
