@@ -1123,7 +1123,7 @@ function renderStock(s, cached=false) {
       : `<tr><td>${label}</td><td colspan="4">歷史樣本不足</td></tr>`;
   }).join("");
   $("stockOut").innerHTML = (cached ? '<p class="note">瀏覽器保存的結果 · ' + esc(s.savedAt || "") + '（資料日期 ' + esc(s.asof || "") + '）</p>' : "") +
-    `<p class="sig" style="font-size:1.5rem">${esc(s.code)} ${s.last}<small>${esc(s.asof)}</small></p>
+    `<p class="sig" style="font-size:1.5rem">${esc(s.code)} ${s.last}<small>${esc(s.asof)}｜${esc(s.market_data_source || "官方日線")}收盤資料</small></p><p class="note">${esc(s.quote_status || "此資料為歷史日線收盤價，非盤中即時報價。")} 價格序列採交易所漲跌價差重建調整基準。</p>
       <p>此股 Beta ${s.beta}（與加權指數歷史報酬的共變程度，並非未來方向預測）。</p>
       <p>${e ? `此股自身歷史樣本（${e.n} 筆）中，之後 5 日平均報酬 <b>${e.avg}%</b>，正報酬比例 ${e.win}%，歷史 10%～90% 區間為 <b>${e.p10}% 到 ${e.p90}%</b>。` : "此股目前沒有足夠的歷史樣本。"}</p>
       <p class="note">20 日動能 ${s.mom20}%，年化波動 ${s.vol60}%。以下新增中長期研究，資料預設盡可能取得 10 年日線；實際長度依標的上市時間與來源可用性而定。資料期間：${esc(model.history_start || s.history_start || "—")}～${esc(model.history_end || s.asof)}（${Number(model.history_sessions || s.history_sessions || 0).toLocaleString("zh-TW")} 個交易日）。</p>
@@ -1138,7 +1138,7 @@ function renderStock(s, cached=false) {
       <p class="note">歷史報酬統計採重疊視窗，樣本彼此並非獨立；不得解讀為未來機率。模型以價格、成交量與大盤相對特徵進行時間序列驗證；歷史財報未具備完整公告時點資料，因此不納入模型訓練。</p>
       <h2 style="margin-top:16px">財報體檢（參考，未納入模型）</h2>` +
     (s.fundamentals.length ? `<table><thead><tr><th>項目</th><th>數值</th><th>判讀</th></tr></thead><tbody>${s.fundamentals.map(f => `<tr><td>${esc(f.item)}</td><td>${esc(f.value)}</td><td>${fl[f.flag + 1]}</td></tr>`).join("")}</tbody></table>` : '<p class="note">抓不到這檔的財報資料。</p>') +
-    '<p class="note">財報來自 Yahoo，台股欄位常不完整，請對照公開資訊觀測站。沒有「當時公布」的歷史財報可回測，因此只作參考，不調整模型。</p>';
+    '<p class="note">目前個股研究已改用交易所官方歷史日線；官方歷史財報資料尚未接入，因此暫不顯示財報數值。未具備完整公告時點的財報不會納入模型訓練。</p>';
 }
 $("go").onclick = () => {
   const c = $("code").value.trim(); if (!c) return;
