@@ -1,0 +1,1 @@
+Temporary smoke-test file for validating the Gemini PR review workflow. No application code changes.
