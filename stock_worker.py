@@ -12,6 +12,13 @@ from tw_market_data import MarketDataError
 
 TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
 MAX_BODY = 4096
+_SAFE_DIAGNOSTIC = re.compile(
+    r"(?:no_recent_history|provider_invalid_json_shape|provider_error|"
+    r"(?:twse|tpex)_(?:http_\\d{3}|network_errno_-?\\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|"
+    r"(?:exchange_probe_failed|history_fetch_failed):"
+    r"(?:(?:twse|tpex)_(?:http_\\d{3}|network_errno_-?\\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|provider_error)"
+    r"(?:,(?:(?:twse|tpex)_(?:http_\\d{3}|network_errno_-?\\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|provider_error)){0,11})"
+)
 
 
 def analyze_code(code):
@@ -23,7 +30,7 @@ def analyze_code(code):
         # Prefer structured, allowlisted diagnostic categories. Fall back to
         # parsing legacy messages only when no structured category is present.
         diagnostic = getattr(exc, "diagnostic_code", None)
-        if isinstance(diagnostic, str) and re.fullmatch(r"[a-z0-9_,:]{1,200}", diagnostic):
+        if isinstance(diagnostic, str) and _SAFE_DIAGNOSTIC.fullmatch(diagnostic):
             detail = diagnostic
         else:
             match = re.search(
