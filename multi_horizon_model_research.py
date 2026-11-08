@@ -255,7 +255,7 @@ def evaluate_candidate(X, y, fwd, horizon, name, factory):
     }
 
 
-def latest_estimate(X, y, horizon, factory, oos_probability, oos_actual):
+def latest_estimate(X, y, horizon, factory, oos_raw_probability, oos_actual):
     complete = X.notna().all(axis=1)
     if not complete.any():
         return {"status": "insufficient", "note": "沒有完整的最新特徵列。"}
@@ -275,10 +275,10 @@ def latest_estimate(X, y, horizon, factory, oos_probability, oos_actual):
     asof_pos = int(X.index.get_indexer([asof])[0])
     mature_count = max(0, asof_pos - horizon + 1)
     matured_calendar = X.index[:mature_count]
-    matured_oos = oos_probability.index.intersection(matured_calendar)
+    matured_oos = oos_raw_probability.index.intersection(matured_calendar)
     matured_oos = matured_oos.intersection(oos_actual.index)
-    matured_oos = matured_oos[oos_probability.loc[matured_oos].notna()]
-    cal = _fit_calibrator(oos_probability.loc[matured_oos].to_numpy(),
+    matured_oos = matured_oos[oos_raw_probability.loc[matured_oos].notna()]
+    cal = _fit_calibrator(oos_raw_probability.loc[matured_oos].to_numpy(),
                           oos_actual.loc[matured_oos].astype(int).to_numpy()) if len(matured_oos) else None
     calibrated = float(_apply_calibrator(cal, [raw])[0])
     return {
@@ -446,7 +446,7 @@ def run():
         wf = walk_forward(selected_X, yh.reindex(selected_X.index), horizon, model_factories[selected_factory_name])
         current = latest_estimate(
             selected_X_full, yh, horizon, model_factories[selected_factory_name],
-            wf["probability"], wf["actual"]
+            wf["raw_probability"], wf["actual"]
         ) if wf else {"status": "insufficient"}
         experiments[horizon_name] = {
             "status": "evaluated",
