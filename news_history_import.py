@@ -172,6 +172,7 @@ def build_context(rows, latest):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, default=90, choices=(30, 60, 90))
+    parser.add_argument("--current-only", action="store_true", help="只更新最近交易日之後的最新新聞環境，不回補歷史交易日")
     args = parser.parse_args()
     if not os.path.isfile("market_history.csv"):
         raise SystemExit("缺少 market_history.csv；請先還原台股歷史行情。")
@@ -207,6 +208,8 @@ def main():
     capped_dates = []
     fetched = 0
     for idx in range(1, len(sessions)):
+        if args.current_only:
+            break
         asof = sessions[idx]
         if asof.isoformat() in rows_by_date:
             continue
@@ -263,7 +266,7 @@ def main():
         print(f"GDELT {asof}: {len(articles)} 篇標題；{'達到單次上限' if capped else '未達單次上限'}", flush=True)
         time.sleep(5.2)
 
-    if fetched == 0 and not rows_by_date:
+    if fetched == 0 and not rows_by_date and not args.current_only:
         raise SystemExit(
             "No GDELT snapshots were retrieved and no prior history exists; "
             "refusing to write an empty history or success summary."
