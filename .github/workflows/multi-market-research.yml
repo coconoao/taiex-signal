@@ -32,6 +32,8 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Test multi-market research
+        run: python -m unittest discover -s tests -p "test_multi_market_research.py"
       - name: Run independent multi-market research
         run: python multi_market_research.py
       - name: Persist research results
