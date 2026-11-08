@@ -5,10 +5,28 @@ from sklearn.linear_model import LogisticRegression
 
 from multi_horizon_model_research import (
     _metrics, _fit_calibrator, _apply_calibrator, build_macro_proxy_features, latest_estimate,
+    _promotion_quality_check,
 )
 
 
 class MultiHorizonModelResearchTests(unittest.TestCase):
+    def test_promotion_gate_accounts_for_overlapping_horizon_labels(self):
+        good_years = {
+            "2024": {"brier_skill_vs_prevalence": 0.03},
+            "2025": {"brier_skill_vs_prevalence": 0.02},
+            "2026": {"brier_skill_vs_prevalence": 0.01},
+        }
+        metrics = {"brier_skill_vs_prevalence": 0.04}
+        too_few = _promotion_quality_check(metrics, good_years, 126 * 2, 126)
+        self.assertFalse(too_few["eligible"])
+        self.assertEqual(too_few["effective_nonoverlap_windows"], 2)
+        enough = _promotion_quality_check(metrics, good_years, 126 * 20, 126)
+        self.assertTrue(enough["eligible"])
+        bad_years = dict(good_years)
+        bad_years["2026"] = {"brier_skill_vs_prevalence": -0.01}
+        unstable = _promotion_quality_check(metrics, bad_years, 126 * 20, 126)
+        self.assertFalse(unstable["eligible"])
+
     def test_metrics_reports_brier_skill(self):
         y = np.array([0, 1, 0, 1] * 30)
         p = np.array([0.2, 0.8, 0.3, 0.7] * 30)
