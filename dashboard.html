@@ -786,7 +786,12 @@ function renderMultiHorizonResearch(r) {
 }
 const loadMultiHorizonResearch = () => getJSON("multi_horizon_model_research.json")
   .then(renderMultiHorizonResearch)
-  .catch(() => { $("multiHorizonMeta").textContent = "多期間研究報告尚未產生或暫時無法載入。"; });
+  .catch(() => {
+    const message = "多期間研究報告尚未產生或暫時無法載入。";
+    $("multiHorizonMeta").textContent = message;
+    const rows = $("longTermForecastRows");
+    if (rows) rows.textContent = message;
+  });
 function renderBestTestModel(r) {
   const paired = r.same_calendar_comparison || {};
   const models = paired.experiments || {};
