@@ -768,9 +768,14 @@ class H(SimpleHTTPRequestHandler):
         b = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(b)))
         self.end_headers()
-        self.wfile.write(b)
+        try:
+            self.wfile.write(b)
+        except (BrokenPipeError, ConnectionResetError):
+            # 使用者切頁或重新整理時，瀏覽器可能先關閉連線；不應讓正常取消請求產生錯誤堆疊。
+            pass
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
@@ -876,6 +881,25 @@ class H(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(b)))
             self.end_headers()
             return self.wfile.write(b)
+        if u.path in ("/", "/dashboard.html"):
+            # 首頁不可使用條件式快取；避免 iOS/Safari 在重新部署後繼續拿舊 HTML。
+            try:
+                with open(os.path.join(DATA, "dashboard.html"), "rb") as stream:
+                    page = stream.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                try:
+                    self.wfile.write(page)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
+            except FileNotFoundError:
+                return self.send_error(404, "dashboard.html not found")
         name = os.path.basename(u.path)
         if name.endswith(".py") or name == "settings.json":
             return self.send_error(404)
