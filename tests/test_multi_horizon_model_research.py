@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from multi_horizon_model_research import (
-    _metrics, _fit_calibrator, _apply_calibrator, build_macro_proxy_features,
+    _metrics, _fit_calibrator, _apply_calibrator, build_macro_proxy_features, latest_estimate,
 )
 
 
@@ -60,6 +60,24 @@ class MultiHorizonModelResearchTests(unittest.TestCase):
         market.loc[index[70], "SOX"] = np.nan
         features = build_macro_proxy_features(market)
         self.assertTrue(np.isnan(features.loc[index[70], "宏觀代理:SOX_報酬5日"]))
+
+
+    def test_latest_estimate_uses_latest_feature_row_even_when_target_is_unmatured(self):
+        rng = np.random.default_rng(11)
+        index = pd.bdate_range("2020-01-01", periods=720)
+        x = rng.normal(size=720)
+        X = pd.DataFrame({"x1": x, "x2": rng.normal(size=720)}, index=index)
+        y = pd.Series((x + rng.normal(scale=0.5, size=720) > 0).astype(float), index=index)
+        y.iloc[-5:] = np.nan
+        oos_index = index[100:600:3]
+        oos_probability = pd.Series(np.linspace(0.2, 0.8, len(oos_index)), index=oos_index)
+        oos_actual = pd.Series((np.arange(len(oos_index)) % 2).astype(int), index=oos_index)
+        result = latest_estimate(
+            X, y, 5,
+            lambda: __import__("sklearn.linear_model").linear_model.LogisticRegression(max_iter=300),
+            oos_probability, oos_actual,
+        )
+        self.assertEqual(result["asof"], str(index[-1].date()))
 
 if __name__ == "__main__":
     unittest.main()
