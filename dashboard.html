@@ -1143,12 +1143,12 @@ function renderStock(s, cached=false) {
 $("go").onclick = () => {
   const c = $("code").value.trim(); if (!c) return;
   $("stockOut").innerHTML = '<p class="note">正在執行此股票的個股分析流程（不會重跑整套大盤 Pipeline）…</p>';
-  api("/api/stock?code=" + encodeURIComponent(c), undefined, 180000).then(s => {
+  api("/api/stock?code=" + encodeURIComponent(c), undefined, 300000).then(s => {
     if (s.error) { $("stockOut").innerHTML = `<p>${esc(s.error)}</p>`; return; }
     renderStock(s, false); saveStockHistory(s);
   }).catch(err => {
     const message = err && err.name === "AbortError"
-      ? "個股分析超過 180 秒仍未完成，請稍後重試。"
+      ? "個股分析超過 300 秒仍未完成，請稍後重試。"
       : (err && err.message ? err.message : "連線失敗，請重新整理後再試。");
     $("stockOut").innerHTML = '<p class="note">個股查詢失敗：' + esc(message) + '</p>';
   });
