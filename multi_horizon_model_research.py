@@ -243,9 +243,9 @@ def latest_estimate(X, y, horizon, factory, oos_probability, oos_actual):
         "status": "available",
         "asof": str(asof.date()),
         "training_samples": int(len(idx)),
-        "estimated_positive_return_probability_pct": round(calibrated * 100, 2),
+        "estimated_positive_return_probability_pct": round(calibrated * 100, 2) if cal is not None else None,
         "calibration_status": "past_oos_calibrated" if cal is not None else "uncalibrated_model_score",
-        "research_category": "偏正向" if calibrated >= 0.60 else "中性" if calibrated >= 0.40 else "偏負向",
+        "research_category": ("偏正向" if calibrated >= 0.60 else "中性" if calibrated >= 0.40 else "偏負向") if cal is not None else "尚未校準",
         "note": "這是指定期間正報酬的模型估計，不是保證、不是持有/賣出指示；若校準樣本不足，數值不可視為可靠機率。",
     }
 
