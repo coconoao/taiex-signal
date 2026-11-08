@@ -14,7 +14,6 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 HISTORY = "news_research_history.jsonl"
-NEWS = "news.json"
 SIGNALS = "signals.json"
 OUTPUT = "news_enhanced_model.json"
 MIN_SAMPLES = 100
@@ -43,6 +42,16 @@ def read_history():
             except ValueError:
                 continue
     return sorted(rows, key=lambda row: str(row.get("asof", "")))
+
+
+def write_history(rows):
+    tmp = HISTORY + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as stream:
+        for row in rows[-1500:]:
+            stream.write(json.dumps(row, ensure_ascii=False) + "\\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(tmp, HISTORY)
 
 
 def vector(features, market_context):
@@ -110,27 +119,39 @@ def main():
         training_dates.append(str(row.get("asof", "")))
         original_scores.append(float(market_context["prob_up"]))
 
-    news_data = read_json(NEWS)
     signals = read_json(SIGNALS)
-    headlines = news_data.get("headlines") or []
-    current_features = None
-    current_vector = None
-    if len(headlines) >= 3 and signals.get("asof"):
-        try:
-            import news
-            current_features = news.research_features(headlines)
-            current_vector = vector(current_features, {
-                "prob_up": signals.get("prob_up"),
+    signal_asof = str(signals.get("asof") or "")
+    current_context = {}
+    try:
+        probability = float(signals.get("prob_up"))
+        if signal_asof and 0 <= probability <= 1:
+            current_context = {
+                "prob_up": probability,
                 "missing_layer_count": len(signals.get("missing_layers") or []),
-            })
-        except Exception as exc:
-            print("Current news features unavailable:", type(exc).__name__, str(exc)[:160], flush=True)
+            }
+    except (TypeError, ValueError):
+        current_context = {}
+
+    history_changed = False
+    current_row = None
+    for row in history:
+        if str(row.get("asof") or "") == signal_asof:
+            current_row = row
+            if current_context and row.get("market_context") != current_context:
+                row["market_context"] = current_context
+                history_changed = True
+            break
+    if history_changed:
+        write_history(history)
+
+    current_features = (current_row or {}).get("features") or {}
+    current_vector = vector(current_features, current_context) if current_context else None
 
     payload = {
         "status": "insufficient",
         "signal": "資料累積中",
         "score_pct": None,
-        "asof": signals.get("asof"),
+        "asof": signal_asof or None,
         "history_count": len(history),
         "sample_count": len(training_x),
         "minimum_samples": MIN_SAMPLES,
