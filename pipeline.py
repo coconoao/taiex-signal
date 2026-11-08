@@ -1006,11 +1006,23 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     expected = pd.DatetimeIndex(pd.to_datetime(df.index, errors="coerce")).dropna()
     expected = expected.tz_localize(None).normalize().unique().sort_values() if len(expected) else pd.DatetimeIndex([])
 
-    def coverage(frame, columns, source):
+    def coverage(frame, columns, source, source_window_years=None):
+        recent_start = now.normalize().tz_localize(None) - pd.Timedelta(days=365)
+        recent_expected = expected[expected >= recent_start]
         empty = {
             "source": "無可用資料", "latest_date": None, "start_date": None,
             "valid_rows": 0, "expected_rows": int(len(expected)),
             "coverage_pct": 0.0 if len(expected) else None,
+            "full_history_coverage_pct": 0.0 if len(expected) else None,
+            "recent_1y_expected_rows": int(len(recent_expected)),
+            "recent_1y_valid_rows": 0,
+            "recent_1y_coverage_pct": 0.0 if len(recent_expected) else None,
+            "observed_period_expected_rows": 0,
+            "observed_period_coverage_pct": None,
+            "source_window_years": source_window_years,
+            "source_window_expected_rows": None,
+            "source_window_valid_rows": None,
+            "source_window_coverage_pct": None,
             "missing_rows": int(len(expected)), "missing_dates": [str(x.date()) for x in expected[:20]],
             "required_columns": list(columns), "age_calendar_days": None
         }
@@ -1024,6 +1036,17 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
         valid_index = valid_index.tz_localize(None).normalize().unique().sort_values()
         latest = valid_index.max() if len(valid_index) else None
         missing = expected.difference(valid_index)
+        observed_expected = (expected[(expected >= valid_index.min()) & (expected <= valid_index.max())]
+                             if len(valid_index) else pd.DatetimeIndex([]))
+        recent_valid = recent_expected.intersection(valid_index)
+        source_expected = source_valid = None
+        source_pct = None
+        if source_window_years and len(expected):
+            source_start = now.normalize().tz_localize(None) - pd.DateOffset(years=source_window_years)
+            source_expected_dates = expected[expected >= source_start]
+            source_valid_dates = source_expected_dates.intersection(valid_index)
+            source_expected, source_valid = len(source_expected_dates), len(source_valid_dates)
+            source_pct = round(source_valid / source_expected * 100, 1) if source_expected else None
         return {
             "source": source if latest is not None else "尚無完整有效資料",
             "latest_date": str(latest.date()) if latest is not None else None,
@@ -1031,6 +1054,16 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "valid_rows": int(valid.sum()),
             "expected_rows": int(len(expected)),
             "coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) else None,
+            "full_history_coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) else None,
+            "recent_1y_expected_rows": int(len(recent_expected)),
+            "recent_1y_valid_rows": int(len(recent_valid)),
+            "recent_1y_coverage_pct": round(len(recent_valid) / len(recent_expected) * 100, 1) if len(recent_expected) else None,
+            "observed_period_expected_rows": int(len(observed_expected)),
+            "observed_period_coverage_pct": round(len(observed_expected.intersection(valid_index)) / len(observed_expected) * 100, 1) if len(observed_expected) else None,
+            "source_window_years": source_window_years,
+            "source_window_expected_rows": source_expected,
+            "source_window_valid_rows": source_valid,
+            "source_window_coverage_pct": source_pct,
             "missing_rows": int(len(missing)),
             "missing_dates": [str(x.date()) for x in missing[:20]],
             "required_columns": list(columns),
@@ -1069,7 +1102,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     payload = {
         "updated_at": now.isoformat(),
         "demo": False,
-        "note": "僅呈現台股資料來源、完整有效筆數與最新日期；不代表即時報價。",
+        "note": "完整期間覆蓋率以指數歷史日期為分母；另列近一年覆蓋率。期貨另列近三年來源期間覆蓋率；實際資料起訖不等於來源保證可用期間。此報表不代表即時報價。",
         "layers": layers
     }
     tmp = "taiwan_data_status.json.tmp"
