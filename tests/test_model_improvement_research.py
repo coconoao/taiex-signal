@@ -30,6 +30,28 @@ class ModelImprovementResearchTests(unittest.TestCase):
         self.assertTrue(market_only.index.equals(all_features.index))
         self.assertNotIn(dates[4], market_only.index)
 
+    def test_paired_feature_layer_ablation_uses_one_calendar(self):
+        from model_improvement_research import paired_feature_sets
+        dates = pd.bdate_range("2020-01-01", periods=12)
+        X = pd.DataFrame({
+            "market": np.arange(12, dtype=float),
+            "籌碼:外資": np.arange(12, dtype=float) + 1,
+            "信用:融資": np.arange(12, dtype=float) + 2,
+            "期貨:外資": np.arange(12, dtype=float) + 3,
+        }, index=dates)
+        X.loc[dates[3], "籌碼:外資"] = np.nan
+        paired_index = X.index[X.notna().all(axis=1)]
+        sets = paired_feature_sets(X, ["market"], paired_index)
+        self.assertEqual(set(sets), {
+            "market_only", "market_plus_chips", "market_plus_margin",
+            "market_plus_futures", "all_features"
+        })
+        for frame in sets.values():
+            self.assertTrue(frame.index.equals(paired_index))
+            self.assertNotIn(dates[3], frame.index)
+        self.assertEqual(list(sets["market_plus_chips"].columns),
+                         ["market", "籌碼:外資"])
+
     def test_metrics_compare_against_baseline(self):
         result = evaluate_predictions(
             [0.8, 0.2, 0.7, 0.3],
