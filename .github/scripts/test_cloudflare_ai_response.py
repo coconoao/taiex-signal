@@ -35,6 +35,11 @@ class CloudflareAIResponseTests(unittest.TestCase):
         self.assertNotIn("quoted-secret-value", redacted)
         self.assertNotIn("unquoted_secret_value_123", redacted)
         self.assertEqual(redacted.count("[REDACTED]"), 2)
+        prefixed = 'CLOUDFLARE_API_TOKEN="cloudflare-token-value"\\nSUPABASE_SERVICE_ROLE_KEY=supabase_secret_value_123'
+        prefixed_redacted = _redact_sensitive_text(prefixed)
+        self.assertNotIn("cloudflare-token-value", prefixed_redacted)
+        self.assertNotIn("supabase_secret_value_123", prefixed_redacted)
+        self.assertEqual(prefixed_redacted.count("[REDACTED]"), 2)
 
     def test_output_redacts_bearer_and_jwt_tokens(self):
         bearer = "Bearer " + "A" * 32
