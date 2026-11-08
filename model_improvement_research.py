@@ -141,7 +141,7 @@ def run():
     specs = candidates()
     for name, factory in specs.items():
         use = X[market_cols] if name == "logistic_market_features_only" else X
-        step = 20 if name == "logistic_current_step5" and False else STEP
+        step = STEP
         pred, base, result = walk_forward_candidate(use, y, factory, step=step)
         experiments[name] = result
 
@@ -161,7 +161,7 @@ def run():
         "available_complete_samples": int(len(X)),
         "feature_count": int(X.shape[1]),
         "feature_coverage_pct": feature_coverage,
-        "method": "Expanding-window chronological walk-forward; first test after at least 500 training rows where available, refit every 5 sessions (production cadence comparator every 20); no random shuffle; identical chronological target labels; yearly subperiod metrics.",
+        "method": "Expanding-window chronological walk-forward; first test after at least 100 training rows, refit every 5 sessions (production cadence comparator every 20); no random shuffle; identical chronological target labels; yearly subperiod metrics.",
         "experiments": experiments,
         "promotion_policy": "No automatic promotion. Require repeatable improvement across multiple time blocks, improved Brier/log loss versus baseline, adequate coverage, and a later untouched holdout before any production change.",
         "disclaimer": "Historical research only. Metrics are not a guarantee of future performance and are not investment advice or trading instructions.",
