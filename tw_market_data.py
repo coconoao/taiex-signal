@@ -11,6 +11,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import json
+import random
 import threading
 import time
 import urllib.parse
@@ -57,7 +58,7 @@ def _request_json(url: str) -> dict:
             if code in (401, 403):
                 break
             if code in (429, 500, 502, 503, 504) and attempt < 2:
-                time.sleep(float(2 ** attempt))
+                time.sleep(float(2 ** attempt) + random.uniform(0.0, 0.25))
                 continue
             break
 
@@ -114,7 +115,12 @@ def _roc_date(value: str) -> dt.date:
     parts = raw.split("/")
     if len(parts) != 3:
         raise ValueError("日期格式錯誤")
-    year, month, day = (int(part) for part in parts)
+    try:
+        year, month, day = (int(part) for part in parts)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("日期包含非數字欄位") from exc
+    if year <= 0:
+        raise ValueError("民國年必須大於 0")
     if year < 1911:
         year += 1911
     return dt.date(year, month, day)
@@ -410,7 +416,6 @@ def _taiex_month(month: dt.date):
 
 
 def load_taiex_history(years: int = 10):
-    global _INDEX_CACHE
     now = time.time()
     with _CACHE_LOCK:
         cached = _INDEX_CACHE.get(years)
