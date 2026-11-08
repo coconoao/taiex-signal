@@ -6,6 +6,19 @@ import tw_market_data
 
 
 class TestTaiwanMarketData(unittest.TestCase):
+    def test_request_json_logs_safe_network_diagnostic(self):
+        error = __import__("urllib.error").error.URLError(
+            OSError(101, "Network is unreachable")
+        )
+        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                tw_market_data.MarketDataError,
+                r"twse\.com\.tw URLError/OSError\(errno=101\)",
+            ):
+                tw_market_data._request_json(
+                    "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
+                )
+
     def test_roc_date_converts_taiwan_calendar(self):
         self.assertEqual(
             tw_market_data._roc_date("115/11/06"), dt.date(2026, 11, 6)
