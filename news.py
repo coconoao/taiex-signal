@@ -347,8 +347,20 @@ def save_research_snapshot(hl):
     if any(str(row.get("asof")) == str(asof) for row in records):
         print(f"新聞研究快照 {asof} 已存在，保留原始紀錄。", flush=True)
         return
+    market_context = {}
+    try:
+        signal_data = json.load(open("signals.json", encoding="utf-8"))
+        probability = float(signal_data.get("prob_up"))
+        if signal_data.get("asof") == asof and 0 <= probability <= 1:
+            market_context = {
+                "prob_up": probability,
+                "missing_layer_count": len(signal_data.get("missing_layers") or []),
+            }
+    except (OSError, ValueError, TypeError):
+        pass
     snapshot = {
         "asof": asof, "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "market_context": market_context,
         "features": research_features(hl),
         "articles": [{
             "kind": str(h.get("kind", "")), "category": str(h.get("tag", "")),
