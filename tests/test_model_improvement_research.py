@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from model_improvement_research import evaluate_predictions, walk_forward_candidate
+from model_improvement_research import evaluate_predictions, walk_forward_candidate, current_research_judgment
 
 
 class ModelImprovementResearchTests(unittest.TestCase):
@@ -36,6 +36,26 @@ class ModelImprovementResearchTests(unittest.TestCase):
         self.assertEqual(market_result["status"], "available")
         self.assertEqual(full_result["status"], "insufficient")
         self.assertGreater(len(market.dropna()), len(full.dropna()))
+
+
+    def test_current_judgment_uses_latest_complete_feature_row(self):
+        dates = pd.bdate_range("2020-01-01", periods=150)
+        X = pd.DataFrame({"x": np.sin(np.arange(150) / 7)}, index=dates)
+        X.loc[dates[-5:], "x"] = np.nan
+        y = pd.Series((np.arange(150) % 2).astype(float), index=dates)
+
+        class FixedClassifier:
+            def fit(self, x, target):
+                self.p = float(target.mean())
+                return self
+            def predict_proba(self, x):
+                return np.column_stack([np.full(len(x), 1-self.p), np.full(len(x), self.p)])
+
+        result = current_research_judgment(X, y, FixedClassifier)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["asof"], str(dates[-6].date()))
+        self.assertEqual(result["training_samples"], 144)
+        self.assertIn("category", result)
 
     def test_walk_forward_predictions_are_chronological_and_oos(self):
         dates = pd.bdate_range("2020-01-01", periods=160)
