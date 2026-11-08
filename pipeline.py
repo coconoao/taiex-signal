@@ -370,7 +370,7 @@ def load_demo(n=1800, seed=7):
 # Keep each scheduled run bounded. Recent dates are always prioritized while
 # older missing dates are backfilled gradually across subsequent runs.
 # Each scheduled run backfills a larger bounded batch while preserving checkpoints.
-BACKFILL_DATES_PER_RUN = 80
+BACKFILL_DATES_PER_RUN = 200
 RECENT_DATES_PER_RUN = 5
 CHECKPOINT_EVERY = 5
 
@@ -505,7 +505,7 @@ def _fetch_finmind_data(dataset, start_date, end_date, data_id=None):
 
 
 
-def _fetch_finmind_data_for_dates(dataset, dates, data_id=None, batch_size=10):
+def _fetch_finmind_data_for_dates(dataset, dates, data_id=None, batch_size=25):
     """Fetch sparse historical gaps in small date batches so one timeout cannot lose the whole backfill."""
     dates = pd.DatetimeIndex(dates).tz_localize(None).normalize().unique().sort_values()
     frames = []
@@ -541,7 +541,8 @@ def fetch_chips(days_back=3650, path="chips.csv", trading_days=None):
     rows = {}
 
     # FinMind first for older historical gaps; TWSE remains primary for recent data.
-    historical_dates = dates[dates < today - pd.DateOffset(years=3)]
+    recent_cutoff = today - pd.DateOffset(years=3)
+    historical_dates = dates[dates < recent_cutoff]
     try:
         if len(historical_dates):
             alt = _fetch_finmind_data_for_dates("TaiwanStockTotalInstitutionalInvestors", historical_dates)
@@ -561,7 +562,7 @@ def fetch_chips(days_back=3650, path="chips.csv", trading_days=None):
         print(f"FinMind 三大法人主備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
 
     for d in dates:
-        if d in rows:
+        if d in rows or d < recent_cutoff:
             continue
         url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?type=day&dayDate={d:%Y%m%d}&response=json"
         try:
@@ -591,7 +592,7 @@ def fetch_chips(days_back=3650, path="chips.csv", trading_days=None):
             print("欄位名稱與預期不同，請檢查", d.date(), list(diff))
     # TWSE is primary. Fill only missing dates from FinMind market-wide data.
     try:
-        needed = [d for d in dates if d not in rows]
+        needed = [d for d in dates if d not in rows and d >= recent_cutoff]
         if needed:
             alt = _fetch_finmind_data_for_dates("TaiwanStockTotalInstitutionalInvestors", needed)
             if not alt.empty and {"date", "name", "buy", "sell"}.issubset(alt.columns):
@@ -762,7 +763,8 @@ def fetch_margin(days_back=3650, path="margin.csv", trading_days=None):
     rows = {}
 
     # FinMind first for older historical gaps; TWSE remains primary for recent data.
-    historical_dates = dates[dates < today - pd.DateOffset(years=3)]
+    recent_cutoff = today - pd.DateOffset(years=3)
+    historical_dates = dates[dates < recent_cutoff]
     try:
         if len(historical_dates):
             alt = _fetch_finmind_data_for_dates("TaiwanStockTotalMarginPurchaseShortSale", historical_dates)
@@ -784,7 +786,7 @@ def fetch_margin(days_back=3650, path="margin.csv", trading_days=None):
         print(f"FinMind 融資融券主備援暫不可用：{type(exc).__name__}: {exc}", flush=True)
 
     for d in dates:
-        if d in rows:
+        if d in rows or d < recent_cutoff:
             continue
         url = f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={d:%Y%m%d}&selectType=MS&response=json"
         try:
@@ -815,7 +817,7 @@ def fetch_margin(days_back=3650, path="margin.csv", trading_days=None):
             print("找不到融資／融券欄位，請檢查", d.date(), list(last))
     # TWSE is primary. FinMind separates TWD amounts from share counts.
     try:
-        needed = [d for d in dates if d not in rows]
+        needed = [d for d in dates if d not in rows and d >= recent_cutoff]
         if needed:
             alt = _fetch_finmind_data_for_dates("TaiwanStockTotalMarginPurchaseShortSale", needed)
             if not alt.empty and {"date", "name", "TodayBalance"}.issubset(alt.columns):
