@@ -52,6 +52,32 @@ class ModelImprovementResearchTests(unittest.TestCase):
         self.assertEqual(list(sets["market_plus_chips"].columns),
                          ["market", "籌碼:外資"])
 
+    def test_rolling_window_caps_training_history(self):
+        dates = pd.bdate_range("2020-01-01", periods=180)
+        X = pd.DataFrame({"x": np.sin(np.arange(180) / 7)}, index=dates)
+        y = pd.Series((np.arange(180) % 3 == 0).astype(float), index=dates)
+        class TrackingClassifier:
+            max_train_rows = 0
+            def fit(self, x, target):
+                TrackingClassifier.max_train_rows = max(
+                    TrackingClassifier.max_train_rows, len(x)
+                )
+                self.p = float(target.mean())
+                return self
+            def predict_proba(self, x):
+                return np.column_stack([
+                    np.full(len(x), 1-self.p), np.full(len(x), self.p)
+                ])
+        TrackingClassifier.max_train_rows = 0
+        pred, baseline, result = walk_forward_candidate(
+            X, y, TrackingClassifier, step=5, train_window=120
+        )
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["training_window_sessions"], 120)
+        self.assertEqual(TrackingClassifier.max_train_rows, 120)
+        self.assertTrue(pred.index.equals(baseline.index))
+
+
     def test_metrics_compare_against_baseline(self):
         result = evaluate_predictions(
             [0.8, 0.2, 0.7, 0.3],
