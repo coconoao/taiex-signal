@@ -79,9 +79,17 @@ ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 STOCK_WORKER_URL = os.environ.get("STOCK_WORKER_URL", "").rstrip("/")
 STOCK_WORKER_TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
 
+class StockServiceUnavailable(RuntimeError):
+    """The production stock-analysis service is not configured or reachable."""
+
+
+class StockWorkerGatewayError(RuntimeError):
+    """The configured stock worker failed or returned an invalid response."""
+
+
 def request_stock_worker(code):
     if not STOCK_WORKER_URL or not STOCK_WORKER_TOKEN:
-        raise RuntimeError("個股分析服務尚未設定")
+        raise StockServiceUnavailable("個股分析服務尚未設定")
     code = str(code or "").strip().upper()
     payload = json.dumps({"code": code}).encode("utf-8")
     req = urllib.request.Request(
@@ -102,12 +110,25 @@ def request_stock_worker(code):
             message = detail.get("error") or "個股分析服務回傳錯誤"
         except Exception:
             message = "個股分析服務回傳 HTTP %s" % exc.code
-        raise RuntimeError(str(message)[:1000])
+        if exc.code in (400, 404, 422):
+            raise ValueError(str(message)[:1000])
+        raise StockWorkerGatewayError(str(message)[:1000])
     except Exception as exc:
-        raise RuntimeError("無法連接個股分析服務：%s" % type(exc).__name__)
+        raise StockWorkerGatewayError("無法連接個股分析服務：%s" % type(exc).__name__)
     if not isinstance(result, dict):
-        raise RuntimeError("個股分析服務回傳格式錯誤")
+        raise StockWorkerGatewayError("個股分析服務回傳格式錯誤")
     return result
+
+
+def analyze_stock(code):
+    # Public/read-only deployments must use the isolated official-data Worker.
+    # Never silently fall back to the legacy local/Yahoo implementation in production.
+    if STOCK_WORKER_URL and STOCK_WORKER_TOKEN:
+        return request_stock_worker(code)
+    if READONLY:
+        raise StockServiceUnavailable("個股分析服務尚未設定")
+    import stock
+    return stock.analyze(code)
 
 
 def production_oauth_ready():
@@ -895,16 +916,22 @@ class H(SimpleHTTPRequestHandler):
                     return self.send_json(stale)
                 return self.send_json({"error": str(e)}, 503)
         if u.path in ("/api/quote", "/api/stock"):
-            try:
-                if u.path == "/api/quote":
+            if u.path == "/api/quote":
+                try:
                     return self.send_json(quote())
-                code = urllib.parse.parse_qs(u.query).get("code", [""])[0]
-                if STOCK_WORKER_URL and STOCK_WORKER_TOKEN:
-                    return self.send_json(request_stock_worker(code))
-                import stock
-                return self.send_json(stock.analyze(code))
-            except Exception as e:
+                except Exception as e:
+                    return self.send_json({"error": str(e)}, 503)
+            code = urllib.parse.parse_qs(u.query).get("code", [""])[0]
+            try:
+                return self.send_json(analyze_stock(code))
+            except ValueError as e:
                 return self.send_json({"error": str(e)}, 400)
+            except StockServiceUnavailable as e:
+                return self.send_json({"error": str(e)}, 503)
+            except StockWorkerGatewayError as e:
+                return self.send_json({"error": str(e)}, 502)
+            except Exception:
+                return self.send_json({"error": "個股分析暫時無法完成，請稍後重試"}, 500)
         if u.path == "/export":
             import export_html
             b = export_html.build().encode()
