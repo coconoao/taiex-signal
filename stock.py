@@ -12,6 +12,8 @@ import pandas as pd
 
 import tw_market_data
 
+HISTORY_YEARS = 4
+
 
 def _historical_horizon_summary(close, horizon):
     forward = (close.shift(-horizon) / close - 1).dropna()
@@ -39,7 +41,7 @@ def analyze(code):
     if not code or not code[0].isdigit() or not code.isalnum() or len(code) > 12:
         raise ValueError("請輸入台股代號，例如 2330、0050 或 00679B")
 
-    stock_data = tw_market_data.load_stock_history(code, exchange_hint, years=10)
+    stock_data = tw_market_data.load_stock_history(code, exchange_hint, years=HISTORY_YEARS)
 
     import os
     if os.path.exists("signals.json"):
@@ -55,7 +57,7 @@ def analyze(code):
     px = stock_data["Close"].dropna()
     raw_px = stock_data["RawClose"].dropna()
     volume = stock_data["Volume"].reindex(px.index)
-    mk = tw_market_data.load_taiex_history().dropna()
+    mk = tw_market_data.load_taiex_history(years=HISTORY_YEARS).dropna()
 
     f5 = px.shift(-5) / px - 1
 
@@ -105,7 +107,7 @@ def analyze(code):
         "market_state": "CLOSED",
         "history_start": str(px.index[0].date()),
         "history_sessions": int(len(px)),
-        "history_years_requested": 10,
+        "history_years_requested": HISTORY_YEARS,
         "market_data_source": stock_data.attrs.get("source", "TWSE/TPEx official"),
         "price_basis": "official_reference_price_chained_adjusted",
         "quote_realtime": False,
