@@ -780,7 +780,7 @@ function renderBestTestModel(r) {
   const card = $("bestTestModelCard");
   if (!candidates.length) {
     meta.textContent = "尚無可比較的同日期樣本外模型。";
-    card.innerHTML = '<p class="note">資料不足，暫不選出最佳候選。</p>';
+    card.innerHTML = '<p class="note">資料不足，暫無最佳候選判別。</p>';
     return;
   }
   const [key, v] = candidates[0];
@@ -789,12 +789,8 @@ function renderBestTestModel(r) {
     : j.category === "偏正向研究分類" ? "看漲"
     : j.category === "偏負向研究分類" ? "看空" : "觀察";
   const date = j.asof || "無可用完整資料日";
-  const ci = v.paired_uncertainty_vs_incumbent || v.paired_uncertainty_vs_expanding_incumbent || {};
-  const brierCI = ci.brier_delta_95pct_ci || [];
-  const ciLabel = brierCI.length === 2 ? `${brierCI[0]} 至 ${brierCI[1]}` : "尚無";
-  const significant = brierCI.length === 2 && (brierCI[0] > 0 || brierCI[1] < 0);
-  meta.textContent = `比較日期 ${paired.comparison_start || v.comparison_start || "—"} 至 ${paired.comparison_end || v.comparison_end || "—"}｜共同樣本 ${v.sample_count ?? paired.sample_count ?? "—"} 筆`;
-  card.innerHTML = `<div class="mc"><b>${labels[key] || key}</b><div class="big">${category}</div><p class="note">最新完整資料日 ${date}｜訓練樣本 ${j.training_samples ?? "—"} 筆</p><p class="note">樣本外方向分類正確率 ${v.direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}｜Brier Skill ${v.brier_skill ?? "—"}</p><p class="note">相較正式模型的 Brier 差異 ${ci.brier_delta_candidate_minus_incumbent ?? ci.brier_delta_candidate_minus_expanding_incumbent ?? "—"}｜95% 區間 ${ciLabel}</p><p class="note">${significant ? "配對區間未包含 0；仍需跨年度與未觸碰保留樣本驗證。" : "配對區間包含 0 或尚無區間，尚不能確認優勢超出抽樣波動。"}</p></div>`;
+  meta.textContent = `最佳候選：${labels[key] || key}`;
+  card.innerHTML = `<div class="mc"><div class="big">${category}</div><p class="note">資料日期：${date}</p></div>`;
 }
 function renderModelImprovementResearch(r) {
   const experiments = r.experiments || {};
