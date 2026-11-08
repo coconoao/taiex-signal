@@ -18,7 +18,7 @@ from sklearn.preprocessing import StandardScaler
 import pipeline
 
 STEP = 5
-MIN_TRAIN = 500
+MIN_TRAIN = 100
 RANDOM_STATE = 42
 
 
@@ -88,7 +88,11 @@ def walk_forward_candidate(X, y, factory, step=STEP):
     n = len(idx)
     if n < 100:
         return None, None, {"status": "insufficient", "available_samples": n}
-    first_test = min(max(MIN_TRAIN, 31), max(31, n // 2))
+    first_test = MIN_TRAIN
+    if n <= first_test + 30:
+        return None, None, {"status": "insufficient", "available_samples": n,
+                            "minimum_training_rows": MIN_TRAIN,
+                            "note": "不足訓練資料與至少 30 筆樣本外評估資料。"}
     pred = pd.Series(np.nan, index=idx, dtype=float)
     baseline = pd.Series(np.nan, index=idx, dtype=float)
     for i in range(first_test, n, step):
