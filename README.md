@@ -26,6 +26,7 @@
 在「設定」分頁填入自己的 Claude／OpenAI／Gemini 金鑰：只存在該裝置的瀏覽器，由瀏覽器直接呼叫各家 API，伺服器不接收也不儲存。預設只存本次分頁，勾選「記住」才存到本機。「內建規則」不需金鑰，永遠可用。
 - OpenAI、Gemini 需填模型名稱（我沒有預設，避免猜錯）。
 - 營運者也可用環境變數 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`+`OPENAI_MODEL`、`GEMINI_API_KEY`+`GEMINI_MODEL` 讓排程跑 AI，結果所有人共用。
+- Cloudflare Workers AI（新聞研究模型，與正式預測模型分離）：在 Render 主網站環境變數設定 `CLOUDFLARE_ACCOUNT_ID` 與 `CLOUDFLARE_API_TOKEN`；可選設定 `CLOUDFLARE_AI_MODEL`，預設 `@cf/zai-org/glm-4.7-flash`。Token 僅由伺服器呼叫 Cloudflare，不可寫入程式碼、GitHub 一般檔案或前端。GitHub Actions Secrets 不會自動成為 Render 執行環境變數。
 
 ## 本機與 Mac App
 ```
