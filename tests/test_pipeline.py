@@ -81,8 +81,8 @@ class LoadLiveTests(unittest.TestCase):
 class PendingDatesTests(unittest.TestCase):
     def test_limits_backfill_and_keeps_latest_missing_dates(self):
         today = pd.Timestamp("2026-11-06")
-        trading_days = pd.bdate_range(end=today, periods=300)
-        result = _pending_dates(pd.DataFrame(), today, 365, trading_days)
+        trading_days = pd.bdate_range(end=today, periods=250)
+        result = _pending_dates(pd.DataFrame(), today, 500, trading_days)
         self.assertEqual(len(result), BACKFILL_DATES_PER_RUN + RECENT_DATES_PER_RUN)
         self.assertEqual(result[:RECENT_DATES_PER_RUN].tolist(), trading_days[-RECENT_DATES_PER_RUN:].tolist())
         self.assertEqual(result[RECENT_DATES_PER_RUN:].tolist(), trading_days[:BACKFILL_DATES_PER_RUN].tolist())
