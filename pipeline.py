@@ -540,15 +540,16 @@ def fetch_chips(days_back=3650, path="chips.csv", trading_days=None):
     dates = _pending_dates(old, today, days_back, trading_days, required_columns=("foreign_net", "trust_net"))
     rows = {}
 
-    # FinMind first for historical gaps; TWSE remains the official fallback.
+    # FinMind first for older historical gaps; TWSE remains primary for recent data.
+    historical_dates = dates[dates < today - pd.DateOffset(years=3)]
     try:
-        if len(dates):
-            alt = _fetch_finmind_data_for_dates("TaiwanStockTotalInstitutionalInvestors", dates)
+        if len(historical_dates):
+            alt = _fetch_finmind_data_for_dates("TaiwanStockTotalInstitutionalInvestors", historical_dates)
             if not alt.empty and {"date", "name", "buy", "sell"}.issubset(alt.columns):
                 alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
                 alt["net"] = pd.to_numeric(alt["buy"], errors="coerce") - pd.to_numeric(alt["sell"], errors="coerce")
                 for date, group in alt.dropna(subset=["date", "net"]).groupby("date"):
-                    if date not in dates:
+                    if date not in historical_dates:
                         continue
                     by_name = group.groupby("name")["net"].sum()
                     foreign = float(by_name.get("Foreign_Investor", 0)) + float(by_name.get("Foreign_Dealer_Self", 0))
@@ -760,15 +761,16 @@ def fetch_margin(days_back=3650, path="margin.csv", trading_days=None):
     dates = _pending_dates(old, today, days_back, trading_days, required_columns=("margin_bal", "margin_units", "short_units"))
     rows = {}
 
-    # FinMind first for historical gaps; TWSE remains the official fallback.
+    # FinMind first for older historical gaps; TWSE remains primary for recent data.
+    historical_dates = dates[dates < today - pd.DateOffset(years=3)]
     try:
-        if len(dates):
-            alt = _fetch_finmind_data_for_dates("TaiwanStockTotalMarginPurchaseShortSale", dates)
+        if len(historical_dates):
+            alt = _fetch_finmind_data_for_dates("TaiwanStockTotalMarginPurchaseShortSale", historical_dates)
             if not alt.empty and {"date", "name", "TodayBalance"}.issubset(alt.columns):
                 alt["date"] = pd.to_datetime(alt["date"], errors="coerce").dt.normalize()
                 alt["TodayBalance"] = pd.to_numeric(alt["TodayBalance"], errors="coerce")
                 for date, group in alt.dropna(subset=["date", "TodayBalance"]).groupby("date"):
-                    if date not in dates:
+                    if date not in historical_dates:
                         continue
                     balances = group.groupby("name")["TodayBalance"].last()
                     money, margin_units, short_units = (balances.get("MarginPurchaseMoney"),
