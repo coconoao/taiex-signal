@@ -98,5 +98,22 @@ class TestTaiwanMarketData(unittest.TestCase):
             tw_market_data._to_adjusted_frame(rows, "TWSE")
 
 
+    def test_taiex_cache_is_scoped_by_requested_years(self):
+        dates = [
+            (dt.date(2025, 1, 1) + dt.timedelta(days=i), 10000.0 + i)
+            for i in range(252)
+        ]
+        with (
+            patch.object(tw_market_data, "_INDEX_CACHE", {}),
+            patch.object(tw_market_data, "_month_starts", return_value=[dt.date(2026, 11, 1)]),
+            patch.object(tw_market_data, "_taiex_month", return_value=dates) as fetch,
+            patch.object(tw_market_data.time, "time", return_value=1000.0),
+        ):
+            tw_market_data.load_taiex_history(years=2)
+            tw_market_data.load_taiex_history(years=10)
+            self.assertEqual(fetch.call_count, 2)
+
+
+
 if __name__ == "__main__":
     unittest.main()
