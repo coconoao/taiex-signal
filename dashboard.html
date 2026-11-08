@@ -476,14 +476,16 @@ function renderGdeltResearch(r) {
     box.textContent = "目前沒有 GDELT 歷史快照。";
     return;
   }
-  const f = r.latest.features, h = r.historical_context || {};
+  const active = r.current && r.current.features ? r.current : r.latest;
+  const f = active.features, h = (active === r.current ? r.current_historical_context : r.historical_context) || {};
+  const isCurrent = active === r.current;
   const score = Number(f.news_environment_score || 0);
   const mood = score > 0.08 ? "標題環境偏正面" : score < -0.08 ? "標題環境偏負面" : "標題環境接近中性";
   const historical = h.status === "available"
     ? `<div class="mcs"><div class="mc"><b>相似歷史樣本</b><div class="big">${h.sample_count}</div></div><div class="mc"><b>歷史正報酬比例</b><div class="big">${h.positive_return_pct}%</div></div><div class="mc"><b>歷史負報酬比例</b><div class="big">${h.negative_return_pct}%</div></div><div class="mc"><b>平均隔日變化</b><div class="big">${h.average_return_pct}%</div></div></div><p class="note">中位數 ${h.median_return_pct}%｜10%～90% 分位數 ${h.p10_return_pct}% 至 ${h.p90_return_pct}%</p>`
     : `<p class="note">相似環境已標記樣本：${h.sample_count || 0} 筆；至少 20 筆才顯示歷史描述統計。</p>`;
   box.innerHTML = `<div class="mc"><b>${mood}</b><div class="big">${score > 0 ? "+" : ""}${score.toFixed(2)}</div><p class="note">新聞標題 ${f.headline_count || 0} 則｜正面 ${f.positive_headline_count || 0}｜負面 ${f.negative_headline_count || 0}</p></div>${historical}<p class="note">${esc(h.note || "資料不足，暫不顯示歷史統計。")}</p>`;
-  meta.textContent = `資料來源 GDELT DOC 2.0｜最近交易日 ${r.latest.asof}｜快照 ${r.history_count || 0} 天｜已標記隔日結果 ${r.labeled_count || 0} 筆｜本次新增 ${r.fetched_this_run || 0} 天｜達查詢上限日期 ${(r.query_capped_dates || []).length} 天`;
+  meta.textContent = `資料來源 GDELT DOC 2.0｜行情基準日 ${r.latest.asof}｜${isCurrent ? "最新新聞環境" : "最近歷史快照"}｜新聞觀測 ${active.window_start_local || "—"} 至 ${active.window_end_local || active.captured_at || "—"}｜歷史快照 ${r.history_count || 0} 天｜已標記隔日結果 ${r.labeled_count || 0} 筆｜本次新增 ${r.fetched_this_run || 0} 天`;
 }
 function renderPolicyResearch(r) {
   const meta = $("policyResearchMeta"), box = $("policyResearchStats"), note = $("policyResearchNote");
