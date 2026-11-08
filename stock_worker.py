@@ -5,6 +5,7 @@ The worker runs stock research independently from the main dashboard service.
 """
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from tw_market_data import MarketDataError
@@ -19,9 +20,15 @@ def analyze_code(code):
         import stock
         return stock.analyze(code), 200
     except MarketDataError as exc:
-        # Logs contain only fixed exchange host + exception class/errno;
-        # never expose stock symbols, query strings, credentials, or payloads.
-        print("[stock-worker] official_market_data_unavailable: " + str(exc), flush=True)
+        # Extract only allowlisted exchange host + error class/errno. The
+        # broader exception may also contain a symbol or data-validation text.
+        match = re.search(
+            r"(?:www\\.)?(?:twse\\.com\\.tw|tpex\\.org\\.tw) "
+            r"[A-Za-z]+(?:/[A-Za-z]+)?(?:\\(errno=\\d+\\))?(?:\\(http=\\d+\\))?",
+            str(exc),
+        )
+        detail = match.group(0) if match else "provider_or_data_validation_error"
+        print("[stock-worker] official_market_data_unavailable: " + detail, flush=True)
         return {
             "error": "官方行情來源暫時無法連線或資料不足，請稍後重試"
         }, 503
