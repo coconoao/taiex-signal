@@ -2,7 +2,7 @@ name: Live market-data smoke test
 
 on:
   push:
-    branches: [fix/worker-pr18-official-adapter]
+    branches: [fix/worker-pr18-official-adapter, test/worker-live-health-20261108]
   workflow_dispatch:
 
 permissions:
@@ -83,4 +83,19 @@ jobs:
           if failures:
               raise SystemExit("\n".join(failures))
           print("\nOFFICIAL STOCK HISTORY SMOKE TEST PASSED.")
+          PY
+      - name: Verify deployed Worker health endpoint
+        run: |
+          python - <<'PY'
+          import json
+          from urllib.request import urlopen
+
+          url = "https://taiex-stock-worker.onrender.com/healthz"
+          with urlopen(url, timeout=30) as response:
+              if response.status != 200:
+                  raise SystemExit(f"Worker health returned HTTP {response.status}")
+              payload = json.loads(response.read().decode("utf-8"))
+          if payload.get("ok") is not True or payload.get("service") != "stock-worker":
+              raise SystemExit("Worker health payload did not match expected service")
+          print("PASS: deployed Worker /healthz returned ok=true")
           PY
