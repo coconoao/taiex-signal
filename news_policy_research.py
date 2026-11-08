@@ -76,19 +76,36 @@ def main():
             continue
         daily.setdefault(day, []).append(title)
 
-    rows = []
+    mapped = {}
+    matched_publication_dates = set()
     for day, titles in sorted(daily.items()):
-        # bisect_right semantics: first session strictly later than publication date.
+        # Map each publication date to the first trading session strictly after it.
+        # Dates falling in the same weekend/holiday window share one market outcome.
         baseline_i = bisect.bisect_right(session_days, day)
         if baseline_i < 0 or baseline_i + 1 >= len(session_days):
             continue
         baseline_day = session_days[baseline_i]
+        bucket = mapped.setdefault(baseline_day, {
+            "publication_dates": [],
+            "headline_count": 0,
+        })
+        bucket["publication_dates"].append(day)
+        bucket["headline_count"] += len(titles)
+        matched_publication_dates.add(day)
+
+    rows = []
+    for baseline_day, bucket in sorted(mapped.items()):
+        baseline_i = session_index[baseline_day]
         next_day = session_days[baseline_i + 1]
         start = session_closes[baseline_day]
         end = session_closes[next_day]
+        publication_dates = bucket["publication_dates"]
         rows.append({
-            "date": day,
-            "headline_count": len(titles),
+            "date": publication_dates[0],
+            "publication_date_start": publication_dates[0],
+            "publication_date_end": publication_dates[-1],
+            "publication_date_count": len(publication_dates),
+            "headline_count": bucket["headline_count"],
             "baseline_session_date": baseline_day,
             "next_session_date": next_day,
             "next_session_return_pct": round((end / start - 1) * 100, 4),
@@ -109,23 +126,25 @@ def main():
         "archive_date_end": archive.get("date_end"),
         "market_date_start": closes[0][0],
         "market_date_end": closes[-1][0],
-        "matched_date_count": len(rows),
-        "unmatched_news_date_count": max(0, len(daily) - len(rows)),
+        "matched_date_count": len(matched_publication_dates),
+        "matched_session_count": len(rows),
+        "unmatched_news_date_count": max(0, len(daily) - len(matched_publication_dates)),
         "matched_headline_count": sum(x["headline_count"] for x in rows),
         "chronological_split": {
             "method": "依日期排序，前 70% 僅作歷史描述，後 30% 保留作時間外觀察",
             "historical_period": {
-                "date_start": train[0]["date"], "date_end": train[-1]["date"],
+                "date_start": train[0]["publication_date_start"], "date_end": train[-1]["publication_date_end"],
                 **stats(train),
             },
             "later_period": ({
-                "date_start": holdout[0]["date"], "date_end": holdout[-1]["date"],
+                "date_start": holdout[0]["publication_date_start"], "date_end": holdout[-1]["publication_date_end"],
                 **stats(holdout),
             } if holdout else {"sample_count": 0}),
         },
         "all_matched": stats(rows),
         "latest_matches": rows[-12:][::-1],
-        "method_note": "以官方索引發布日期聚合標題，將每個發布日配對至嚴格晚於發布日的第一個台股交易日作為基準，再計算該基準交易日收盤至下一交易日收盤的變化。因未取得發布時刻，此保守規則避免使用可能早於新聞發布的當日收盤價；抽樣官方政策標題不代表完整新聞環境，不代表因果關係、預測能力或未來機率。",
+        "method_note": "先將官方索引標題按發布日彙整，再將每個發布日配對至嚴格晚於發布日的第一個台股交易日；落在同一週末或休市區間的多個發布日合併為同一交易日樣本，避免重複計算同一段指數變化。結果計算該基準交易日收盤至下一交易日收盤的變化。因未取得發布時刻，此保守規則避免使用可能早於新聞發布的當日收盤價；抽樣官方政策標題不代表完整新聞環境，不代表因果關係、預測能力或未來機率。"
+
         "model_training": False,
         "forecasting": False,
     }
