@@ -62,6 +62,8 @@ class StockWorkerRoutingTests(unittest.TestCase):
                 web_app.request_stock_worker("2330")
 
     def test_worker_validation_422_is_preserved_as_value_error(self):
+        health_response = io.BytesIO(b'{"ok":true}')
+        health_response.status = 200
         with patch.multiple(
             web_app,
             STOCK_WORKER_URL="https://worker.example",
@@ -69,7 +71,7 @@ class StockWorkerRoutingTests(unittest.TestCase):
         ), patch.object(
             web_app.urllib.request,
             "urlopen",
-            side_effect=self._worker_http_error(422),
+            side_effect=[health_response, self._worker_http_error(422)],
         ):
             with self.assertRaisesRegex(ValueError, "worker failed"):
                 web_app.request_stock_worker("2330")

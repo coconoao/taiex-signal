@@ -87,9 +87,42 @@ class StockWorkerGatewayError(RuntimeError):
     """The configured stock worker failed or returned an invalid response."""
 
 
+def warm_stock_worker(timeout=90):
+    """Wake the free-tier Worker before analysis; /healthz is intentionally public."""
+    if not STOCK_WORKER_URL:
+        raise StockServiceUnavailable("個股分析服務尚未設定")
+    deadline = time.monotonic() + timeout
+    last_error = "尚未收到健康檢查回應"
+    while time.monotonic() < deadline:
+        req = urllib.request.Request(
+            STOCK_WORKER_URL + "/healthz",
+            headers={"Cache-Control": "no-cache"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=min(15, max(1, deadline - time.monotonic()))) as response:
+                health = json.loads(response.read().decode("utf-8"))
+            if response.status == 200 and isinstance(health, dict) and health.get("ok") is True:
+                return
+            last_error = "子服務健康檢查回傳格式錯誤"
+        except urllib.error.HTTPError as exc:
+            last_error = "HTTP %s" % exc.code
+            if exc.code not in (502, 503, 504):
+                break
+        except Exception as exc:
+            last_error = type(exc).__name__
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(3, remaining))
+    raise StockWorkerGatewayError("個股分析子服務喚醒逾時（%s），請稍後重試" % last_error)
+
+
 def request_stock_worker(code):
     if not STOCK_WORKER_URL or not STOCK_WORKER_TOKEN:
         raise StockServiceUnavailable("個股分析服務尚未設定")
+    # Render free services sleep when idle. Wake the isolated Worker first so
+    # the analysis request does not become the cold-start request.
+    warm_stock_worker()
     code = str(code or "").strip().upper()
     payload = json.dumps({"code": code}).encode("utf-8")
     req = urllib.request.Request(
