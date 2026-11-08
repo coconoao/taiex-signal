@@ -8,9 +8,9 @@ from stock_model_research import analyze
 
 class FourYearResearchFeasibilityTests(unittest.TestCase):
     def test_four_year_history_supports_all_three_research_horizons(self):
-        # About four years of Taiwan trading sessions, without any live provider
+        # A conservative four-year approximation of Taiwan trading sessions, without any live provider
         # calls. This exercises the actual walk-forward and calibration pipeline.
-        dates = pd.bdate_range("2022-01-03", periods=1008)
+        dates = pd.bdate_range("2022-01-03", periods=980)
         rng = np.random.default_rng(20261108)
         stock_returns = rng.normal(0.00025, 0.012, len(dates))
         market_returns = rng.normal(0.00018, 0.009, len(dates))
@@ -27,7 +27,7 @@ class FourYearResearchFeasibilityTests(unittest.TestCase):
         )
 
         result = analyze(stock_close, market_close, volume)
-        self.assertEqual(result["history_sessions"], 1008)
+        self.assertEqual(result["history_sessions"], 980)
         self.assertEqual(set(result["horizons"]), {"1m", "3m", "6m"})
 
         for horizon in ("1m", "3m", "6m"):
