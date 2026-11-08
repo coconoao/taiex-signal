@@ -156,8 +156,10 @@ def current_research_judgment(X, y, factory):
     train_idx = X.index[valid & (X.index < current_date)]
     if len(train_idx) < MIN_TRAIN:
         return {"status": "insufficient", "asof": str(current_date.date()),
+                "latest_data_date": str(latest_data_date.date()),
+                "missing_features_at_latest_data_date": latest_missing,
                 "training_samples": int(len(train_idx)),
-                "note": "截至最新完整特徵日，歷史標記樣本尚未達訓練門檻。"}
+                "note": freshness_note + " 歷史標記樣本尚未達訓練門檻。"}
     y_train = y.loc[train_idx].astype(int)
     if y_train.nunique() < 2:
         return {"status": "insufficient", "asof": str(current_date.date()),
