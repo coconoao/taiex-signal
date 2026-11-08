@@ -120,6 +120,12 @@ details[open]>summary{margin-bottom:12px}
       <div class="charttools" aria-label="歷史回測圖表操作"><button class="btn sm ghost" id="curveZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="curveZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="curvePan" type="button">平移</button><button class="btn sm ghost" id="curveZoom" type="button">框選縮放</button><button class="btn sm ghost" id="curveReset" type="button">重設</button><button class="btn sm ghost" id="curveRange1m" type="button">1 個月</button><button class="btn sm ghost" id="curveRange3m" type="button">3 個月</button><button class="btn sm ghost" id="curveRange6m" type="button">6 個月</button><button class="btn sm ghost" id="curveRangeYtd" type="button">今年</button><button class="btn sm ghost" id="curveRange1y" type="button">1 年</button><button class="btn sm ghost" id="curveRangeAll" type="button">全部</button></div><p class="note">可拖曳下方滑桿選日期；點選「框選縮放」後，在圖表上拖曳選取區域。此圖為歷史滾動樣本外模擬，非實際成交；程式假設每次部位變動成本 0.2%，未必涵蓋所有交易摩擦。</p><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
+    <section id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
+      <p class="note" id="newsEnhancedModelMeta">載入獨立模型資料中…</p>
+      <div id="newsEnhancedModelSignal"></div>
+      <div id="newsEnhancedModelMetrics"></div>
+      <p class="note" id="newsEnhancedModelNote">此模型結合原始模型當時的市場分數與新聞特徵；樣本不足或未通過時間外測試條件時，不產生方向分類。</p>
+    </section>
     <section><h2>新聞綜合分析</h2>
       <p class="note" id="newsResearchMeta">整合最新新聞、歷史新聞與政策事件資料；載入中…</p>
       <p class="note" id="newsUnifiedMeta">正在合併新聞資料並去除重複標題…</p>
@@ -378,7 +384,7 @@ function openChatGPTWindow() {
 $("openChatGPTSettings").addEventListener("click", openChatGPTWindow);
 
 /* ---- 新聞資料：提供複製到 Gemini 或 ChatGPT ---- */
-let NEWS = null, WK = null, NEWS_RESEARCH = null, GDELT_RESEARCH = null, MEDIACLOUD_RESEARCH = null, POLICY_ARCHIVE = null, POLICY_RESEARCH = null;
+let NEWS = null, WK = null, NEWS_RESEARCH = null, GDELT_RESEARCH = null, MEDIACLOUD_RESEARCH = null, POLICY_ARCHIVE = null, POLICY_RESEARCH = null, NEWS_ENHANCED_MODEL = null;
 function mergedNews() {
   if (!NEWS) return null;
   const n = JSON.parse(JSON.stringify(NEWS));
@@ -563,6 +569,37 @@ function renderPolicyArchive(a) {
     </article>`;
   }).join("");
 }
+function renderNewsEnhancedModel(m) {
+  const meta = $("newsEnhancedModelMeta");
+  const signal = $("newsEnhancedModelSignal");
+  const metrics = $("newsEnhancedModelMetrics");
+  const note = $("newsEnhancedModelNote");
+  if (!m) {
+    meta.textContent = "尚無新聞增強模型資料；等待每日研究流程建立。";
+    signal.innerHTML = '<div class="mc"><b>資料尚未建立</b><p class="note">目前不顯示參考訊號。</p></div>';
+    metrics.textContent = "";
+    return;
+  }
+  meta.textContent = `市場基準日 ${m.asof || "—"}｜可用歷史樣本 ${m.sample_count || 0}／至少 ${m.minimum_samples || 100} 筆｜模型狀態 ${m.status || "未知"}`;
+  if (m.status !== "ready") {
+    signal.innerHTML = `<div class="mc"><b>${esc(m.signal || "資料累積中")}</b><p class="note">目前尚未產生新聞增強分類。</p></div>`;
+    metrics.textContent = `歷史快照 ${m.history_count || 0} 筆。至少需要 ${m.minimum_samples || 100} 筆同時具備原始模型分數、新聞特徵與後續收盤結果的樣本。`;
+    note.textContent = m.note || "資料不足時不會產生模型訊號。";
+    return;
+  }
+  const s = m.feature_summary || {}, v = m.metrics || {};
+  signal.innerHTML = `<div class="mc"><b>新聞增強參考分類</b><div class="big">${esc(m.signal)}</div><p class="note">正向分類分數 ${Number(m.score_pct).toFixed(1)}%｜新聞標題 ${s.headline_count || 0} 則｜原始模型分數 ${s.original_model_score_pct ?? "—"}%</p></div>`;
+  const cards = [
+    ["時間外測試樣本", m.holdout_samples || 0],
+    ["時間外方向分類正確率", (v.holdout_accuracy_pct ?? "—") + (Number.isFinite(v.holdout_accuracy_pct) ? "%" : "")],
+    ["新聞增強模型 Brier", v.enhanced_brier ?? "—"],
+    ["原始模型基準 Brier", v.original_model_brier ?? "—"],
+    ["相對原始模型", v.brier_improved_vs_original ? "測試期較低" : "未見改善"]
+  ];
+  metrics.innerHTML = '<div class="mcs">' + cards.map(([k,x]) => `<div class="mc"><b>${esc(k)}</b><div class="big">${esc(x)}</div></div>`).join("") + '</div>' +
+    `<p class="note">時間外測試區間：${esc(v.holdout_start || "—")} 至 ${esc(v.holdout_end || "—")}。Brier 越低代表該測試期分數誤差越小；這不是未來績效保證。</p>`;
+  note.textContent = m.note || "僅供研究參考，不是買賣指令。";
+}
 function renderUnifiedNews() {
   const items = [];
   const add = (title, date, url) => {
@@ -599,6 +636,7 @@ function renderNews() {
   renderNewsResearch(NEWS_RESEARCH);
   renderUnifiedNews();
   renderPolicyResearch(POLICY_RESEARCH);
+  renderNewsEnhancedModel(NEWS_ENHANCED_MODEL);
 }
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
@@ -611,7 +649,8 @@ const loadNews = () => Promise.all([
   getJSON("news_gdelt_research.json").then(r => { GDELT_RESEARCH = r; }).catch(() => { GDELT_RESEARCH = null; }),
   getJSON("news_mediacloud_research.json").then(r => { MEDIACLOUD_RESEARCH = r; }).catch(() => { MEDIACLOUD_RESEARCH = null; }),
   getJSON("news_policy_archive.json").then(r => { POLICY_ARCHIVE = r; }).catch(() => { POLICY_ARCHIVE = null; }),
-  getJSON("news_policy_research.json").then(r => { POLICY_RESEARCH = r; }).catch(() => { POLICY_RESEARCH = null; })
+  getJSON("news_policy_research.json").then(r => { POLICY_RESEARCH = r; }).catch(() => { POLICY_RESEARCH = null; }),
+  getJSON("news_enhanced_model.json").then(r => { NEWS_ENHANCED_MODEL = r; }).catch(() => { NEWS_ENHANCED_MODEL = null; })
 ]).then(renderNews);
 let lastSig = null, busy = false;
 function loadAll() {
