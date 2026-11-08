@@ -55,7 +55,22 @@ def _request_json(url: str) -> dict:
                 time.sleep(1.0)
                 continue
             break
-    raise MarketDataError(f"官方行情來源連線失敗：{type(last_error).__name__}")
+
+    # Keep diagnostics useful without recording full URLs, query strings, or
+    # request payloads. The adapter only calls fixed public exchange hosts.
+    host = urllib.parse.urlparse(url).hostname or "unknown-host"
+    reason = getattr(last_error, "reason", None)
+    if reason is not None:
+        reason_type = type(reason).__name__
+        reason_errno = getattr(reason, "errno", None)
+        detail = f"{type(last_error).__name__}/{reason_type}"
+        if reason_errno is not None:
+            detail += f"(errno={reason_errno})"
+    elif code is not None:
+        detail = f"{type(last_error).__name__}(http={code})"
+    else:
+        detail = type(last_error).__name__
+    raise MarketDataError(f"官方行情來源連線失敗：{host} {detail}")
 
 
 def _month_starts(years: int = 10):
