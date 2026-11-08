@@ -35,8 +35,10 @@ jobs:
           ref: ${{ inputs.target_ref }}
           fetch-depth: 1
           persist-credentials: false
+          path: source
 
       - name: Build a bounded, redacted source bundle
+        working-directory: source
         env:
           TASK: ${{ inputs.task }}
           SCOPE: ${{ inputs.scope }}
@@ -123,6 +125,9 @@ jobs:
           print(f"Prepared {len(chunks)} source files ({total} characters); excluded secrets and generated files.")
           PY
 
+      - name: Validate Cloudflare response parser
+        run: python -m unittest discover -s .github/scripts -p 'test_cloudflare_ai_response.py' -v
+
       - name: Analyze with Cloudflare Workers AI
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -150,38 +155,22 @@ jobs:
             --request POST "$URL" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --header "Content-Type: application/json" \
-            --data-binary @cloudflare_request.json) || HTTP_CODE="000"
+            --data-binary @source/cloudflare_request.json) || HTTP_CODE="000"
           if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error::Cloudflare Workers AI request failed (HTTP ${HTTP_CODE}). Check token permissions, account ID, model availability, and quota."
-            python - <<'PY'
-          import json
-          from pathlib import Path
-          try:
-              data = json.loads(Path("cloudflare_response.json").read_text())
-              for item in data.get("errors", [])[:3]:
-                  print(item.get("message", "Cloudflare API error"))
-          except Exception:
-              print("No readable API error details were returned.")
-          PY
+            python .github/scripts/cloudflare_ai_response.py cloudflare_response.json cloudflare_audit.md || true
             exit 1
           fi
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          data = json.loads(Path("cloudflare_response.json").read_text(encoding="utf-8"))
-          response = (data.get("result") or {}).get("response")
-          if not isinstance(response, str) or not response.strip():
-              raise SystemExit("Cloudflare returned no text response.")
-          Path("cloudflare_audit.md").write_text(response, encoding="utf-8")
-          print("Cloudflare AI analysis completed.")
-          PY
+          python .github/scripts/cloudflare_ai_response.py cloudflare_response.json cloudflare_audit.md
 
       - name: Publish analysis summary
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
         run: |
           {
             echo "## Cloudflare AI 程式碼診斷"
             echo
-            echo "目標版本：`${{ inputs.target_ref }}`"
+            printf '目標版本：`%s`\n' "$TARGET_REF"
             echo
             cat cloudflare_audit.md
             echo

@@ -1,0 +1,35 @@
+name: Cloudflare AI Parser Tests
+
+on:
+  pull_request:
+    paths:
+      - ".github/scripts/cloudflare_ai_response.py"
+      - ".github/scripts/test_cloudflare_ai_response.py"
+      - ".github/workflows/cloudflare-ai-code-audit.yml"
+      - ".github/workflows/cloudflare-ai-parser-ci.yml"
+  push:
+    branches:
+      - fix/cloudflare-ai-response-parser
+    paths:
+      - ".github/scripts/cloudflare_ai_response.py"
+      - ".github/scripts/test_cloudflare_ai_response.py"
+      - ".github/workflows/cloudflare-ai-code-audit.yml"
+      - ".github/workflows/cloudflare-ai-parser-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  parser-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run response parser tests
+        run: python -m unittest discover -s .github/scripts -p 'test_cloudflare_ai_response.py' -v
