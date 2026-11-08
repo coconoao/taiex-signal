@@ -138,48 +138,46 @@ def run():
         str(col): round(float(X_raw[col].notna().mean() * 100), 1)
         for col in X_raw.columns
     }
-    valid = X_raw.notna().all(axis=1) & y_raw.notna()
-    X, y = X_raw.loc[valid], y_raw.loc[valid]
-    complete_samples = int(len(X))
-
+    # Each candidate gets its own complete-case calendar. This prevents sparse
+    # chip/credit/futures columns from suppressing a market-only model's usable
+    # history. Results on different calendars are explicitly non-comparable.
+    market_cols = [c for c in X_raw.columns
+                   if not c.startswith(("籌碼:", "信用:", "期貨:"))]
     experiments = {}
     specs = candidates()
-    if complete_samples >= 100:
-        market_cols = [c for c in X.columns
-                       if not c.startswith(("籌碼:", "信用:", "期貨:"))]
-        for name, factory in specs.items():
-            use = X[market_cols] if name == "logistic_market_features_only" else X
-            _, _, result = walk_forward_candidate(use, y, factory, step=STEP)
-            experiments[name] = result
-        # Exact production LogisticRegression(C=0.5) cadence reference.
-        _, _, experiments["production_cadence_step20"] = walk_forward_candidate(
-            X, y, specs["logistic_current_step5"], step=20
-        )
-    else:
-        for name in specs:
-            experiments[name] = {
-                "status": "insufficient",
-                "available_complete_samples": complete_samples,
-                "minimum_training_rows": MIN_TRAIN,
-                "note": "完整特徵樣本不足，暫不執行候選模型比較。",
-            }
-        experiments["production_cadence_step20"] = {
-            "status": "insufficient",
-            "available_complete_samples": complete_samples,
-            "minimum_training_rows": MIN_TRAIN,
-            "note": "完整特徵樣本不足，暫不執行候選模型比較。",
-        }
+    for name, factory in specs.items():
+        cols = market_cols if name == "logistic_market_features_only" else list(X_raw.columns)
+        X_candidate = X_raw[cols]
+        _, _, result = walk_forward_candidate(X_candidate, y_raw, factory, step=STEP)
+        result["feature_count"] = len(cols)
+        result["sample_calendar"] = "market_features_only" if name == "logistic_market_features_only" else "all_features_complete_cases"
+        experiments[name] = result
+
+    # Production-cadence reference uses the same full-feature sample calendar.
+    _, _, production_result = walk_forward_candidate(
+        X_raw, y_raw, specs["logistic_current_step5"], step=20
+    )
+    production_result["feature_count"] = int(X_raw.shape[1])
+    production_result["sample_calendar"] = "all_features_complete_cases"
+    experiments["production_cadence_step20"] = production_result
+
+    full_valid = X_raw.notna().all(axis=1) & y_raw.notna()
+    complete_samples = int(full_valid.sum())
+    market_valid = X_raw[market_cols].notna().all(axis=1) & y_raw.notna()
+    market_complete_samples = int(market_valid.sum())
+    any_available = any(item.get("status") == "available" for item in experiments.values())
 
     return {
         "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "status": "evaluated" if complete_samples >= MIN_TRAIN + 30 else "insufficient",
+        "status": "evaluated" if any_available else "insufficient",
         "target": "TAIEX next-session direction",
         "available_complete_samples": complete_samples,
+        "market_only_complete_samples": market_complete_samples,
         "minimum_training_rows": MIN_TRAIN,
         "minimum_oos_samples": 30,
         "feature_count": int(X_raw.shape[1]),
         "feature_coverage_pct": feature_coverage,
-        "method": "Expanding-window chronological walk-forward; at least 100 training rows and 30 out-of-sample rows required; refit every 5 sessions (production cadence comparator every 20); no random shuffle; common complete-case sample calendar; yearly subperiod metrics.",
+        "method": "Expanding-window chronological walk-forward; each candidate uses its own complete-case feature calendar; at least 100 training rows and 30 out-of-sample rows required; refit every 5 sessions (production cadence comparator every 20); no random shuffle; yearly subperiod metrics. Results on different calendars must not be compared as if they used identical dates.",
         "experiments": experiments,
         "promotion_policy": "No automatic promotion. Require repeatable improvement across multiple time blocks, improved Brier/log loss versus baseline, adequate coverage, and a later untouched holdout before any production change.",
         "disclaimer": "Historical research only. Metrics are not a guarantee of future performance and are not investment advice or trading instructions.",
