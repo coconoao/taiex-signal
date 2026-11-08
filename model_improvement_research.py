@@ -187,6 +187,38 @@ def current_research_judgment(X, y, factory):
             "note": freshness_note + " 訓練標籤僅取判讀日之前的資料；非盤中即時行情、非買賣指示。"}
 
 
+def paired_block_bootstrap(candidate_prob, incumbent_prob, actual, block_size=20, repeats=1000):
+    """Paired moving-block bootstrap; negative Brier delta favors candidate."""
+    cp = np.clip(np.asarray(candidate_prob, dtype=float), 1e-6, 1 - 1e-6)
+    ip = np.clip(np.asarray(incumbent_prob, dtype=float), 1e-6, 1 - 1e-6)
+    y = np.asarray(actual, dtype=int)
+    n = len(y)
+    if n < block_size or len(cp) != n or len(ip) != n:
+        return {"status": "insufficient"}
+    brier_delta = (cp - y) ** 2 - (ip - y) ** 2
+    accuracy_delta = ((cp >= 0.5) == (y == 1)).astype(float) - ((ip >= 0.5) == (y == 1)).astype(float)
+    rng = np.random.default_rng(RANDOM_STATE)
+    n_blocks = int(np.ceil(n / block_size))
+    brier_samples = np.empty(repeats)
+    accuracy_samples = np.empty(repeats)
+    max_start = n - block_size
+    for i in range(repeats):
+        starts = rng.integers(0, max_start + 1, size=n_blocks)
+        indices = np.concatenate([np.arange(s, s + block_size) for s in starts])[:n]
+        brier_samples[i] = float(np.mean(brier_delta[indices]))
+        accuracy_samples[i] = float(np.mean(accuracy_delta[indices]) * 100)
+    return {
+        "status": "available",
+        "block_size_sessions": int(block_size),
+        "bootstrap_repeats": int(repeats),
+        "brier_delta_candidate_minus_incumbent": round(float(np.mean(brier_delta)), 5),
+        "brier_delta_95pct_ci": [round(float(x), 5) for x in np.quantile(brier_samples, [0.025, 0.975])],
+        "accuracy_delta_percentage_points": round(float(np.mean(accuracy_delta) * 100), 2),
+        "accuracy_delta_95pct_ci": [round(float(x), 2) for x in np.quantile(accuracy_samples, [0.025, 0.975])],
+        "interpretation": "Negative Brier delta favors candidate; positive accuracy delta favors candidate. Confidence intervals are moving-block bootstrap estimates, not guarantees.",
+    }
+
+
 def run():
     market, chips, margin, futures = load_inputs()
     X_raw, y_raw, _ = pipeline.build(market, chips, margin, futures=futures)
@@ -242,10 +274,20 @@ def run():
         "market_only_random_forest": (X_raw.loc[paired_index, market_cols], specs["random_forest_conservative"]),
         "market_only_hist_gradient_boosting": (X_raw.loc[paired_index, market_cols], specs["hist_gradient_boosting_conservative"]),
     }
+    incumbent_pred = None
     for paired_name, (paired_X, paired_factory) in paired_specs.items():
-        _, _, paired_result = walk_forward_candidate(
+        paired_pred, _, paired_result = walk_forward_candidate(
             paired_X, paired_y, paired_factory, step=STEP
         )
+        if paired_name == "incumbent_all_features_logistic":
+            incumbent_pred = paired_pred
+        elif incumbent_pred is not None and paired_pred is not None:
+            common_pred = paired_pred.index.intersection(incumbent_pred.index)
+            paired_result["paired_uncertainty_vs_incumbent"] = paired_block_bootstrap(
+                paired_pred.loc[common_pred],
+                incumbent_pred.loc[common_pred],
+                paired_y.loc[common_pred],
+            )
         paired_result["feature_count"] = int(paired_X.shape[1])
         paired_result["sample_calendar"] = "identical_all_features_complete_case_calendar"
         paired_result["comparison_start"] = (
