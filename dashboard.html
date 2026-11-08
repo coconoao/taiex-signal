@@ -147,7 +147,14 @@ details[open]>summary{margin-bottom:12px}
       <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。每格依序顯示「不重疊樣本／逐日重疊觀察」；正報酬比例亦依此順序。逐日觀察數較多，但相鄰期間高度重疊、彼此相關，不可視為同等數量的獨立樣本；Wilson 95% 參考區間只用不重疊樣本計算，但未校正時間序列相依性，因此不應視為精確的不確定性界線。歷史統計不代表未來發生機率。</p>
     </section>
 
-    <section id="longModelResearch">
+    <section id="bestTestModel">
+      <h2>目前表現最佳的測試模型</h2>
+      <p class="note" id="bestTestModelMeta">正在讀取同日期樣本外比較…</p>
+      <div id="bestTestModelCard" class="mcs"><p class="note">載入研究資料中…</p></div>
+      <p class="note">此處只展示同一日期日曆下 Brier Score 最低的研究候選，並非正式模型替換。看漲／看空／觀察是模型依最新完整資料產生的研究分類，不是未來漲跌保證或買賣指示；若資料過期或不完整，會顯示觀察或資料不足。</p>
+    </section>
+
+    <section id="longModelResearch" hidden>
       <h2>中長期模型研究</h2>
       <p class="note">以下分別呈現台股不同持有期間模型、模型改良實驗、新聞增強模型，以及策略與其他市場研究。研究結果與正式隔日訊號分開，不會自動取代正式模型。</p>
       <section id="multiHorizonModelResearch"><h2>中長期市場研究</h2>
@@ -177,6 +184,14 @@ details[open]>summary{margin-bottom:12px}
       <section id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
       <section hidden id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
     </section>
+  </div>
+
+  <div id="tab-test" hidden>
+    <section>
+      <h2>模型測試與研究</h2>
+      <p class="note">此頁集中呈現模型實驗、樣本外比較、穩健性檢查、新聞增強研究及策略回測。候選模型不會自動取代正式模型。</p>
+    </section>
+    <div id="testResearchMount"></div>
   </div>
 
   <div id="tab-stock" hidden>
@@ -212,8 +227,19 @@ details[open]>summary{margin-bottom:12px}
 
   <p class="note">研究用途，不構成投資建議。回測績效不代表未來，樣本外表現通常較差。新聞與 AI 分數目前只供參考，沒有納入上面的機率與回測。</p>
 </main>
-<nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">📊<br>長線</button><button data-t="stock">🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
+<nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">📊<br>長線</button><button data-t="test">🧪<br>測試</button><button data-t="stock">🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
 <script>
+/* 將完整測試研究區移入獨立「測試」分頁，避免長線頁面過度擁擠。 */
+(function mountTestResearch() {
+  const research = document.getElementById("longModelResearch");
+  const strategy = document.getElementById("longStrategyResearch");
+  const mount = document.getElementById("testResearchMount");
+  if (research && strategy && mount) {
+    research.hidden = false;
+    strategy.hidden = false;
+    mount.append(research, strategy);
+  }
+})();
 /* 獨立導覽控制器：即使主頁面其他功能發生 JavaScript 錯誤，底部導覽仍可切換。 */
 document.addEventListener("click", function(event) {
   const button = event.target.closest(".tabs [data-t]");
@@ -731,6 +757,45 @@ function renderMultiHorizonResearch(r) {
 const loadMultiHorizonResearch = () => getJSON("multi_horizon_model_research.json")
   .then(renderMultiHorizonResearch)
   .catch(() => { $("multiHorizonMeta").textContent = "多期間研究報告尚未產生或暫時無法載入。"; });
+function renderBestTestModel(r) {
+  const paired = r.same_calendar_comparison || {};
+  const models = paired.experiments || {};
+  const labels = {
+    market_only_logistic: "市場特徵 Logistic",
+    market_only_random_forest: "市場特徵 Random Forest",
+    market_only_hist_gradient_boosting: "市場特徵 Gradient Boosting",
+    market_plus_chips_logistic: "市場＋籌碼 Logistic",
+    market_plus_margin_logistic: "市場＋融資融券 Logistic",
+    market_plus_futures_logistic: "市場＋期貨 Logistic",
+    market_only_rolling_252: "市場特徵 Logistic（252 日滾動）",
+    market_only_rolling_504: "市場特徵 Logistic（504 日滾動）",
+    all_features_rolling_252: "全特徵 Logistic（252 日滾動）",
+    all_features_rolling_504: "全特徵 Logistic（504 日滾動）"
+  };
+  const candidates = Object.entries(models)
+    .filter(([key, v]) => key !== "incumbent_all_features_logistic"
+      && v.status === "available" && Number.isFinite(Number(v.brier)))
+    .sort((a, b) => Number(a[1].brier) - Number(b[1].brier));
+  const meta = $("bestTestModelMeta");
+  const card = $("bestTestModelCard");
+  if (!candidates.length) {
+    meta.textContent = "尚無可比較的同日期樣本外模型。";
+    card.innerHTML = '<p class="note">資料不足，暫不選出最佳候選。</p>';
+    return;
+  }
+  const [key, v] = candidates[0];
+  const j = v.current_judgment || {};
+  const category = j.status !== "available" ? "觀察"
+    : j.category === "偏正向研究分類" ? "看漲"
+    : j.category === "偏負向研究分類" ? "看空" : "觀察";
+  const date = j.asof || "無可用完整資料日";
+  const ci = v.paired_uncertainty_vs_incumbent || v.paired_uncertainty_vs_expanding_incumbent || {};
+  const brierCI = ci.brier_delta_95pct_ci || [];
+  const ciLabel = brierCI.length === 2 ? `${brierCI[0]} 至 ${brierCI[1]}` : "尚無";
+  const significant = brierCI.length === 2 && (brierCI[0] > 0 || brierCI[1] < 0);
+  meta.textContent = `比較日期 ${paired.comparison_start || v.comparison_start || "—"} 至 ${paired.comparison_end || v.comparison_end || "—"}｜共同樣本 ${v.sample_count ?? paired.sample_count ?? "—"} 筆`;
+  card.innerHTML = `<div class="mc"><b>${labels[key] || key}</b><div class="big">${category}</div><p class="note">最新完整資料日 ${date}｜訓練樣本 ${j.training_samples ?? "—"} 筆</p><p class="note">樣本外方向分類正確率 ${v.direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}｜Brier Skill ${v.brier_skill ?? "—"}</p><p class="note">相較正式模型的 Brier 差異 ${ci.brier_delta_candidate_minus_incumbent ?? ci.brier_delta_candidate_minus_expanding_incumbent ?? "—"}｜95% 區間 ${ciLabel}</p><p class="note">${significant ? "配對區間未包含 0；仍需跨年度與未觸碰保留樣本驗證。" : "配對區間包含 0 或尚無區間，尚不能確認優勢超出抽樣波動。"}</p></div>`;
+}
 function renderModelImprovementResearch(r) {
   const experiments = r.experiments || {};
   const entries = Object.entries(experiments);
@@ -804,7 +869,7 @@ function renderStrategyResearch(r) {
 }
 const loadStrategyResearch = () => getJSON("strategy_research.json").then(renderStrategyResearch).catch(() => { $("strategyResearchMeta").textContent = "策略研究報告尚未產生或暫時無法載入。"; });
 const loadModelImprovementResearch = () => getJSON("model_improvement_research.json")
-  .then(renderModelImprovementResearch)
+  .then(r => { renderModelImprovementResearch(r); renderBestTestModel(r); })
   .catch(() => { $("modelImprovementMeta").textContent = "目前尚無模型改良實驗報告，或資料來源暫時不可用。"; });
 const loadNews = () => Promise.all([
   getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }),
