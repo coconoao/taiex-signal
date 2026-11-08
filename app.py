@@ -224,11 +224,24 @@ def run_jobs(*whats):
             if code == 0 and os.environ.get("TAIEX_STORAGE", "").strip().lower() == "supabase":
                 try:
                     import storage
-                    saved = storage.save_data(DATA)
-                    log += f"[storage] saved {saved} data files to Supabase\\n"
-                    if w == "news_enhanced_model":
-                        model_saved = storage.save_data(DATA, names=("news_enhanced_model.json",))
-                        log += f"[storage] saved news-enhanced model output: {model_saved}\\n"
+                    # Fast startup reads restored caches but must never write
+                    # them back: GitHub Actions is the authoritative market-data writer.
+                    save_names = {
+                        "pipeline-fast": (),
+                        "news": (
+                            "news.json", "news_history.jsonl", "policy_events.jsonl",
+                            "news_research.json", "news_research_history.jsonl",
+                        ),
+                        "news_enhanced_model": (
+                            "news_enhanced_model.json", "news_research_history.jsonl",
+                        ),
+                    }.get(w)
+                    saved = (
+                        storage.save_data(DATA, names=save_names)
+                        if save_names is not None else storage.save_data(DATA)
+                    )
+                    if saved:
+                        log += f"[storage] saved {saved} selected data files to Supabase\\n"
                 except Exception as e:
                     code = 1
                     log += f"[storage] persistence failed: {type(e).__name__}: {e}\\n"
