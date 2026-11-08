@@ -14,14 +14,14 @@ class TestTaiwanMarketData(unittest.TestCase):
     def test_number_handles_exchange_formats(self):
         self.assertEqual(tw_market_data._number("+1,234.50"), 1234.5)
         self.assertEqual(tw_market_data._number("-12.00"), -12.0)
-        self.assertEqual(tw_market_data._number("X0.00"), 0.0)
+        self.assertIsNone(tw_market_data._number("X0.00"))
         self.assertIsNone(tw_market_data._number("--"))
 
     def test_adjusted_close_uses_exchange_reference_price_change(self):
         rows = [
             {"date": dt.date(2026, 1, 2), "raw_close": 100.0, "change": 0.0,
              "volume": 1000, "open": 100, "high": 100, "low": 100},
-            # Ex-dividend reference price is 95; a 95 close is a flat adjusted return.
+            # Ordinary unchanged-price session: reference price is also 95.
             {"date": dt.date(2026, 1, 5), "raw_close": 95.0, "change": 0.0,
              "volume": 2000, "open": 95, "high": 95, "low": 95},
             {"date": dt.date(2026, 1, 6), "raw_close": 96.0, "change": 1.0,
@@ -89,3 +89,14 @@ class TestTaiwanMarketData(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_x_prefixed_change_fails_closed_in_adjusted_series(self):
+        rows = [
+            {"date": dt.date(2026, 1, 2), "raw_close": 100.0, "change": 0.0,
+             "volume": 1000, "open": 100, "high": 100, "low": 100},
+            {"date": dt.date(2026, 1, 5), "raw_close": 95.0, "change": None,
+             "volume": 2000, "open": 95, "high": 95, "low": 95},
+        ]
+        with self.assertRaisesRegex(tw_market_data.MarketDataError, "無法解析"):
+            tw_market_data._to_adjusted_frame(rows, "TWSE")
