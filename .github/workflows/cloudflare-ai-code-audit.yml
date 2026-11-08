@@ -126,7 +126,7 @@ jobs:
           PY
 
       - name: Validate Cloudflare response parser
-        run: python -m unittest discover -s .github/scripts -p 'test_cloudflare_ai_response.py' -v
+        run: python .github/scripts/test_cloudflare_ai_response.py
 
       - name: Analyze with Cloudflare Workers AI
         env:
