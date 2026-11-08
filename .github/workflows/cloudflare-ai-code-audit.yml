@@ -88,7 +88,8 @@ jobs:
                   continue
               if any(part in excluded_parts for part in path.parts):
                   continue
-              if path.name.lower() in excluded_names or any(x in path.name.lower() for x in ("secret", "credential", "private_key")):
+              if (path.name.lower() in excluded_names or path.name.lower().startswith(".env.")
+                  or any(x in path.name.lower() for x in ("secret", "credential", "private_key"))):
                   continue
               if patterns and not any(fnmatch.fnmatch(name, p) for p in patterns):
                   continue
