@@ -29,6 +29,10 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install worker dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Compile modules and run unit tests
+        run: |
+          python -m compileall -q .
+          python -m unittest discover -s tests -v
       - name: Run isolated diagnostic with request tracing
         run: |
           python - <<'PY'
