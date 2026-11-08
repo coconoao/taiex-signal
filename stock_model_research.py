@@ -17,7 +17,10 @@ from sklearn.preprocessing import StandardScaler
 HORIZONS = {"1m": 21, "3m": 63, "6m": 126}
 MIN_TRAIN = 500
 MIN_CALIBRATION = 80
-STEP = 21
+# Refit quarterly rather than monthly. Each fold still predicts a contiguous
+# block of 63 sessions, with the same horizon-specific purge; this cuts repeated
+# model fits substantially on the free Render CPU without dropping OOS dates.
+STEP = 63
 RANDOM_STATE = 42
 
 
