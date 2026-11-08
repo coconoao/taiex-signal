@@ -1,5 +1,7 @@
 import datetime as dt
+import io
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 import tw_market_data
@@ -18,6 +20,30 @@ class TestTaiwanMarketData(unittest.TestCase):
                 tw_market_data._request_json(
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
                 )
+
+    def test_request_json_retries_transient_http_status(self):
+        error = urllib.error.HTTPError(
+            "https://www.twse.com.tw/example", 429, "Too Many Requests", {}, None
+        )
+        with (
+            patch.object(
+                tw_market_data.urllib.request, "urlopen",
+                side_effect=[error, io.BytesIO(b'{"stat":"OK"}')],
+            ) as urlopen,
+            patch.object(tw_market_data.time, "sleep") as sleep,
+        ):
+            payload = tw_market_data._request_json("https://www.twse.com.tw/example")
+        self.assertEqual(payload, {"stat": "OK"})
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1.0)
+
+    def test_request_json_diagnostic_includes_http_status(self):
+        error = urllib.error.HTTPError(
+            "https://www.twse.com.tw/example", 403, "Forbidden", {}, None
+        )
+        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(tw_market_data.MarketDataError, "http=403"):
+                tw_market_data._request_json("https://www.twse.com.tw/example")
 
     def test_roc_date_converts_taiwan_calendar(self):
         self.assertEqual(
@@ -45,6 +71,10 @@ class TestTaiwanMarketData(unittest.TestCase):
         self.assertEqual(frame["Close"].iloc[1], 100.0)
         self.assertAlmostEqual(frame["Close"].iloc[2], 100 * 96 / 95, places=4)
         self.assertEqual(frame["RawClose"].tolist(), [100.0, 95.0, 96.0])
+        self.assertAlmostEqual(frame["Open"].iloc[1], 100.0, places=5)
+        self.assertAlmostEqual(frame["High"].iloc[1], 100.0, places=5)
+        self.assertAlmostEqual(frame["Low"].iloc[1], 100.0, places=5)
+        self.assertAlmostEqual(frame["Open"].iloc[2], 100 * 96 / 95, places=5)
         self.assertEqual(frame.attrs["source"], "TWSE")
 
     def test_adjusted_series_fails_closed_on_unparsed_change(self):
