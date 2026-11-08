@@ -6,6 +6,17 @@ from model_improvement_research import evaluate_predictions, walk_forward_candid
 
 
 class ModelImprovementResearchTests(unittest.TestCase):
+    def test_paired_block_bootstrap_reports_directional_deltas(self):
+        from model_improvement_research import paired_block_bootstrap
+        y = np.array([0, 1] * 50)
+        incumbent = np.full(100, 0.5)
+        candidate = np.where(y == 1, 0.8, 0.2)
+        result = paired_block_bootstrap(candidate, incumbent, y, block_size=10, repeats=100)
+        self.assertEqual(result["status"], "available")
+        self.assertLess(result["brier_delta_candidate_minus_incumbent"], 0)
+        self.assertGreater(result["accuracy_delta_percentage_points"], 0)
+        self.assertEqual(len(result["brier_delta_95pct_ci"]), 2)
+
     def test_paired_comparison_uses_identical_calendar(self):
         dates = pd.bdate_range("2020-01-01", periods=10)
         X = pd.DataFrame({"market": np.arange(10, dtype=float),
