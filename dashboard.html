@@ -190,7 +190,7 @@ details[open]>summary{margin-bottom:12px}
 
   <p class="note">研究用途，不構成投資建議。回測績效不代表未來，樣本外表現通常較差。新聞與 AI 分數目前只供參考，沒有納入上面的機率與回測。</p>
 </main>
-<nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">📊<br>長線</button><button data-t="stock" hidden>🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
+<nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">📊<br>長線</button><button data-t="stock">🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
 <script>
 /* 獨立導覽控制器：即使主頁面其他功能發生 JavaScript 錯誤，底部導覽仍可切換。 */
 document.addEventListener("click", function(event) {
@@ -727,9 +727,7 @@ async function copyNewsToAI(target) {
 來源：${h.source || h.tag || "未提供"}
 時間：${h.published || "未提供"}
 連結：${safeNewsHref(h.link) || "未提供"}`
-  ).join("
-
-");
+  ).join("\n\n");
   const events = (NEWS.policy_events || []).slice(0, 18).map((e, i) =>
     `政策事件 ${i + 1}. ${e.title || "（無標題）"}
 類別：${e.category || "一般政策"}
@@ -739,16 +737,8 @@ async function copyNewsToAI(target) {
 發布時間：${e.published || "未提供"}
 摘要：${e.description || "未提供"}
 原文：${safeNewsHref(e.link) || "未提供"}`
-  ).join("
-
-");
-  const payload = "請用繁體中文整理以下資料，分成台灣新聞、政府政策、國際局勢與市場新聞。每則請區分已確認事實、尚待確認資訊及分析推論；說明政策可能經由關稅、出口、供應鏈、能源、匯率或利率傳導的管道。政策階段是依標題與摘要的初步字詞分類，請核對原始公告，不要自行判定法律效力。不要提供股票買賣建議、價格預測或投資策略。
-
-【新聞】
-" + items + "
-
-【政策事件資料庫】
-" + events;
+  ).join("\n\n");
+  const payload = "請用繁體中文整理以下資料，分成台灣新聞、政府政策、國際局勢與市場新聞。每則請區分已確認事實、尚待確認資訊及分析推論；說明政策可能經由關稅、出口、供應鏈、能源、匯率或利率傳導的管道。政策階段是依標題與摘要的初步字詞分類，請核對原始公告，不要自行判定法律效力。不要提供股票買賣建議、價格預測或投資策略。\n\n【新聞】\n" + items + "\n\n【政策事件資料庫】\n" + events;
   try {
     await navigator.clipboard.writeText(payload);
     msg.textContent = "已複製 " + selected.length + " 則新聞資料（含台灣新聞與政策來源）。請開啟 " + target + " 聊天室並貼上。";
