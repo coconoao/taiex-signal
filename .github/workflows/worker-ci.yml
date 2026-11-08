@@ -5,7 +5,7 @@ on:
     branches: [worker-production]
     types: [opened, synchronize, reopened, ready_for_review]
   push:
-    branches: [worker-production]
+    branches: ['**']
 
 permissions:
   contents: read
