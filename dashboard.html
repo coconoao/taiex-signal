@@ -120,34 +120,22 @@ details[open]>summary{margin-bottom:12px}
       <div class="charttools" aria-label="歷史回測圖表操作"><button class="btn sm ghost" id="curveZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="curveZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="curvePan" type="button">平移</button><button class="btn sm ghost" id="curveZoom" type="button">框選縮放</button><button class="btn sm ghost" id="curveReset" type="button">重設</button><button class="btn sm ghost" id="curveRange1m" type="button">1 個月</button><button class="btn sm ghost" id="curveRange3m" type="button">3 個月</button><button class="btn sm ghost" id="curveRange6m" type="button">6 個月</button><button class="btn sm ghost" id="curveRangeYtd" type="button">今年</button><button class="btn sm ghost" id="curveRange1y" type="button">1 年</button><button class="btn sm ghost" id="curveRangeAll" type="button">全部</button></div><p class="note">可拖曳下方滑桿選日期；點選「框選縮放」後，在圖表上拖曳選取區域。此圖為歷史滾動樣本外模擬，非實際成交；程式假設每次部位變動成本 0.2%，未必涵蓋所有交易摩擦。</p><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
-    <section><h2>新聞資料研究版（獨立於原模型）</h2>
-      <p class="note" id="newsResearchMeta">載入新聞研究資料中…</p>
+    <section><h2>新聞綜合分析</h2>
+      <p class="note" id="newsResearchMeta">整合最新新聞、歷史新聞與政策事件資料；載入中…</p>
+      <div id="newsD"></div>
       <div id="newsResearchIndicator"></div>
       <div id="newsResearchFeatures"></div>
-      <p class="note" id="newsResearchNote">新聞環境分數僅由標題字詞初步分類；相似環境統計是已發生的歷史結果，不是未來機率或買賣指令。</p>
-    </section>
-    <section><h2>GDELT 歷史新聞研究（獨立資料源）</h2>
-      <p class="note" id="gdeltResearchMeta">尚未載入 GDELT 歷史研究資料。</p>
       <div id="gdeltResearchIndicator"></div>
-      <p class="note">資料來源：GDELT Project。此資料為全球新聞報導索引，不等於完整台灣媒體新聞庫；標題分類為字詞規則，歷史關聯不是未來預測或買賣訊號。</p>
-    </section>
-    <section><h2>Media Cloud 獨立新聞資料（標題索引）</h2>
-      <p class="note" id="mediaCloudResearchMeta">等待 Media Cloud 資料…</p>
       <div id="mediaCloudResearchIndicator"></div>
       <div id="mediaCloudResearchItems"></div>
-      <p class="note">只顯示 Media Cloud 可提供的標題與中繼資料，不保存新聞全文。此來源收錄範圍依各媒體開始被追蹤的日期而異；主題分類只依標題關鍵字計數，不代表語意分析、因果關係或市場預測。</p>
-    </section>
-    <section><h2>官方政策新聞 × 台股歷史對照</h2>
-      <p class="note" id="policyResearchMeta">等待建立歷史對照資料…</p>
       <div id="policyResearchStats"></div>
-      <p class="note" id="policyResearchNote">此區為日期層級的歷史描述統計，不是機器學習訓練、預測或買賣訊號。</p>
-    </section>
-    <section><h2>台灣官方歷史新聞資料</h2>
-      <p class="note" id="policyArchiveMeta">載入官方歷史新聞資料中…</p>
       <div id="policyArchiveItems"></div>
-      <p class="note">來源：行政院官網歷史新聞索引（抽樣）。僅保存短標題、日期與原文連結，不保存全文或摘要；依原站權利聲明使用，也不與多來源每日新聞分數混算。</p>
+      <p class="note" id="gdeltResearchMeta" hidden></p>
+      <p class="note" id="mediaCloudResearchMeta" hidden></p>
+      <p class="note" id="policyResearchMeta" hidden></p>
+      <p class="note" id="policyArchiveMeta" hidden></p>
+      <p class="note" id="newsResearchNote">新聞內容以整體主題、事件脈絡及歷史資料作綜合整理。不同資料集不直接相加成單一分數，以避免重複新聞與不同統計口徑造成誤差。歷史關聯僅為描述統計，不代表因果、未來機率或買賣訊號。</p>
     </section>
-    <section><h2>新聞情緒（既有資料）</h2><div id="newsD"></div><p class="note">此區沿用原本新聞摘要與分析，與下方新聞研究資料分開保存。</p></section>
   </div>
 
   <div id="tab-weekly" hidden>
