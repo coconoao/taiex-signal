@@ -18,10 +18,13 @@ FILES = (
     "news_gdelt_history.jsonl", "news_gdelt_research.json",
     "news_policy_archive.json", "news_policy_research.json",
 )
-# The official historical archive has its own importer. Exclude it from routine
-# Render pipeline saves so an older in-memory copy cannot overwrite a fresh backfill.
-AUTO_SAVE_FILES = tuple(name for name in FILES if name != "news_policy_archive.json")
+# These two artifacts are maintained by dedicated research workflows. Exclude
+# them from routine Render saves so stale process-local copies cannot overwrite
+# freshly computed research data in Supabase.
+MANAGED_RESEARCH_FILES = ("news_policy_archive.json", "news_policy_research.json")
+AUTO_SAVE_FILES = tuple(name for name in FILES if name not in MANAGED_RESEARCH_FILES)
 POLICY_ARCHIVE_FILE = "news_policy_archive.json"
+POLICY_RESEARCH_FILE = "news_policy_research.json"
 TABLE = "site_data"
 
 
@@ -86,7 +89,7 @@ def restore_data(directory="."):
 
 
 def save_data(directory=".", names=None):
-    """Upsert selected data files; routine saves omit the separately managed archive."""
+    """Upsert selected data files; routine saves omit dedicated research artifacts."""
     if not enabled():
         return 0
     now = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -118,9 +121,10 @@ if __name__ == "__main__":
     elif action == "save":
         print("Saved data files:", save_data())
     elif action == "save-policy-archive":
-        print(
-            "Saved policy archive files:",
-            save_data(names=(POLICY_ARCHIVE_FILE,)),
-        )
+        print("Saved policy archive files:", save_data(names=(POLICY_ARCHIVE_FILE,)))
+    elif action == "save-policy-research":
+        print("Saved policy research files:", save_data(names=(POLICY_RESEARCH_FILE,)))
     else:
-        raise SystemExit("Usage: python storage.py restore|save|save-policy-archive")
+        raise SystemExit(
+            "Usage: python storage.py restore|save|save-policy-archive|save-policy-research"
+        )
