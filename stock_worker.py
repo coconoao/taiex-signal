@@ -14,10 +14,10 @@ TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
 MAX_BODY = 4096
 _SAFE_DIAGNOSTIC = re.compile(
     r"(?:no_recent_history|provider_invalid_json_shape|provider_error|"
-    r"(?:twse|tpex)_(?:http_\\d{3}|network_errno_-?\\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|"
+    r"(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|"
     r"(?:exchange_probe_failed|history_fetch_failed):"
-    r"(?:(?:twse|tpex)_(?:http_\\d{3}|network_errno_-?\\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|provider_error)"
-    r"(?:,(?:(?:twse|tpex)_(?:http_\\d{3}|network_errno_-?\\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|provider_error)){0,11})"
+    r"(?:(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|provider_error)"
+    r"(?:,(?:(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_error)|provider_error)){0,11})"
 )
 
 
