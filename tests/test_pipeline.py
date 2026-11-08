@@ -20,6 +20,7 @@ from pipeline import (
     fetch_chips,
     fetch_futures,
     _fetch_taifex_openapi_latest,
+    _fetch_twse_taiex_missing_recent,
     load_live,
     TICKERS,
 )
@@ -78,6 +79,27 @@ class LoadLiveTests(unittest.TestCase):
             self.assertEqual(len(fake_yfinance.download.call_args_list), 3)
             self.assertEqual(result["TAIEX"].dropna().iloc[-1],
                              cached["TAIEX"].iloc[-1])
+
+class TwseMissingTaiExTests(unittest.TestCase):
+    def test_only_queries_missing_recent_taiex_rows(self):
+        index = pd.to_datetime(["2026-10-01", "2026-10-02", "2026-10-05"])
+        frame = pd.DataFrame({"TAIEX": [30000.0, float("nan"), 30100.0]}, index=index)
+        now = pd.Timestamp("2026-11-08 15:00", tz="Asia/Taipei")
+        with patch("pipeline._fetch_twse_taiex_day", return_value=30200.0) as fetch:
+            result = _fetch_twse_taiex_missing_recent(frame, now)
+        self.assertEqual(result, {pd.Timestamp("2026-10-02"): 30200.0})
+        fetch.assert_called_once_with(pd.Timestamp("2026-10-02"))
+
+    def test_stops_after_official_source_rate_limit(self):
+        index = pd.to_datetime(["2026-10-01", "2026-10-02", "2026-10-05"])
+        frame = pd.DataFrame({"TAIEX": [float("nan")] * 3}, index=index)
+        now = pd.Timestamp("2026-11-08 15:00", tz="Asia/Taipei")
+        error = urllib.error.HTTPError("https://twse.test", 429, "rate limit", {}, None)
+        with patch("pipeline._fetch_twse_taiex_day", side_effect=error) as fetch:
+            result = _fetch_twse_taiex_missing_recent(frame, now)
+        self.assertEqual(result, {})
+        fetch.assert_called_once()
+
 
 class PendingDatesTests(unittest.TestCase):
     def test_limits_backfill_and_keeps_latest_missing_dates(self):
