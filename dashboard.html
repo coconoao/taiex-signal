@@ -577,7 +577,7 @@ function renderUnifiedNews() {
   const mc = MEDIACLOUD_RESEARCH?.current?.stories || [];
   mc.forEach(x => add(x.title, x.published_date || x.publish_date, x.url));
   (POLICY_ARCHIVE?.items || []).forEach(x => add(x.title, x.date, x.url));
-  const norm = s => s.toLocaleLowerCase().replace(/[\\s\\p{P}\\p{S}]+/gu, "");
+  const norm = s => s.toLocaleLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, "");
   const unique = new Map();
   for (const item of items) {
     const key = norm(item.title);
