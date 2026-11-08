@@ -128,6 +128,24 @@ def walk_forward_candidate(X, y, factory, step=STEP):
     return pred, baseline, result
 
 
+def current_research_judgment(X, y, factory):
+    """Fit on labels strictly before latest feature date; infer latest snapshot."""
+    valid = X.notna().all(axis=1) & y.notna()
+    current_date = X.index.max()
+    train_idx = X.index[valid & (X.index < current_date)]
+    current = X.loc[[current_date]]
+    if current.isna().any(axis=None) or len(train_idx) < MIN_TRAIN:
+        return {"status": "insufficient", "asof": str(current_date.date()), "training_samples": int(len(train_idx)), "note": "最新特徵不完整或歷史標記樣本未達門檻。"}
+    y_train = y.loc[train_idx].astype(int)
+    if y_train.nunique() < 2:
+        return {"status": "insufficient", "asof": str(current_date.date()), "training_samples": int(len(train_idx)), "note": "歷史標記僅包含單一類別。"}
+    model = factory()
+    model.fit(X.loc[train_idx], y_train)
+    p = float(model.predict_proba(current)[:, 1][0])
+    category = "偏正向研究分類" if p >= 0.55 else "偏負向研究分類" if p <= 0.45 else "中性研究分類"
+    return {"status": "available", "asof": str(current_date.date()), "training_samples": int(len(train_idx)), "category": category, "note": "最新已完成資料日的研究分類；非盤中即時行情、非買賣指示。"}
+
+
 def run():
     market, chips, margin, futures = load_inputs()
     X_raw, y_raw, _ = pipeline.build(market, chips, margin, futures=futures)
@@ -149,6 +167,7 @@ def run():
         cols = market_cols if name == "logistic_market_features_only" else list(X_raw.columns)
         X_candidate = X_raw[cols]
         _, _, result = walk_forward_candidate(X_candidate, y_raw, factory, step=STEP)
+        result["current_judgment"] = current_research_judgment(X_candidate, y_raw, factory)
         result["feature_count"] = len(cols)
         result["sample_calendar"] = "market_features_only" if name == "logistic_market_features_only" else "all_features_complete_cases"
         experiments[name] = result
@@ -164,6 +183,7 @@ def run():
         _, _, result = walk_forward_candidate(
             X_raw[cols], y_raw, specs["logistic_market_features_only"], step=STEP
         )
+        result["current_judgment"] = current_research_judgment(X_raw[cols], y_raw, specs["logistic_market_features_only"])
         result["feature_count"] = len(cols)
         result["sample_calendar"] = name.removeprefix("logistic_")
         experiments[name] = result
@@ -172,6 +192,7 @@ def run():
     _, _, production_result = walk_forward_candidate(
         X_raw, y_raw, specs["logistic_current_step5"], step=20
     )
+    production_result["current_judgment"] = current_research_judgment(X_raw, y_raw, specs["logistic_current_step5"])
     production_result["feature_count"] = int(X_raw.shape[1])
     production_result["sample_calendar"] = "all_features_complete_cases"
     experiments["production_cadence_step20"] = production_result
