@@ -5,6 +5,7 @@ on:
     paths:
       - "news_policy_research.py"
       - "news_history_import.py"
+      - "news_mediacloud.py"
       - "storage.py"
       - ".github/workflows/refresh-news-research.yml"
   schedule:
