@@ -121,6 +121,7 @@ details[open]>summary{margin-bottom:12px}
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
     <section id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
+    <section id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
     <section id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
       <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
       <div id="modelImprovementSummary" class="mcs"></div><h3>測試模型最新資料日判讀</h3><div id="modelImprovementLive" class="mcs"><p class="note">等待最新研究結果…</p></div>
@@ -713,6 +714,18 @@ function renderModelImprovementResearch(r) {
     ? "市場特徵模型年度分段： " + years.map(([year, v]) => `${year}：${v.direction_accuracy_pct}%（${v.sample_count} 筆，Brier skill ${v.brier_skill}）`).join("；")
     : "目前沒有足夠的年度分段樣本。";
 }
+function renderStrategyResearch(r) {
+  $("strategyResearchMeta").textContent = `報告時間 ${r.computed_at || "—"}｜成本：每次進出場 ${r.transaction_cost_per_side_pct ?? "—"}%｜最長持有 ${r.max_holding_sessions ?? "—"} 個交易日｜樣本外進場分類門檻已固定`;
+  const rows = [];
+  for (const [name, item] of Object.entries(r.experiments || {})) {
+    for (const v of item.variants || []) {
+      if (v.status !== "available") continue;
+      rows.push(`<tr><td>${name}</td><td>${v.profit_target_pct}%</td><td>${v.strategy?.total_return_pct ?? "—"}%</td><td>${v.buy_and_hold?.total_return_pct ?? "—"}%</td><td>${v.strategy?.max_drawdown_pct ?? "—"}%</td><td>${v.trade_count ?? 0}</td></tr>`);
+    }
+  }
+  $("strategyResearchRows").innerHTML = rows.join("") || '<tr><td colspan="6">目前樣本不足，尚無可呈現的策略比較。</td></tr>';
+}
+const loadStrategyResearch = () => getJSON("strategy_research.json").then(renderStrategyResearch).catch(() => { $("strategyResearchMeta").textContent = "策略研究報告尚未產生或暫時無法載入。"; });
 const loadModelImprovementResearch = () => getJSON("model_improvement_research.json")
   .then(renderModelImprovementResearch)
   .catch(() => { $("modelImprovementMeta").textContent = "目前尚無模型改良實驗報告，或資料來源暫時不可用。"; });
@@ -729,7 +742,7 @@ let lastSig = null, busy = false;
 function loadAll() {
   if (busy) return Promise.resolve();
   busy = true;
-  return Promise.all([loadDaily(), loadWeekly(), loadMultiMarketResearch(), loadModelImprovementResearch(), loadNews()]).then(() => {
+  return Promise.all([loadDaily(), loadWeekly(), loadMultiMarketResearch(), loadModelImprovementResearch(), loadStrategyResearch(), loadNews()]).then(() => {
     const sig = JSON.stringify(seen), isNew = lastSig !== null && sig !== lastSig; lastSig = sig;
     $("freshTxt").textContent = SNAP ? "靜態快照（不會自動更新）" : `${isNew ? "已載入新資料，" : ""}最後檢查 ${new Date().toLocaleTimeString("zh-TW", {hour12: false})}`;
     if (dailyLoadFailed && !SNAP && !retryTimer) retryTimer = setTimeout(() => { retryTimer = null; loadAll(); }, 15000);
