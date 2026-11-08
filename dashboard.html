@@ -644,7 +644,15 @@ function renderNews() {
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
   .catch(() => { $("err").hidden = false; $("meta").textContent = ""; });
 const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); }).catch(() => { $("horizonNote").textContent = "目前無法載入長線歷史統計。"; $("horizonRows").innerHTML = "<tr><td colspan=\"7\">資料暫時無法取得</td></tr>"; $("longChart").textContent = "資料暫時無法取得。"; });
-const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then(r => {\n  const names = {SP500:"美國 S&P 500",NASDAQ:"美國 Nasdaq Composite",NIKKEI225:"日本 Nikkei 225",KOSPI:"韓國 KOSPI",TAIEX:"台灣加權指數（對照）"};\n  const rows = Object.entries(r.markets || {}).map(([key,v]) => `<div class="mc"><b>${names[key] || key}</b><div class="big">${v.status === "available" ? v.direction_accuracy_pct + "%" : v.status === "insufficient" ? "資料累積中" : "暫不可用"}</div><p class="note">樣本外 ${v.sample_count || 0} 筆｜基準 ${v.baseline_direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}（基準 ${v.baseline_brier ?? "—"}）｜Log loss ${v.log_loss ?? "—"}</p><p class="note">${v.sample_start || "—"}～${v.sample_end || "—"}｜覆蓋率 ${v.signal_coverage_pct ?? "—"}%</p></div>`).join("");\n  $("multiMarketRows").innerHTML = rows || "<p class=\\"note\\">尚無研究結果。</p>";\n  $("multiMarketMeta").textContent = `更新時間 ${r.computed_at || "—"}｜資料來源 ${r.data_source || "—"}`;\n}).catch(() => { $("multiMarketMeta").textContent = "目前尚無其他市場研究結果，或資料來源暫時不可用。"; });\nconst loadNews = () => Promise.all([
+const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then(r => {
+  const names = {SP500:"美國 S&P 500",NASDAQ:"美國 Nasdaq Composite",NIKKEI225:"日本 Nikkei 225",KOSPI:"韓國 KOSPI",TAIEX:"台灣加權指數（對照）"};
+  const rows = Object.entries(r.markets || {}).map(([key,v]) => `<div class="mc"><b>${names[key] || key}</b><div class="big">${v.status === "available" ? v.direction_accuracy_pct + "%" : v.status === "insufficient" ? "資料累積中" : "暫不可用"}</div><p class="note">樣本外 ${v.sample_count || 0} 筆｜基準 ${v.baseline_direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}（基準 ${v.baseline_brier ?? "—"}）｜Log loss ${v.log_loss ?? "—"}</p><p class="note">${v.sample_start || "—"}～${v.sample_end || "—"}｜覆蓋率 ${v.signal_coverage_pct ?? "—"}%</p></div>`).join("");
+  $("multiMarketRows").textContent = "";
+  if (rows) $("multiMarketRows").innerHTML = rows;
+  else $("multiMarketRows").textContent = "尚無研究結果。";
+  $("multiMarketMeta").textContent = `更新時間 ${r.computed_at || "—"}｜資料來源 ${r.data_source || "—"}`;
+}).catch(() => { $("multiMarketMeta").textContent = "目前尚無其他市場研究結果，或資料來源暫時不可用。"; });
+const loadNews = () => Promise.all([
   getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }),
   getJSON("news_research.json").then(r => { NEWS_RESEARCH = r; }).catch(() => { NEWS_RESEARCH = null; }),
   getJSON("news_gdelt_research.json").then(r => { GDELT_RESEARCH = r; }).catch(() => { GDELT_RESEARCH = null; }),
@@ -685,12 +693,33 @@ async function copyNewsToAI(target) {
     ...NEWS.headlines.filter(h => h.kind === "analyst").slice(0, 4)
   ].slice(0, 40);
   const items = selected.map((h, i) =>
-    `${i + 1}. [${h.tag || h.kind || "新聞"}] ${h.title || "（無標題）"}\n摘要：${h.description || "未提供"}\n來源：${h.source || h.tag || "未提供"}\n時間：${h.published || "未提供"}\n連結：${safeNewsHref(h.link) || "未提供"}`
-  ).join("\n\n");
+    `${i + 1}. [${h.tag || h.kind || "新聞"}] ${h.title || "（無標題）"}
+摘要：${h.description || "未提供"}
+來源：${h.source || h.tag || "未提供"}
+時間：${h.published || "未提供"}
+連結：${safeNewsHref(h.link) || "未提供"}`
+  ).join("
+
+");
   const events = (NEWS.policy_events || []).slice(0, 18).map((e, i) =>
-    `政策事件 ${i + 1}. ${e.title || "（無標題）"}\n類別：${e.category || "一般政策"}\n階段：${e.status || "待確認"}\n來源類型：${e.source_class || "未分類"}\n來源：${e.source || "未提供"}\n發布時間：${e.published || "未提供"}\n摘要：${e.description || "未提供"}\n原文：${safeNewsHref(e.link) || "未提供"}`
-  ).join("\n\n");
-  const payload = "請用繁體中文整理以下資料，分成台灣新聞、政府政策、國際局勢與市場新聞。每則請區分已確認事實、尚待確認資訊及分析推論；說明政策可能經由關稅、出口、供應鏈、能源、匯率或利率傳導的管道。政策階段是依標題與摘要的初步字詞分類，請核對原始公告，不要自行判定法律效力。不要提供股票買賣建議、價格預測或投資策略。\n\n【新聞】\n" + items + "\n\n【政策事件資料庫】\n" + events;
+    `政策事件 ${i + 1}. ${e.title || "（無標題）"}
+類別：${e.category || "一般政策"}
+階段：${e.status || "待確認"}
+來源類型：${e.source_class || "未分類"}
+來源：${e.source || "未提供"}
+發布時間：${e.published || "未提供"}
+摘要：${e.description || "未提供"}
+原文：${safeNewsHref(e.link) || "未提供"}`
+  ).join("
+
+");
+  const payload = "請用繁體中文整理以下資料，分成台灣新聞、政府政策、國際局勢與市場新聞。每則請區分已確認事實、尚待確認資訊及分析推論；說明政策可能經由關稅、出口、供應鏈、能源、匯率或利率傳導的管道。政策階段是依標題與摘要的初步字詞分類，請核對原始公告，不要自行判定法律效力。不要提供股票買賣建議、價格預測或投資策略。
+
+【新聞】
+" + items + "
+
+【政策事件資料庫】
+" + events;
   try {
     await navigator.clipboard.writeText(payload);
     msg.textContent = "已複製 " + selected.length + " 則新聞資料（含台灣新聞與政策來源）。請開啟 " + target + " 聊天室並貼上。";
