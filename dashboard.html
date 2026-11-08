@@ -195,10 +195,10 @@ details[open]>summary{margin-bottom:12px}
   </div>
 
   <div id="tab-stock" hidden>
-    <section><h2>個股／ETF 歷史資料查詢</h2>
+    <section><h2>個股／ETF 中長期研究</h2>
       <p><input class="inp" id="code" placeholder="代號，如 2330、0050、00679B" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="12" aria-label="個股或 ETF 代號"><button class="btn" id="go">查詢</button></p>
       <p class="note">支援純數字及英數混合代號，例如 0050、006208、00679B；不限制四位數。</p>
-      <div id="stockOut"><p class="note">輸入代號後查詢該個股／ETF 的歷史資料與財報資訊。</p></div><div id="stockHistory" class="note" style="margin-top:12px"></div></section>
+      <div id="stockOut"><p class="note">輸入代號後查詢個股／ETF 歷史資料、1 個月／3 個月／6 個月研究估計及財報參考。</p></div><div id="stockHistory" class="note" style="margin-top:12px"></div></section>
   </div>
 
   <div id="tab-settings" hidden>
@@ -1089,14 +1089,43 @@ function renderStockHistory() {
 }
 function renderStock(s, cached=false) {
   const e = s.stock_expected, fl = ["偏弱", "—", "較佳"];
+  const model = s.long_term_model || {};
+  const horizons = model.horizons || {};
+  const historical = s.historical_horizons || {};
+  const keys = [["1m","1 個月"],["3m","3 個月"],["6m","6 個月"]];
+  const rows = keys.map(([key,label]) => {
+    const item = horizons[key] || {};
+    const hold = item.untouched_holdout || {};
+    const probability = item.estimated_positive_return_probability_pct;
+    const estimate = item.status === "available" && probability != null
+      ? Number(probability).toFixed(1) + "%"
+      : "樣本不足／尚未校準";
+    const accuracy = hold.direction_accuracy_pct == null
+      ? "尚無足夠樣本" : Number(hold.direction_accuracy_pct).toFixed(1) + "%";
+    const period = item.holdout_start && item.holdout_end
+      ? esc(item.holdout_start) + "～" + esc(item.holdout_end) : "尚未形成";
+    return `<tr><td>${label}</td><td>${estimate}</td><td>${accuracy}</td><td>${period}</td></tr>`;
+  }).join("");
+  const historicalRows = keys.map(([key,label]) => {
+    const item = historical[key];
+    return item
+      ? `<tr><td>${label}</td><td>${item.n}</td><td>${item.positive_pct}%</td><td>${item.average_return_pct}%</td><td>${item.p10_pct}%～${item.p90_pct}%</td></tr>`
+      : `<tr><td>${label}</td><td colspan="4">歷史樣本不足</td></tr>`;
+  }).join("");
   $("stockOut").innerHTML = (cached ? '<p class="note">瀏覽器保存的結果 · ' + esc(s.savedAt || "") + '（資料日期 ' + esc(s.asof || "") + '）</p>' : "") +
     `<p class="sig" style="font-size:1.5rem">${esc(s.code)} ${s.last}<small>${esc(s.asof)}</small></p>
       <p>此股 Beta ${s.beta}（與加權指數歷史報酬的共變程度，並非未來方向預測）。</p>
       <p>${e ? `此股自身歷史樣本（${e.n} 筆）中，之後 5 日平均報酬 <b>${e.avg}%</b>，正報酬比例 ${e.win}%，歷史 10%～90% 區間為 <b>${e.p10}% 到 ${e.p90}%</b>。` : "此股目前沒有足夠的歷史樣本。"}</p>
-      <p class="note">20 日動能 ${s.mom20}%，年化波動 ${s.vol60}%。這是歷史分布，不是點預測；樣本已降低五日重疊造成的重複計數。</p>
-      <h2 style="margin-top:16px">財報體檢（參考，未納入上面的區間）</h2>` +
+      <p class="note">20 日動能 ${s.mom20}%，年化波動 ${s.vol60}%。以下新增中長期研究，資料預設盡可能取得 10 年日線；實際長度依標的上市時間與來源可用性而定。資料期間：${esc(model.history_start || s.history_start || "—")}～${esc(model.history_end || s.asof)}（${Number(model.history_sessions || s.history_sessions || 0).toLocaleString("zh-TW")} 個交易日）。</p>
+      <h2 style="margin-top:16px">個股中長期模型研究</h2>
+      <p class="note">目標是指定期間後的累積報酬是否為正，不是價格目標。機率僅在歷史樣本外預測足以校準時顯示；方向準確率來自未參與候選選擇的時間序列保留樣本。</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>研究估計</th><th>樣本外方向準確率</th><th>保留測試期間</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <h2 style="margin-top:16px">歷史報酬參考（不是模型預測）</h2>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>歷史樣本</th><th>正報酬比例</th><th>平均報酬</th><th>10%～90%區間</th></tr></thead><tbody>${historicalRows}</tbody></table></div>
+      <p class="note">歷史報酬統計採重疊視窗，樣本彼此並非獨立；不得解讀為未來機率。模型以價格、成交量與大盤相對特徵進行時間序列驗證；歷史財報未具備完整公告時點資料，因此不納入模型訓練。</p>
+      <h2 style="margin-top:16px">財報體檢（參考，未納入模型）</h2>` +
     (s.fundamentals.length ? `<table><thead><tr><th>項目</th><th>數值</th><th>判讀</th></tr></thead><tbody>${s.fundamentals.map(f => `<tr><td>${esc(f.item)}</td><td>${esc(f.value)}</td><td>${fl[f.flag + 1]}</td></tr>`).join("")}</tbody></table>` : '<p class="note">抓不到這檔的財報資料。</p>') +
-    '<p class="note">財報來自 Yahoo，台股欄位常不完整，請對照公開資訊觀測站。沒有「當時公布」的歷史財報可回測，因此只作參考，不調整區間。</p>';
+    '<p class="note">財報來自 Yahoo，台股欄位常不完整，請對照公開資訊觀測站。沒有「當時公布」的歷史財報可回測，因此只作參考，不調整模型。</p>';
 }
 $("go").onclick = () => {
   const c = $("code").value.trim(); if (!c) return;
