@@ -101,6 +101,7 @@ class AnalyzeCodeTests(unittest.TestCase):
 
 
 class SafeDiagnosticAllowlistTests(unittest.TestCase):
+    # Keep these cases aligned with stock_worker._SAFE_DIAGNOSTIC's public categories.
     def test_accepts_all_documented_single_categories(self):
         accepted = [
             "no_recent_history",
