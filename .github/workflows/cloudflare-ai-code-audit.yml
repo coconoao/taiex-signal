@@ -181,7 +181,7 @@ jobs:
                   response = message.get("content") if isinstance(message, dict) else None
 
           if isinstance(response, list):
-              response = "\\n".join(
+              response = "\n".join(
                   part.get("text", "") for part in response
                   if isinstance(part, dict) and isinstance(part.get("text"), str)
               )
@@ -210,7 +210,7 @@ jobs:
           {
             echo "## Cloudflare AI 程式碼診斷"
             echo
-            printf '目標版本：`%s`\\n' "$TARGET_REF"
+            printf '目標版本：`%s`\n' "$TARGET_REF"
             echo
             cat cloudflare_audit.md
             echo
