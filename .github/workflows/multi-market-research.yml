@@ -1,0 +1,38 @@
+name: Multi-market out-of-sample research
+
+on:
+  push:
+    paths:
+      - ".github/workflows/multi-market-research.yml"
+      - "multi_market_research.py"
+      - "storage.py"
+  schedule:
+    - cron: "15 1 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: multi-market-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      TAIEX_STORAGE: supabase
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run independent multi-market research
+        run: python multi_market_research.py
+      - name: Persist research results
+        run: python storage.py save-multi-market-research
