@@ -36,6 +36,24 @@ class StockModelResearchTests(unittest.TestCase):
             original.loc[cutoff], changed.loc[cutoff], check_names=False
         )
 
+
+    def test_block_bootstrap_accuracy_interval_is_reproducible(self):
+        rng = np.random.default_rng(12)
+        actual = rng.integers(0, 2, 240)
+        probability = np.where(actual == 1, 0.6, 0.4)
+        first = research._block_bootstrap_accuracy_ci(probability, actual, 21)
+        second = research._block_bootstrap_accuracy_ci(probability, actual, 21)
+        self.assertEqual(first, second)
+        self.assertLessEqual(first["lower_95_pct"], first["upper_95_pct"])
+        self.assertEqual(first["method"], "moving-block bootstrap")
+
+    def test_block_bootstrap_with_small_sample_returns_no_interval(self):
+        actual = np.array([0, 1] * 20)
+        probability = np.full(40, 0.5)
+        self.assertIsNone(
+            research._block_bootstrap_accuracy_ci(probability, actual, 21)
+        )
+
     def test_feature_builder_includes_price_volume_and_market_relative_inputs(self):
         stock, market, volume = synthetic_data()
         features = research.build_features(stock, market, volume)
