@@ -8,6 +8,7 @@
 """
 import os, sys, json, time, io, datetime as dt, urllib.request, urllib.parse, urllib.error
 import numpy as np, pandas as pd
+FAST_STARTUP = "--skip-backfill" in sys.argv
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
@@ -297,7 +298,7 @@ def load_live(years=10, cache_path="market_history.csv"):
         )
         try:
             import storage
-            if storage.enabled():
+            if storage.enabled() and not FAST_STARTUP:
                 saved = storage.save_data()
                 print(f"行情快取已持久化至 Supabase（檔案數 {saved}）", flush=True)
         except Exception as exc:
@@ -466,7 +467,7 @@ def _merge_and_save(old, rows, path):
         os.replace(tmp, path)
         try:
             import storage
-            if storage.enabled():
+            if storage.enabled() and not FAST_STARTUP:
                 saved = storage.save_data()
                 print(f"已保存檢查點：{path}（Supabase 檔案數 {saved}）", flush=True)
         except Exception as exc:
@@ -1197,7 +1198,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     os.replace(tmp, "taiwan_data_status.json")
     try:
         import storage
-        if storage.enabled():
+        if storage.enabled() and not FAST_STARTUP:
             saved = storage.save_data()
             print(f"台股資料品質狀態已保存至 Supabase（檔案數 {saved}）", flush=True)
     except Exception as exc:
@@ -1325,9 +1326,9 @@ if __name__ == "__main__":
             read_existing("futures.csv") if "--no-futures" in sys.argv
             else fetch_futures(trading_days=df.index)
         )
-    if not demo:
-        # Generate a quality report on both full and fast runs. Fast runs use
-        # restored caches only; absent or incomplete layers remain explicitly missing.
+    if not demo and not skip_backfill:
+        # Fast startup must not recompute or persist a quality report from a
+        # potentially stale cache while the scheduled backfill owns Supabase.
         write_taiwan_data_status(df, chips, margin, futures)
     X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
