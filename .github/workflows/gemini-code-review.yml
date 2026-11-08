@@ -84,18 +84,38 @@ jobs:
           fi
 
           # Send the key in a header, never in the URL or request body.
-          http_code=$(curl --silent --show-error \
-            --output gemini_response.json \
-            --write-out "%{http_code}" \
-            --request POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent" \
-            --header "x-goog-api-key: ${GEMINI_API_KEY}" \
-            --header "Content-Type: application/json" \
-            --data-binary @gemini_request.json)
+          http_code=000
+          for attempt in 1 2 3 4; do
+            if http_code=$(curl --silent --show-error \
+              --max-time 90 \
+              --output gemini_response.json \
+              --write-out "%{http_code}" \
+              --request POST \
+              "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent" \
+              --header "x-goog-api-key: ${GEMINI_API_KEY}" \
+              --header "Content-Type: application/json" \
+              --data-binary @gemini_request.json); then
+              :
+            else
+              http_code=000
+            fi
 
-          if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
-            echo "::error::Gemini API returned HTTP ${http_code}. Response details are in the sanitized job artifact/log output; verify model access and API quota."
-            jq -r '.error.message // "No API error message returned."' gemini_response.json
+            if [ "${http_code}" -ge 200 ] 2>/dev/null && [ "${http_code}" -lt 300 ] 2>/dev/null; then
+              break
+            fi
+
+            if [ "${attempt}" -lt 4 ] && { [ "${http_code}" = "000" ] || [ "${http_code}" = "429" ] || [ "${http_code}" = "500" ] || [ "${http_code}" = "502" ] || [ "${http_code}" = "503" ] || [ "${http_code}" = "504" ]; }; then
+              delay=$((5 * (2 ** (attempt - 1))))
+              echo "Gemini temporarily unavailable (HTTP ${http_code}); retrying in ${delay}s (attempt ${attempt}/4)."
+              sleep "${delay}"
+              continue
+            fi
+            break
+          done
+
+          if [ "${http_code}" -lt 200 ] 2>/dev/null || [ "${http_code}" -ge 300 ] 2>/dev/null; then
+            echo "::error::Gemini API request failed after retry policy (HTTP ${http_code})."
+            jq -r '.error.message // "No API error message returned."' gemini_response.json 2>/dev/null || true
             exit 1
           fi
 
