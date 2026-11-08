@@ -31,6 +31,7 @@ class TestTaiwanMarketData(unittest.TestCase):
                 side_effect=[error, io.BytesIO(b'{"stat":"OK"}')],
             ) as urlopen,
             patch.object(tw_market_data.time, "sleep") as sleep,
+            patch.object(tw_market_data.random, "uniform", return_value=0.0),
         ):
             payload = tw_market_data._request_json("https://www.twse.com.tw/example")
         self.assertEqual(payload, {"stat": "OK"})
@@ -62,6 +63,11 @@ class TestTaiwanMarketData(unittest.TestCase):
         self.assertEqual(
             tw_market_data._roc_date("115/11/06"), dt.date(2026, 11, 6)
         )
+
+    def test_roc_date_rejects_invalid_year_and_non_numeric_fields(self):
+        for value in ("0/11/06", "abc/11/06", "115/x/06"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                tw_market_data._roc_date(value)
 
     def test_number_handles_exchange_formats(self):
         self.assertEqual(tw_market_data._number("+1,234.50"), 1234.5)
