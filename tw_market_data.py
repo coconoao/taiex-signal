@@ -65,6 +65,15 @@ def _request_json(url: str) -> dict:
         if code in (301, 302, 303, 307, 308):
             headers = getattr(last_error, "headers", None)
             location = headers.get("Location") if headers is not None else None
+            if not location:
+                getheader = getattr(last_error, "getheader", None)
+                if callable(getheader):
+                    location = getheader("Location")
+            if not location:
+                info = getattr(last_error, "info", None)
+                response_headers = info() if callable(info) else None
+                if response_headers is not None:
+                    location = response_headers.get("Location")
             if location:
                 target = urllib.parse.urlparse(urllib.parse.urljoin(url, location))
                 target_host = target.hostname or "unknown-host"
