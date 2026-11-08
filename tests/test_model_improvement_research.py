@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from model_improvement_research import evaluate_predictions, walk_forward_candidate, current_research_judgment
+from model_improvement_research import evaluate_predictions, walk_forward_candidate, current_research_judgment, prepare_market_frame
 
 
 class ModelImprovementResearchTests(unittest.TestCase):
@@ -37,6 +37,18 @@ class ModelImprovementResearchTests(unittest.TestCase):
         self.assertEqual(full_result["status"], "insufficient")
         self.assertGreater(len(market.dropna()), len(full.dropna()))
 
+
+    def test_market_preprocessing_matches_production_trading_calendar(self):
+        dates = pd.bdate_range("2026-10-01", periods=8)
+        frame = pd.DataFrame({
+            "TAIEX": [30000.0, 30100.0, np.nan, 30200.0, 30300.0, 30400.0, 30500.0, 30600.0],
+            "SOX": [100.0, np.nan, 102.0, 103.0, np.nan, np.nan, np.nan, 107.0],
+        }, index=dates)
+        prepared = prepare_market_frame(frame)
+        self.assertNotIn(dates[2], prepared.index)
+        self.assertEqual(prepared.loc[dates[1], "SOX"], 100.0)
+        self.assertEqual(prepared.loc[dates[6], "SOX"], 103.0)
+        self.assertEqual(prepared.loc[dates[7], "SOX"], 107.0)
 
     def test_current_judgment_uses_latest_complete_feature_row(self):
         dates = pd.bdate_range("2020-01-01", periods=150)
