@@ -229,6 +229,33 @@ def run():
         result["sample_calendar"] = name.removeprefix("logistic_")
         experiments[name] = result
 
+    # Paired comparison: force all model families onto the exact same
+    # all-feature complete-case calendar, labels and walk-forward schedule.
+    # This isolates algorithm/feature-set effects from missing-data coverage.
+    paired_valid = X_raw.notna().all(axis=1) & y_raw.notna()
+    paired_index = X_raw.index[paired_valid]
+    paired_y = y_raw.loc[paired_index]
+    paired_experiments = {}
+    paired_specs = {
+        "incumbent_all_features_logistic": (X_raw.loc[paired_index], specs["logistic_current_step5"]),
+        "market_only_logistic": (X_raw.loc[paired_index, market_cols], specs["logistic_market_features_only"]),
+        "market_only_random_forest": (X_raw.loc[paired_index, market_cols], specs["random_forest_conservative"]),
+        "market_only_hist_gradient_boosting": (X_raw.loc[paired_index, market_cols], specs["hist_gradient_boosting_conservative"]),
+    }
+    for paired_name, (paired_X, paired_factory) in paired_specs.items():
+        _, _, paired_result = walk_forward_candidate(
+            paired_X, paired_y, paired_factory, step=STEP
+        )
+        paired_result["feature_count"] = int(paired_X.shape[1])
+        paired_result["sample_calendar"] = "identical_all_features_complete_case_calendar"
+        paired_result["comparison_start"] = (
+            str(paired_y.index.min().date()) if len(paired_y) else None
+        )
+        paired_result["comparison_end"] = (
+            str(paired_y.index.max().date()) if len(paired_y) else None
+        )
+        paired_experiments[paired_name] = paired_result
+
     # Production-cadence reference uses the same full-feature sample calendar.
     _, _, production_result = walk_forward_candidate(
         X_raw, y_raw, specs["logistic_current_step5"], step=20
@@ -256,6 +283,12 @@ def run():
         "feature_coverage_pct": feature_coverage,
         "method": "Expanding-window chronological walk-forward; each candidate uses its own complete-case feature calendar; at least 100 training rows and 30 out-of-sample rows required; refit every 5 sessions (production cadence comparator every 20); no random shuffle; yearly subperiod metrics. Results on different calendars must not be compared as if they used identical dates.",
         "experiments": experiments,
+        "same_calendar_comparison": {
+            "calendar": "Exact all-feature complete-case intersection; identical labels, chronological walk-forward schedule and expanding-prevalence baseline.",
+            "sample_count": int(len(paired_y)),
+            "experiments": paired_experiments,
+            "note": "Use this paired block for direct model comparisons. Broader per-feature-calendar experiments are coverage context only and are not directly rankable.",
+        },
         "promotion_policy": "No automatic promotion. Require repeatable improvement across multiple time blocks, improved Brier/log loss versus baseline, adequate coverage, and a later untouched holdout before any production change.",
         "disclaimer": "Historical research only. Metrics are not a guarantee of future performance and are not investment advice or trading instructions.",
     }
