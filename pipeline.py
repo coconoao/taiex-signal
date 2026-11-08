@@ -104,6 +104,36 @@ def _fetch_twse_taiex_recent(now, calendar_days=7):
                 break
     return rows
 
+def _fetch_twse_taiex_missing_recent(frame, now, calendar_days=60, max_requests=12):
+    """Repair only missing recent TAIEX closes from TWSE; never fill by estimation."""
+    if frame is None or frame.empty or "TAIEX" not in frame:
+        return {}
+    local_now = pd.Timestamp(now).tz_convert("Asia/Taipei")
+    end_day = local_now.normalize().tz_localize(None)
+    if local_now.hour < 14:
+        end_day -= pd.Timedelta(days=1)
+    recent_cutoff = end_day - pd.Timedelta(days=7)
+    start_day = end_day - pd.Timedelta(days=calendar_days)
+    index = pd.DatetimeIndex(pd.to_datetime(frame.index)).tz_localize(None).normalize()
+    values = pd.to_numeric(frame["TAIEX"], errors="coerce")
+    missing = index[(index >= start_day) & (index < recent_cutoff) & values.isna()]
+    rows = {}
+    for day in missing.sort_values().unique()[:max_requests]:
+        try:
+            value = _fetch_twse_taiex_day(day)
+            if value is not None:
+                rows[pd.Timestamp(day).normalize()] = value
+        except Exception as exc:
+            print(
+                f"TWSE 加權指數缺漏日補查暫不可用（{pd.Timestamp(day).date()}）："
+                f"{type(exc).__name__}: {exc}", flush=True
+            )
+            if isinstance(exc, urllib.error.HTTPError) and (exc.code == 429 or exc.code >= 500):
+                break
+            if isinstance(exc, (TimeoutError, OSError, urllib.error.URLError)):
+                break
+    return rows
+
 
 def _fetch_fred_reference(series_id, now, calendar_days=120):
     """Fetch a clearly-labelled FRED reference series; never silently substitute its definition."""
@@ -266,6 +296,14 @@ def load_live(years=10, cache_path="market_history.csv"):
     # directly from TWSE, while leaving unavailable overseas series on cache.
     now = pd.Timestamp.now(tz="Asia/Taipei")
     official_taiex = _fetch_twse_taiex_recent(now)
+    missing_taiex = _fetch_twse_taiex_missing_recent(df, now)
+    if missing_taiex:
+        official_taiex.update(missing_taiex)
+        print(
+            f"TWSE 官方加權指數缺漏日回補 {len(missing_taiex)} 個交易日；"
+            f"日期 {', '.join(str(day.date()) for day in sorted(missing_taiex))}",
+            flush=True
+        )
     if official_taiex:
         if "TAIEX" not in df.columns:
             df["TAIEX"] = np.nan
