@@ -250,6 +250,69 @@ def latest_estimate(X, y, horizon, factory, oos_probability, oos_actual):
     }
 
 
+
+def build_macro_proxy_features(market):
+    """Build point-in-time daily macro/market proxies from the existing price panel.
+
+    These are market-implied proxies, not historical macroeconomic releases.
+    Every feature at date t uses observations at or before t only.
+    """
+    frame = market.copy().sort_index()
+    frame = frame[~frame.index.duplicated(keep="last")]
+    for col in frame.columns:
+        frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    returns = frame.pct_change(fill_method=None)
+    out = pd.DataFrame(index=frame.index)
+
+    # Global technology cycle and regional risk appetite.
+    for col in ("SOX", "TSM", "N225", "KOSPI"):
+        if col not in frame:
+            continue
+        for window in (5, 21, 63):
+            out[f"宏觀代理:{col}_報酬{window}日"] = frame[col].pct_change(window, fill_method=None)
+        out[f"宏觀代理:{col}_波動21日"] = returns[col].rolling(21, min_periods=15).std()
+
+    # Volatility regime: level changes and a trailing-only standardized level.
+    if "VIX" in frame:
+        vix = frame["VIX"]
+        out["宏觀代理:VIX變化5日"] = vix.diff(5)
+        out["宏觀代理:VIX變化21日"] = vix.diff(21)
+        vix_mean = vix.rolling(63, min_periods=40).mean()
+        vix_std = vix.rolling(63, min_periods=40).std()
+        out["宏觀代理:VIX滾動Z分數"] = (vix - vix_mean) / vix_std.replace(0, np.nan)
+
+    # Interest-rate pressure proxy; source series is the market yield quote.
+    if "US10Y" in frame:
+        rate = frame["US10Y"]
+        out["宏觀代理:美國10年債殖利率變化5日"] = rate.diff(5)
+        out["宏觀代理:美國10年債殖利率變化21日"] = rate.diff(21)
+        rate_mean = rate.rolling(63, min_periods=40).mean()
+        rate_std = rate.rolling(63, min_periods=40).std()
+        out["宏觀代理:美國10年債殖利率滾動Z分數"] = (
+            (rate - rate_mean) / rate_std.replace(0, np.nan)
+        )
+
+    # FX pressure proxy; use the quoted USD/TWD market series as-is.
+    if "USDTWD" in frame:
+        fx = frame["USDTWD"]
+        for window in (5, 21, 63):
+            out[f"宏觀代理:USD_TWD變化{window}日"] = fx.pct_change(window, fill_method=None)
+        out["宏觀代理:USD_TWD波動21日"] = returns["USDTWD"].rolling(21, min_periods=15).std()
+
+    # Relative leadership versus Taiwan, rather than absolute index levels.
+    if "TAIEX" in frame:
+        taiex = frame["TAIEX"].pct_change(21, fill_method=None)
+        for col in ("SOX", "KOSPI", "N225"):
+            if col in frame:
+                out[f"宏觀代理:{col}_相對TAIEX_21日"] = (
+                    frame[col].pct_change(21, fill_method=None) - taiex
+                )
+        if "SOX" in returns:
+            out["宏觀代理:SOX_TAIEX_相關21日"] = (
+                returns["SOX"].rolling(21, min_periods=15).corr(returns["TAIEX"])
+            )
+    return out.replace([np.inf, -np.inf], np.nan)
+
 def run():
     market, chips, margin, futures = mir.load_inputs()
     experiments = {}
@@ -258,8 +321,21 @@ def run():
         Xh, yh, fwd = pipeline.build(market, chips, margin, futures=futures, h=horizon)
         market_cols = [col for col in Xh.columns
                        if not col.startswith(("籌碼:", "信用:", "期貨:"))]
+        macro = build_macro_proxy_features(market).reindex(Xh.index)
+        macro_cols = list(macro.columns)
+        common = (
+            Xh[market_cols].notna().all(axis=1)
+            & macro.notna().all(axis=1)
+            & yh.notna()
+        )
+        # Baseline and enriched proxy model share the exact same dates.
+        market_common = Xh.loc[common, market_cols]
+        macro_common = pd.concat(
+            [market_common, macro.loc[common, macro_cols]], axis=1
+        )
         feature_sets = {
-            "market_only": Xh[market_cols],
+            "market_only_common_calendar": market_common,
+            "macro_proxy_enhanced": macro_common,
         }
         for layer, prefix in [
             ("market_plus_chips", "籌碼:"),
@@ -276,8 +352,14 @@ def run():
         market_candidates = {}
         model_factories = factories()
         for feature_set_name, X_candidate in feature_sets.items():
-            candidate_factories = (model_factories if feature_set_name == "market_only"
-                                   else {"logistic": model_factories["logistic_baseline"]})
+            candidate_factories = (
+                model_factories
+                if feature_set_name == "market_only_common_calendar"
+                else {
+                    "logistic_baseline": model_factories["logistic_baseline"],
+                    "logistic_regularized": model_factories["logistic_regularized"],
+                }
+            )
             for model_name, factory in candidate_factories.items():
                 name = feature_set_name + "__" + model_name
                 result = evaluate_candidate(X_candidate, yh, fwd, horizon, name, factory)
@@ -287,7 +369,7 @@ def run():
                     (X_candidate.notna().all(axis=1) & yh.notna()).sum()
                 )
                 candidates_result[name] = result
-                if feature_set_name == "market_only":
+                if feature_set_name in ("market_only_common_calendar", "macro_proxy_enhanced"):
                     market_candidates[name] = result
 
         viable_market = {k: v for k, v in market_candidates.items()
@@ -308,18 +390,23 @@ def run():
             key=lambda k: viable_market[k]["development"]["brier"]
         )
         selected = viable_market[selected_name]
+        selected_feature_set = selected.get("feature_set", "market_only_common_calendar")
+        selected_X = feature_sets[selected_feature_set]
         selected_factory_name = selected_name.split("__", 1)[1]
-        wf = walk_forward(Xh[market_cols], yh, horizon, model_factories[selected_factory_name])
+        wf = walk_forward(selected_X, yh.reindex(selected_X.index), horizon, model_factories[selected_factory_name])
         current = latest_estimate(
-            Xh[market_cols], yh, horizon, model_factories[selected_factory_name],
+            selected_X, yh.reindex(selected_X.index), horizon, model_factories[selected_factory_name],
             wf["probability"], wf["actual"]
         ) if wf else {"status": "insufficient"}
         experiments[horizon_name] = {
             "status": "evaluated",
             "horizon_sessions": horizon,
             "selected_candidate": selected_name,
-            "selection_basis": "market-only candidates selected on development Brier; final chronological holdout not used for candidate selection",
-            "calendar_warning": "Layer-specific models use different complete-case calendars and are not directly ranked against market-only models.",
+            "selection_basis": "market-only and macro-proxy candidates compared on the same complete-case calendar; selected on development Brier only; final chronological holdout not used for candidate selection",
+            "macro_proxy_features": macro_cols,
+            "macro_proxy_note": "Daily market-implied proxies from SOX, TSM, VIX, US10Y, USD/TWD, Nikkei and KOSPI. These are not historical CPI/GDP/jobs release series; no latest macro snapshot is backfilled into historical rows.",
+            "comparison_calendar_samples": int(common.sum()),
+            "calendar_warning": "Market-only and macro-proxy candidates share one complete-case calendar. Taiwan layer-specific models use different complete-case calendars and are not directly ranked against them.",
             "selected_candidate_results": selected,
             "candidates": candidates_result,
             "promotion_gate": {
