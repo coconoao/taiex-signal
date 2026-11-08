@@ -1,0 +1,43 @@
+name: Strategy holding-rule research
+
+on:
+  push:
+    paths:
+      - ".github/workflows/strategy-research.yml"
+      - "strategy_backtest_research.py"
+      - "model_improvement_research.py"
+      - "pipeline.py"
+      - "storage.py"
+      - "tests/test_strategy_backtest_research.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strategy-holding-rule-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      TAIEX_STORAGE: supabase
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Restore canonical data
+        run: python storage.py restore
+      - name: Test strategy research
+        run: python -m unittest discover -s tests -p "test_strategy_backtest_research.py"
+      - name: Run isolated strategy backtests
+        run: python strategy_backtest_research.py
+      - name: Persist strategy research artifact only
+        run: python storage.py save-strategy-research
