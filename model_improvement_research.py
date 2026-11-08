@@ -219,6 +219,24 @@ def paired_block_bootstrap(candidate_prob, incumbent_prob, actual, block_size=20
     }
 
 
+def paired_feature_sets(X_raw, market_cols, paired_index):
+    """Feature-layer ablations on one identical complete-case calendar."""
+    sets = {"market_only": list(market_cols)}
+    for key, prefix in (
+        ("market_plus_chips", "籌碼:"),
+        ("market_plus_margin", "信用:"),
+        ("market_plus_futures", "期貨:"),
+    ):
+        layer = [col for col in X_raw.columns if col.startswith(prefix)]
+        if layer:
+            sets[key] = list(market_cols) + layer
+    sets["all_features"] = list(X_raw.columns)
+    return {
+        name: X_raw.loc[paired_index, cols]
+        for name, cols in sets.items()
+    }
+
+
 def run():
     market, chips, margin, futures = load_inputs()
     X_raw, y_raw, _ = pipeline.build(market, chips, margin, futures=futures)
@@ -268,12 +286,21 @@ def run():
     paired_index = X_raw.index[paired_valid]
     paired_y = y_raw.loc[paired_index]
     paired_experiments = {}
+    paired_sets = paired_feature_sets(X_raw, market_cols, paired_index)
     paired_specs = {
-        "incumbent_all_features_logistic": (X_raw.loc[paired_index], specs["logistic_current_step5"]),
-        "market_only_logistic": (X_raw.loc[paired_index, market_cols], specs["logistic_market_features_only"]),
-        "market_only_random_forest": (X_raw.loc[paired_index, market_cols], specs["random_forest_conservative"]),
-        "market_only_hist_gradient_boosting": (X_raw.loc[paired_index, market_cols], specs["hist_gradient_boosting_conservative"]),
+        "incumbent_all_features_logistic": (paired_sets["all_features"], specs["logistic_current_step5"]),
+        "market_only_logistic": (paired_sets["market_only"], specs["logistic_market_features_only"]),
+        "market_only_random_forest": (paired_sets["market_only"], specs["random_forest_conservative"]),
+        "market_only_hist_gradient_boosting": (paired_sets["market_only"], specs["hist_gradient_boosting_conservative"]),
     }
+    # Ablate one Taiwan data layer at a time while holding the dates, labels,
+    # walk-forward folds and logistic estimator constant. This isolates
+    # incremental layer value from missing-data calendar effects.
+    for layer_name in ("market_plus_chips", "market_plus_margin", "market_plus_futures"):
+        if layer_name in paired_sets:
+            paired_specs[layer_name + "_logistic"] = (
+                paired_sets[layer_name], specs["logistic_market_features_only"]
+            )
     incumbent_pred = None
     for paired_name, (paired_X, paired_factory) in paired_specs.items():
         paired_pred, _, paired_result = walk_forward_candidate(
