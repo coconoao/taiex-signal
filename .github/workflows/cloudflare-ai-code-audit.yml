@@ -169,19 +169,48 @@ jobs:
           import json
           from pathlib import Path
           data = json.loads(Path("cloudflare_response.json").read_text(encoding="utf-8"))
-          response = (data.get("result") or {}).get("response")
+          result = data.get("result")
+          response = result.get("response") if isinstance(result, dict) else None
+
+          # Some Workers AI model/API versions return OpenAI-compatible
+          # chat-completion payloads instead of the legacy result.response shape.
           if not isinstance(response, str) or not response.strip():
-              raise SystemExit("Cloudflare returned no text response.")
+              choices = data.get("choices")
+              if isinstance(choices, list) and choices:
+                  message = choices[0].get("message") if isinstance(choices[0], dict) else None
+                  response = message.get("content") if isinstance(message, dict) else None
+
+          if isinstance(response, list):
+              response = "\\n".join(
+                  part.get("text", "") for part in response
+                  if isinstance(part, dict) and isinstance(part.get("text"), str)
+              )
+
+          if not isinstance(response, str) or not response.strip():
+              result_keys = sorted(result.keys()) if isinstance(result, dict) else []
+              choice_count = len(data.get("choices", [])) if isinstance(data.get("choices"), list) else 0
+              finish_reason = None
+              if choice_count:
+                  first = data["choices"][0]
+                  finish_reason = first.get("finish_reason") if isinstance(first, dict) else None
+              raise SystemExit(
+                  "Cloudflare returned HTTP success but no readable text. "
+                  f"Top-level keys={sorted(data.keys())}; result keys={result_keys}; "
+                  f"choices={choice_count}; finish_reason={finish_reason!r}. "
+                  "No response content or credentials were printed."
+              )
           Path("cloudflare_audit.md").write_text(response, encoding="utf-8")
           print("Cloudflare AI analysis completed.")
           PY
 
       - name: Publish analysis summary
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
         run: |
           {
             echo "## Cloudflare AI 程式碼診斷"
             echo
-            echo "目標版本：`${{ inputs.target_ref }}`"
+            printf '目標版本：`%s`\\n' "$TARGET_REF"
             echo
             cat cloudflare_audit.md
             echo
