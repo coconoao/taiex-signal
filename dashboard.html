@@ -125,7 +125,7 @@ details[open]>summary{margin-bottom:12px}
     <section id="multiHorizonModelResearch"><h2>中長期市場研究</h2>
       <p class="note" id="multiHorizonMeta">正在更新研究摘要…</p>
       <div id="multiHorizonLatest" class="mcs"><p class="note">研究資料載入中…</p></div>
-      <p class="note">提供不同期間的大盤歷史研究概況，不是個人化持有／賣出建議，也不保證未來結果。</p>
+      <p class="note" id="multiHorizonModelNote">暫定實驗候選模型載入中…</p>
     </section>
     <section hidden id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
       <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
@@ -696,15 +696,27 @@ const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then
 }).catch(() => { $("multiMarketMeta").textContent = "目前尚無其他市場研究結果，或資料來源暫時不可用。"; });
 function renderMultiHorizonResearch(r) {
   const labels = { "1m": "1 個月", "3m": "3 個月", "6m": "6 個月" };
-  $("multiHorizonMeta").textContent = `研究更新：${(r.computed_at || "").slice(0, 10) || "—"}`;
+  const modelLabels = {
+    logistic_baseline: "邏輯迴歸",
+    logistic_regularized: "正則化邏輯迴歸",
+    random_forest: "隨機森林",
+    hist_gradient_boosting: "梯度提升樹"
+  };
+  $("multiHorizonMeta").textContent = `研究更新：${(r.computed_at || "").slice(0, 10) || "—"}｜目前顯示各期間歷史模擬開發集選出的實驗候選模型`;
   const latest = r.latest_estimates || {};
+  const experiments = r.experiments || {};
   $("multiHorizonLatest").innerHTML = Object.entries(labels).map(([h, label]) => {
     const v = latest[h] || {};
+    const exp = experiments[h] || {};
+    const candidate = String(exp.selected_candidate || "").split("__").pop();
+    const modelName = modelLabels[candidate] || (candidate ? "實驗候選模型" : "尚無候選模型");
     const calibrated = v.status === "available" && v.calibration_status === "past_oos_calibrated";
     const category = calibrated ? (v.research_category || "研究中") :
       (v.status === "insufficient" ? "資料累積中" : "校準驗證中");
-    return `<div class="mc"><b>${label}</b><div class="big">${category}</div></div>`;
+    return `<div class="mc"><b>${label}</b><p class="note">暫定實驗候選｜${modelName}</p><div class="big">${category}</div></div>`;
   }).join("");
+  const note = $("multiHorizonModelNote");
+  if (note) note.textContent = "以上為各期間歷史模擬開發集選出的暫定候選模型，尚未成為正式模型。獨立留出期的穩定度與基準比較仍在驗證；目前分類僅供研究觀察，不代表未來報酬機率或持有／賣出指示。";
 }
 const loadMultiHorizonResearch = () => getJSON("multi_horizon_model_research.json")
   .then(renderMultiHorizonResearch)
