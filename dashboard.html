@@ -123,10 +123,10 @@ details[open]>summary{margin-bottom:12px}
     <section id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
     <section id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
       <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
-      <div id="modelImprovementSummary" class="mcs"></div>
+      <div id="modelImprovementSummary" class="mcs"></div><h3>測試模型最新資料日判讀</h3><div id="modelImprovementLive" class="mcs"><p class="note">等待最新研究結果…</p></div>
       <div style="overflow-x:auto"><table><thead><tr><th>候選實驗</th><th>狀態</th><th>樣本外筆數</th></tr></thead><tbody id="modelImprovementRows"><tr><td colspan="3">載入中…</td></tr></tbody></table></div>
       <p class="note" id="modelImprovementYearly"></p>
-      <p class="note">各候選模型依自身特徵完整度使用不同樣本日曆；日期區間不同的模型不可直接比較。準確率與 Brier 等指標僅描述歷史樣本外表現，不代表未來機率、因果關係或交易建議。全特徵模型資料不足時會明確標示，不會降低門檻。</p>
+      <p class="note">各候選模型依自身特徵完整度使用不同樣本日曆；日期區間不同的模型不可直接比較。即時判讀是在最新可用資料日重新訓練後產生的研究分類，不是逐秒盤中預測、未來機率或買賣指示。準確率與 Brier 等指標僅描述歷史樣本外表現。全特徵模型資料不足時會明確標示，不會降低門檻。</p>
     </section>
     <section id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
       <p class="note" id="newsEnhancedModelMeta">載入獨立模型資料中…</p>
@@ -669,6 +669,12 @@ function renderModelImprovementResearch(r) {
     const label = name === "logistic_market_features_only" ? "僅市場特徵模型" : name;
     return `<div class="mc"><b>${label}</b><div class="big">${Number.isFinite(Number(v.direction_accuracy_pct)) ? Number(v.direction_accuracy_pct).toFixed(2) + "%" : "—"}</div><p class="note">樣本外 ${v.sample_count ?? 0} 筆｜基準 ${v.baseline_direction_accuracy_pct ?? "—"}%｜Brier ${v.brier ?? "—"}（基準 ${v.baseline_brier ?? "—"}）｜Log loss ${v.log_loss ?? "—"}</p><p class="note">${v.sample_start || "—"}～${v.sample_end || "—"}｜特徵數 ${v.feature_count ?? "—"}｜每 ${v.refit_every_sessions ?? "—"} 個交易日重新訓練</p></div>`;
   }).join("") || '<p class="note">目前尚無足夠樣本可進行樣本外比較。</p>';
+  $("modelImprovementLive").innerHTML = entries.map(([name, v]) => {
+    const j = v.current_judgment || {};
+    const label = name === "logistic_market_features_only" ? "僅市場特徵模型" : name === "production_cadence_step20" ? "正式模型頻率參考" : name;
+    const state = j.status === "available" ? j.category : "資料不足";
+    return `<div class="mc"><b>${label}</b><div class="big">${state}</div><p class="note">資料日 ${j.asof || "—"}｜訓練樣本 ${j.training_samples ?? 0} 筆</p><p class="note">${j.note || "尚無判讀資料"}</p></div>`;
+  }).join("") || '<p class="note">尚無測試模型判讀資料。</p>';
   $("modelImprovementRows").innerHTML = entries.map(([name, v]) =>
     `<tr><td>${name === "logistic_market_features_only" ? "僅市場特徵模型" : name === "production_cadence_step20" ? "正式模型頻率參考" : name}</td><td>${statusText(v)}</td><td>${v.sample_count ?? v.available_samples ?? 0}</td></tr>`
   ).join("") || '<tr><td colspan="3">尚無實驗紀錄</td></tr>';
