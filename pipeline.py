@@ -1187,10 +1187,12 @@ if __name__ == "__main__":
             return None
 
     if skip_backfill and not demo:
-        # Fast boot must remain independent of sparse optional caches. The full
-        # scheduled pipeline still loads and backfills these layers separately.
-        chips = margin = futures = None
-        print("快速啟動模式：只使用完整基礎行情特徵；籌碼／信用／期貨層留待完整排程回補。", flush=True)
+        # Fast boot avoids external backfill requests, but can still assess the
+        # restored local caches without pretending missing layers are complete.
+        chips = read_existing("chips.csv")
+        margin = read_existing("margin.csv")
+        futures = read_existing("futures.csv")
+        print("快速啟動模式：使用已還原的籌碼／信用／期貨快取；不呼叫外部回補來源。", flush=True)
     else:
         chips = demo_chips(df) if demo else (
             read_existing("chips.csv") if "--no-chips" in sys.argv
@@ -1206,7 +1208,9 @@ if __name__ == "__main__":
             read_existing("futures.csv") if "--no-futures" in sys.argv
             else fetch_futures(trading_days=df.index)
         )
-    if not demo and not skip_backfill:
+    if not demo:
+        # Generate a quality report on both full and fast runs. Fast runs use
+        # restored caches only; absent or incomplete layers remain explicitly missing.
         write_taiwan_data_status(df, chips, margin, futures)
     X, y, fwd = build(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
