@@ -9,7 +9,7 @@ permissions:
 jobs:
   live-data-smoke:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       # Deliberately local-only: this job has no Supabase credentials and must
       # never read or write the production site_data table.
@@ -42,7 +42,7 @@ jobs:
           failures = []
           for name, fetch, filename in checks:
               path = root / filename
-              print(f"\n=== {name}: requesting up to {len(dates)} recent weekdays ===", flush=True)
+              print(f"\\n=== {name}: requesting up to {len(dates)} recent weekdays ===", flush=True)
               result = fetch(days_back=10, path=str(path), trading_days=dates)
               count = len(result)
               print(f"RESULT {name}: {count} records", flush=True)
@@ -51,5 +51,34 @@ jobs:
 
           if failures:
               raise SystemExit("No real records received from: " + ", ".join(failures))
-          print("\nLIVE DATA SMOKE TEST PASSED: all three sources returned records.")
+          print("\\nLIVE DATA SMOKE TEST PASSED: all three sources returned records.")
+          PY
+      - name: Verify official listed, OTC and TAIEX history adapters
+        run: |
+          python - <<'PY'
+          import tw_market_data
+
+          checks = [
+              ("TWSE listed 2330", lambda: tw_market_data.load_stock_history("2330", "TWSE", years=1)),
+              ("TPEx OTC 6488", lambda: tw_market_data.load_stock_history("6488", "TPEX", years=1)),
+              ("TWSE TAIEX", lambda: tw_market_data.load_taiex_history(years=2)),
+          ]
+          failures = []
+          for name, fetch in checks:
+              print(f"\\n=== {name} ===", flush=True)
+              try:
+                  frame = fetch()
+                  if len(frame) < 60:
+                      raise RuntimeError(f"only {len(frame)} observations")
+                  print(
+                      f"PASS: rows={len(frame)}, first={frame.index[0]}, "
+                      f"last={frame.index[-1]}",
+                      flush=True,
+                  )
+              except Exception as exc:
+                  failures.append(f"{name}: {type(exc).__name__}: {exc}")
+                  print(f"FAIL: {failures[-1]}", flush=True)
+          if failures:
+              raise SystemExit("\\n".join(failures))
+          print("\\nOFFICIAL STOCK HISTORY SMOKE TEST PASSED.")
           PY
