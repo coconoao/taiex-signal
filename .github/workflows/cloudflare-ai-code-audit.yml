@@ -167,37 +167,68 @@ jobs:
           fi
           python - <<'PY'
           import json
+          import re
           from pathlib import Path
+
           data = json.loads(Path("cloudflare_response.json").read_text(encoding="utf-8"))
+          if not isinstance(data, dict):
+              raise SystemExit("Cloudflare returned an unexpected JSON envelope.")
+
+          # Cloudflare may return HTTP 2xx with success=false. Report the
+          # provider's error instead of misclassifying it as an empty answer.
+          errors = data.get("errors")
+          if isinstance(errors, list) and errors:
+              for item in errors[:3]:
+                  if isinstance(item, dict):
+                      code = item.get("code", "unknown")
+                      message = str(item.get("message", "Cloudflare API error"))[:500]
+                      message = re.sub(r"(?i)(bearer\\s+)[A-Za-z0-9._~+/-]+", r"\\1[REDACTED]", message)
+                      message = re.sub(r"(?i)(api[_-]?token|access[_-]?token|secret|password)(\\s*[:=]\\s*)[^\\s,;]+", r"\\1\\2[REDACTED]", message)
+                      print(f"Cloudflare error {code}: {message}")
+              raise SystemExit("Cloudflare reported an API/model error (HTTP status was successful).")
+
+          if data.get("success") is False:
+              raise SystemExit(
+                  "Cloudflare reported success=false without a readable errors array. "
+                  f"Top-level keys={sorted(data.keys())}."
+              )
+
           result = data.get("result")
           response = result.get("response") if isinstance(result, dict) else None
 
-          # Some Workers AI model/API versions return OpenAI-compatible
-          # chat-completion payloads instead of the legacy result.response shape.
+          # Support the documented Workers AI result.response format and
+          # OpenAI-compatible responses should the provider return that envelope.
           if not isinstance(response, str) or not response.strip():
-              choices = data.get("choices")
+              candidates = []
+              if isinstance(result, dict):
+                  candidates.extend([result.get("output_text"), result.get("text")])
+                  choices = result.get("choices")
+              else:
+                  choices = None
+              if not isinstance(choices, list):
+                  choices = data.get("choices")
               if isinstance(choices, list) and choices:
-                  message = choices[0].get("message") if isinstance(choices[0], dict) else None
-                  response = message.get("content") if isinstance(message, dict) else None
+                  first = choices[0]
+                  message = first.get("message") if isinstance(first, dict) else None
+                  candidates.append(message.get("content") if isinstance(message, dict) else None)
+              response = next((value for value in candidates if isinstance(value, str) and value.strip()), None)
 
           if isinstance(response, list):
-              response = "\n".join(
+              response = "\\n".join(
                   part.get("text", "") for part in response
                   if isinstance(part, dict) and isinstance(part.get("text"), str)
               )
 
           if not isinstance(response, str) or not response.strip():
               result_keys = sorted(result.keys()) if isinstance(result, dict) else []
+              result_type = type(result).__name__
               choice_count = len(data.get("choices", [])) if isinstance(data.get("choices"), list) else 0
-              finish_reason = None
-              if choice_count:
-                  first = data["choices"][0]
-                  finish_reason = first.get("finish_reason") if isinstance(first, dict) else None
+              message_count = len(data.get("messages", [])) if isinstance(data.get("messages"), list) else 0
               raise SystemExit(
                   "Cloudflare returned HTTP success but no readable text. "
-                  f"Top-level keys={sorted(data.keys())}; result keys={result_keys}; "
-                  f"choices={choice_count}; finish_reason={finish_reason!r}. "
-                  "No response content or credentials were printed."
+                  f"success={data.get('success')!r}; result_type={result_type}; "
+                  f"result_keys={result_keys}; choices={choice_count}; messages={message_count}. "
+                  "The response body was not printed to protect source code and credentials."
               )
           Path("cloudflare_audit.md").write_text(response, encoding="utf-8")
           print("Cloudflare AI analysis completed.")
