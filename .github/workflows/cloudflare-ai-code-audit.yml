@@ -184,7 +184,8 @@ jobs:
               encoding="utf-8"
           )
           PY
-          read -r PROBE_HTTP PROBE_CURL < <(invoke_cloudflare cloudflare_probe.json cloudflare_probe_response.json 45)
+          probe_result="$(invoke_cloudflare cloudflare_probe.json cloudflare_probe_response.json 45)"
+          read -r PROBE_HTTP PROBE_CURL <<< "$probe_result"
           if [[ ! "$PROBE_HTTP" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error::Cloudflare preflight failed (HTTP ${PROBE_HTTP:-000}, curl exit ${PROBE_CURL}). The full source bundle was not submitted."
             if [[ -s cloudflare_probe_response.json ]]; then
@@ -201,7 +202,8 @@ jobs:
           HTTP_CODE="000"
           CURL_STATUS=0
           for attempt in 1 2; do
-            read -r HTTP_CODE CURL_STATUS < <(invoke_cloudflare source/cloudflare_request.json cloudflare_response.json 180)
+            full_result="$(invoke_cloudflare source/cloudflare_request.json cloudflare_response.json 180)"
+            read -r HTTP_CODE CURL_STATUS <<< "$full_result"
             if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
               break
             fi
