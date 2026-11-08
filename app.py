@@ -226,6 +226,9 @@ def run_jobs(*whats):
                     import storage
                     saved = storage.save_data(DATA)
                     log += f"[storage] saved {saved} data files to Supabase\\n"
+                    if w == "news_enhanced_model":
+                        model_saved = storage.save_data(DATA, names=("news_enhanced_model.json",))
+                        log += f"[storage] saved news-enhanced model output: {model_saved}\\n"
                 except Exception as e:
                     code = 1
                     log += f"[storage] persistence failed: {type(e).__name__}: {e}\\n"
@@ -271,11 +274,11 @@ def stale():
 def scheduler():
     last = None
     # Recompute once on every process start so restored/repo-bundled outputs cannot mask stale data.
-    run_jobs("pipeline-fast", "news")
+    run_jobs("pipeline-fast", "news", "news_enhanced_model")
     while True:
         now = dt.datetime.now(TZ)
         if now.weekday() < 5 and (now.hour, now.minute) == (8, 30) and last != now.date():
-            last = now.date(); run_jobs("pipeline", "news")
+            last = now.date(); run_jobs("pipeline", "news", "news_enhanced_model")
         time.sleep(20)
 
 def _spot_session(now):
