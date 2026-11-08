@@ -1,0 +1,29 @@
+name: Deployed Worker health check
+
+on:
+  push:
+    branches: [test/worker-health-only-20261108]
+
+permissions:
+  contents: read
+
+jobs:
+  worker-health:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Check deployed Worker health endpoint
+        run: |
+          python - <<'PY'
+          import json
+          from urllib.request import urlopen
+
+          url = "https://taiex-stock-worker.onrender.com/healthz"
+          with urlopen(url, timeout=30) as response:
+              if response.status != 200:
+                  raise SystemExit(f"HTTP {response.status}")
+              data = json.loads(response.read().decode("utf-8"))
+          if data != {"ok": True, "service": "stock-worker"}:
+              raise SystemExit(f"Unexpected health payload: {data!r}")
+          print("PASS: deployed Worker returned HTTP 200 and expected health payload")
+          PY
