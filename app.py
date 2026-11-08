@@ -114,6 +114,7 @@ def warm_stock_worker(timeout=90):
         remaining = deadline - time.monotonic()
         if remaining > 0:
             time.sleep(min(3, remaining))
+    print("[stock-worker] health check did not become ready: %s" % last_error, flush=True)
     raise StockWorkerGatewayError("個股分析子服務喚醒逾時（%s），請稍後重試" % last_error)
 
 
@@ -138,6 +139,7 @@ def request_stock_worker(code):
         with urllib.request.urlopen(req, timeout=240) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        print("[stock-worker] analyze endpoint returned HTTP %s" % exc.code, flush=True)
         try:
             detail = json.loads(exc.read().decode("utf-8"))
             message = detail.get("error") or "個股分析服務回傳錯誤"
@@ -147,6 +149,7 @@ def request_stock_worker(code):
             raise ValueError(str(message)[:1000])
         raise StockWorkerGatewayError(str(message)[:1000])
     except Exception as exc:
+        print("[stock-worker] analyze transport failed: %s" % type(exc).__name__, flush=True)
         raise StockWorkerGatewayError("無法連接個股分析服務：%s" % type(exc).__name__)
     if not isinstance(result, dict):
         raise StockWorkerGatewayError("個股分析服務回傳格式錯誤")
