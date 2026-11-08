@@ -87,7 +87,7 @@ jobs:
           http_code=000
           for attempt in 1 2 3 4; do
             if http_code=$(curl --silent --show-error \
-              --max-time 90 \
+              --max-time 45 \
               --output gemini_response.json \
               --write-out "%{http_code}" \
               --request POST \
