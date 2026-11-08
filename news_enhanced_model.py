@@ -54,9 +54,16 @@ def write_history(rows):
     os.replace(tmp, HISTORY)
 
 
+FEATURE_VERSION = 2
+
+
 def vector(features, market_context):
-    categories = features.get("category_counts") or {}
-    total = max(1, int(features.get("headline_count") or 0))
+    if int(features.get("feature_version") or 0) != FEATURE_VERSION:
+        return None
+    categories = features.get("relevant_category_counts") or {}
+    total = int(features.get("relevant_headline_count") or 0)
+    if total <= 0:
+        return None
     try:
         original_score = float(market_context["prob_up"])
         if not math.isfinite(original_score) or not 0 <= original_score <= 1:
@@ -151,6 +158,8 @@ def main():
 
     payload = {
         "status": "insufficient",
+        "model_version": 2,
+        "feature_version": FEATURE_VERSION,
         "signal": "資料累積中",
         "score_pct": None,
         "asof": signal_asof or None,
@@ -163,14 +172,16 @@ def main():
         "feature_summary": None,
         "note": (
             "新聞增強模型需要至少 100 筆同時具備原始模型當時分數、新聞特徵及後續實際收盤結果的交易日樣本；"
-            "目前只累積符合條件的資料，不以未驗證規則產生訊號。"
+            "新版特徵只納入與台灣市場有明確關聯的市場、台灣及政策標題；"
+            "至少需要 100 筆同時具備新版特徵、原始模型當時分數及後續實際收盤結果的交易日樣本。"
+            "舊版特徵不混入新版訓練資料，目前只累積符合條件的資料，不以未驗證規則產生訊號。"
         ),
     }
 
     if current_vector is None:
         payload["status"] = "current_data_unavailable"
         payload["signal"] = "目前資料不足"
-        payload["note"] = "目前新聞或原始模型資料不足，無法產生當日研究分類。"
+        payload["note"] = "目前新聞快照尚未具備新版市場相關特徵，或原始模型資料不足；不使用舊版特徵混合訓練。"
         write_output(payload)
         print("News-enhanced model: current inputs unavailable.", flush=True)
         return
@@ -178,6 +189,7 @@ def main():
     if len(training_x) < MIN_SAMPLES:
         payload["feature_summary"] = {
             "headline_count": current_features.get("headline_count", 0),
+            "relevant_headline_count": current_features.get("relevant_headline_count", 0),
             "news_environment_score": current_features.get("news_environment_score", 0),
             "original_model_score_pct": round(float(signals["prob_up"]) * 100, 1),
         }
