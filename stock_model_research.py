@@ -82,7 +82,46 @@ def _factories():
     }
 
 
-def _metrics(probability, actual, baseline):
+def _block_bootstrap_accuracy_ci(probability, actual, block_length, seed=RANDOM_STATE, draws=1000):
+    """Moving-block bootstrap CI; preserves short-range dependence in overlapping labels."""
+    p = np.asarray(probability, dtype=float)
+    y = np.asarray(actual, dtype=int)
+    n = len(y)
+    if n < max(100, block_length * 4):
+        return None
+    correct = ((p >= 0.5) == (y == 1)).astype(float)
+    rng = np.random.default_rng(seed)
+    block = min(max(1, int(block_length)), max(1, n // 4))
+    starts = np.arange(0, n - block + 1)
+    estimates = np.empty(draws, dtype=float)
+    blocks_needed = int(np.ceil(n / block))
+    for i in range(draws):
+        chosen = rng.choice(starts, size=blocks_needed, replace=True)
+        sample = np.concatenate([correct[start:start + block] for start in chosen])[:n]
+        estimates[i] = sample.mean() * 100
+    low, high = np.quantile(estimates, [0.025, 0.975])
+    return {"lower_95_pct": round(float(low), 2), "upper_95_pct": round(float(high), 2),
+            "method": "moving-block bootstrap", "block_length_sessions": int(block),
+            "bootstrap_draws": int(draws)}
+
+
+def _annual_metrics(probability, actual, baseline):
+    frame = pd.DataFrame({
+        "probability": np.asarray(probability, dtype=float),
+        "actual": np.asarray(actual, dtype=int),
+        "baseline": np.asarray(baseline, dtype=float),
+    }, index=pd.DatetimeIndex(actual.index))
+    output = {}
+    for year, group in frame.groupby(frame.index.year):
+        if len(group) < 20:
+            continue
+        output[str(year)] = _metrics(
+            group["probability"], group["actual"], group["baseline"]
+        )
+    return output
+
+
+def _metrics(probability, actual, baseline, horizon=21):
     p = np.clip(np.asarray(probability, dtype=float), 1e-6, 1 - 1e-6)
     y = np.asarray(actual, dtype=int)
     b = np.clip(np.asarray(baseline, dtype=float), 1e-6, 1 - 1e-6)
@@ -91,6 +130,8 @@ def _metrics(probability, actual, baseline):
     return {
         "sample_count": int(len(y)),
         "direction_accuracy_pct": round(float(np.mean((p >= 0.5) == (y == 1)) * 100), 2),
+        "baseline_direction_accuracy_pct": round(float(np.mean((b >= 0.5) == (y == 1)) * 100), 2),
+        "accuracy_95pct_ci": _block_bootstrap_accuracy_ci(p, y, horizon),
         "brier": round(brier, 5),
         "baseline_brier": round(baseline_brier, 5),
         "brier_skill": round(1 - brier / baseline_brier, 5) if baseline_brier else None,
@@ -166,14 +207,17 @@ def _one_horizon(features, close, horizon):
         dev = wf["development_index"]
         hold = wf["holdout_index"]
         dev_metrics = _metrics(
-            wf["raw"].loc[dev], wf["actual"].loc[dev], wf["baseline"].loc[dev]
+            wf["raw"].loc[dev], wf["actual"].loc[dev], wf["baseline"].loc[dev], horizon
         )
         hold_metrics = _metrics(
-            wf["raw"].loc[hold], wf["actual"].loc[hold], wf["baseline"].loc[hold]
+            wf["raw"].loc[hold], wf["actual"].loc[hold], wf["baseline"].loc[hold], horizon
         ) if len(hold) else None
         results[name] = {
             "development_brier": dev_metrics["brier"],
             "untouched_holdout": hold_metrics,
+            "annual_holdout_metrics": _annual_metrics(
+                wf["raw"].loc[hold], wf["actual"].loc[hold], wf["baseline"].loc[hold]
+            ) if len(hold) else {},
             "holdout_start": str(hold.min().date()) if len(hold) else None,
             "holdout_end": str(hold.max().date()) if len(hold) else None,
         }
@@ -230,6 +274,7 @@ def _one_horizon(features, close, horizon):
             "偏負向研究分類" if calibrated <= 0.40 else "中性研究分類"
         ) if calibrated is not None else "尚未校準",
         "untouched_holdout": holdout_metrics,
+        "annual_holdout_metrics": results[selected_name]["annual_holdout_metrics"],
         "candidate_comparison": results,
         "note": (
             "目標為該標的在指定交易日數後的累積報酬是否為正；這是歷史樣本外研究模型估計，"
