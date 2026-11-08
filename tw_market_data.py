@@ -55,7 +55,22 @@ def _request_json(url: str) -> dict:
                 time.sleep(1.0)
                 continue
             break
-    raise MarketDataError(f"官方行情來源連線失敗：{type(last_error).__name__}")
+
+    # Keep diagnostics useful without recording full URLs, query strings, or
+    # request payloads. The adapter only calls fixed public exchange hosts.
+    host = urllib.parse.urlparse(url).hostname or "unknown-host"
+    reason = getattr(last_error, "reason", None)
+    if reason is not None:
+        reason_type = type(reason).__name__
+        reason_errno = getattr(reason, "errno", None)
+        detail = f"{type(last_error).__name__}/{reason_type}"
+        if reason_errno is not None:
+            detail += f"(errno={reason_errno})"
+    elif code is not None:
+        detail = f"{type(last_error).__name__}(http={code})"
+    else:
+        detail = type(last_error).__name__
+    raise MarketDataError(f"官方行情來源連線失敗：{host} {detail}")
 
 
 def _month_starts(years: int = 10):
@@ -249,8 +264,8 @@ def _official_cash_dividend_references(code: str, source: str, rows):
 def _fetch_months(fetcher, code: str, months):
     collected = []
     errors = []
-    # Keep concurrency modest to avoid overloading public exchange endpoints.
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    # Two concurrent requests balance throughput with public exchange rate limits.
+    with ThreadPoolExecutor(max_workers=2) as pool:
         futures = {pool.submit(fetcher, code, month): month for month in months}
         for future in as_completed(futures):
             try:
@@ -376,7 +391,7 @@ def load_taiex_history(years: int = 10):
 
     months = _month_starts(years)
     records = []
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(_taiex_month, month) for month in months]
         errors = []
         for future in as_completed(futures):
