@@ -103,9 +103,11 @@ def _twse_month(code: str, month: dt.date):
     })
     url = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?" + params
     payload = _request_json(url)
-    if payload.get("stat") not in ("OK", "很抱歉，沒有符合條件的資料!"):
-        if not payload.get("data"):
-            return []
+    status = payload.get("stat")
+    if status == "很抱歉，沒有符合條件的資料!":
+        return []
+    if status != "OK":
+        raise MarketDataError(f"TWSE STOCK_DAY 回傳非成功狀態：{status or 'missing stat'}")
     rows = []
     for item in payload.get("data") or []:
         if len(item) < 8:
@@ -257,7 +259,7 @@ def _taiex_month(month: dt.date):
         "date": month.strftime("%Y%m01"),
         "response": "json",
     })
-    url = "https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?" + params
+    url = "https://www.twse.com.tw/indicesReport/MI_5MINS_HIST?" + params
     payload = _request_json(url)
     rows = []
     for item in payload.get("data") or []:
