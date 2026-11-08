@@ -280,6 +280,47 @@ def main():
     latest = rows[-1] if rows else None
     labeled = sum(isinstance(row.get("outcome"), dict) for row in rows)
     context = build_context(rows, latest) if latest else {"status": "insufficient", "sample_count": 0}
+
+    # Refresh a separate live window every calendar day, including weekends and
+    # Taiwan market holidays. This does not create or relabel a market-session row.
+    previous_summary = {}
+    if os.path.isfile("news_gdelt_research.json"):
+        try:
+            with open("news_gdelt_research.json", encoding="utf-8") as stream:
+                previous_summary = json.load(stream)
+        except Exception:
+            previous_summary = {}
+    current = previous_summary.get("current")
+    current_context = previous_summary.get("current_historical_context")
+    now_local = dt.datetime.now(TZ)
+    latest_market_date = dates[-1]
+    current_start = dt.datetime.combine(latest_market_date, CUTOFF, TZ)
+    if now_local > current_start:
+        try:
+            current_articles, current_capped = fetch_window(current_start, now_local)
+            current = {
+                "asof": latest_market_date.isoformat(),
+                "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                "window_start_local": current_start.isoformat(),
+                "window_end_local": now_local.isoformat(),
+                "features": score_articles(current_articles),
+                "query_capped": bool(current_capped),
+            }
+            current_context = build_context(rows, current)
+            print(
+                f"GDELT 最新新聞環境（基準交易日 {latest_market_date}）："
+                f"{len(current_articles)} 篇標題；"
+                f"{'達到單次上限' if current_capped else '未達單次上限'}",
+                flush=True,
+            )
+        except Exception as exc:
+            # Preserve the last successful current window; do not replace it with
+            # an empty snapshot during a transient API error or rate limit.
+            print(
+                f"GDELT 最新新聞環境更新失敗，保留上次資料："
+                f"{type(exc).__name__}: {str(exc)[:160]}",
+                flush=True,
+            )
     summary = {
         "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "source": "GDELT DOC 2.0",
@@ -291,6 +332,8 @@ def main():
         "query_capped_dates": capped_dates,
         "latest": latest,
         "historical_context": context,
+        "current": current,
+        "current_historical_context": current_context,
         "note": "新聞分數是標題字詞研究特徵；歷史報酬僅為事後描述統計，不代表未來結果。",
     }
     atomic_json("news_gdelt_research.json", summary)
