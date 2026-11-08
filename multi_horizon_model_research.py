@@ -400,10 +400,18 @@ def run():
         selected = viable_market[selected_name]
         selected_feature_set = selected.get("feature_set", "market_only_common_calendar")
         selected_X = feature_sets[selected_feature_set]
+        # Keep the latest feature rows (whose forward labels are not mature yet)
+        # for the current estimate. Only the historical evaluation calendar is
+        # restricted to rows with realized outcomes.
+        selected_X_full = (
+            Xh[market_cols]
+            if selected_feature_set == "market_only_common_calendar"
+            else pd.concat([Xh[market_cols], macro[macro_cols].reindex(Xh.index)], axis=1)
+        )
         selected_factory_name = selected_name.split("__", 1)[1]
         wf = walk_forward(selected_X, yh.reindex(selected_X.index), horizon, model_factories[selected_factory_name])
         current = latest_estimate(
-            selected_X, yh.reindex(selected_X.index), horizon, model_factories[selected_factory_name],
+            selected_X_full, yh, horizon, model_factories[selected_factory_name],
             wf["probability"], wf["actual"]
         ) if wf else {"status": "insufficient"}
         experiments[horizon_name] = {
