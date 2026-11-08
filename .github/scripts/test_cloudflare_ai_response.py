@@ -41,6 +41,12 @@ class CloudflareAIResponseTests(unittest.TestCase):
         self.assertNotIn("supabase_secret_value_123", prefixed_redacted)
         self.assertEqual(prefixed_redacted.count("[REDACTED]"), 2)
 
+    def test_extract_text_redacts_secrets_before_returning_markdown(self):
+        result = extract_text({
+            "choices": [{"message": {"content": 'CLOUDFLARE_API_TOKEN="sensitive-token-value"'}}]
+        })
+        self.assertEqual(result, 'CLOUDFLARE_API_TOKEN="[REDACTED]"')
+
     def test_output_redacts_bearer_and_jwt_tokens(self):
         bearer = "Bearer " + "A" * 32
         jwt = ".".join(["eyJ" + "a" * 20, "eyJ" + "b" * 20, "eyJ" + "c" * 20])
