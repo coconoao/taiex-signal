@@ -42,12 +42,13 @@ NEG = {"fall", "falls", "fell", "drop", "drops", "slump", "plunge", "loss", "los
        "tension", "war", "wars", "tariff", "sanction", "curb", "ban", "bans", "recession", "sell-off", "selloff", "slide", "crash",
        "probe", "bearish", "underweight", "cuts"}
 
-PROMPT = """你是台灣市場新聞研究助理。以下資料包含國際市場新聞、台灣本地新聞、政府政策與國際局勢，以及機構觀點。只根據提供的標題與 RSS 摘要判斷，不要引用未提供的資訊；資訊不足時分數接近 0、信心調低。
-分析政策時，請區分「已公告／已生效」與「提案／討論／媒體推測」，說明可能的傳導管道（例如關稅、出口、半導體供應鏈、能源、匯率、利率、財政支出），不要把政策立場直接等同市場結果。
+PROMPT = """你是台灣加權指數的新聞研究助理。只根據提供的標題與 RSS 摘要判斷，不得補入未提供的事實；資訊不足、方向混合或傳導不清楚時，分數應接近 0 並降低信心。
+先判斷新聞是否與台灣加權指數有合理關聯。排除與台股無關的一般政治、地方活動、其他國家股市及單一公司新聞；若單一公司新聞涉及台灣大型權值股、半導體供應鏈或明確的台灣產業傳導，才納入並說明原因。不要把「提到台灣企業」直接等同「台股方向」。
+政策新聞須區分已公告／已生效、提案／研議及媒體推測，並說明關稅、出口、半導體供應鏈、能源、匯率、利率或財政支出的具體傳導管道。關稅、制裁、戰爭、升降息等詞本身不自動代表利空或利多，須判斷實際影響與雙向風險。
+機構觀點必須同時符合：標題直接點名該機構、明確提到台股／台灣股市／TAIEX，且明確表達該機構對台股方向的看法。泛指美股、中國股市、全球科技股或台灣企業投資的文章不得列為台股機構觀點。
 只輸出 JSON：{"next_day": 數字, "next_week": 數字, "confidence": 0到1, "drivers": [{"id": 標題id, "impact": "正面"或"負面", "why": "20字內理由"}], "summary": "繁體中文，80字內", "analysts": [{"name": 機構名稱, "id": 標題id, "stance": "看多"或"看空"或"中性"或"無明確看法"}]}
-分數代表對「台灣加權指數」的影響：-1 極偏空、0 中性、1 極偏多；next_day 指下一個交易日，next_week 指未來 5 個交易日。drivers 最多 4 則，可引用市場新聞、台灣新聞或政策新聞，並指出來源 id。
-analysts 只列「標題明確寫出該機構對台股或台股大盤的方向性看法」的項目，其他不列，不要從標題推測。
-"""
+分數代表對台灣加權指數的研究方向：-1 極偏負向、0 中性、1 極偏正向；不是未來上漲機率。next_day 指下一個交易日，next_week 指未來 5 個交易日。drivers 最多 4 則，須引用實際標題 id 並簡述傳導原因。
+analysts 不得依機構搜尋分類或單純情緒字詞推測；只有標題明確表達該機構對台股大盤方向的看法才列出，否則回傳空陣列。"""
 
 def load_settings():  # 儀表板「設定」頁存下的金鑰
     try: os.environ.update({k: v for k, v in json.load(open("settings.json", encoding="utf-8")).items() if v})
@@ -216,19 +217,141 @@ def tally(title):
     hit = lambda S: sum(any(w == s or (len(s) > 4 and w.startswith(s)) for s in S) for w in ws)
     return hit(POS), hit(NEG)
 
+MARKET_RELEVANCE_TERMS = (
+    "台股", "台灣股市", "台灣股票", "加權指數", "台積電", "半導體", "晶片", "晶圓",
+    "出口", "關稅", "貿易", "央行", "利率", "通膨", "通胀", "匯率", "gdp",
+    "經濟成長", "景氣", "供應鏈", "能源", "油價", "科技", "人工智慧", "投資",
+    "預算", "補助", "金融", "semiconductor", "chip", "tsmc", "export", "tariff",
+    "trade", "central bank", "interest rate", "inflation", "currency", "supply chain",
+    "energy", "oil price", "manufacturing", "fiscal", "budget", "subsidy",
+)
+POSITIVE_ZH = ("上漲", "上揚", "走高", "反彈", "回升", "成長", "增加", "改善", "利多",
+               "創高", "突破", "復甦", "降息", "獲利", "擴張", "強勁", "優於預期", "買超")
+NEGATIVE_ZH = ("下跌", "走低", "回落", "下滑", "衰退", "減少", "惡化", "利空", "暴跌",
+               "制裁", "戰爭", "升息", "疲弱", "虧損", "萎縮", "低於預期", "賣超")
+
+TAIWAN_MARKET_RE = re.compile(
+    r"(?:台股|台灣股市|台灣股票|台灣加權指數|加權指數|TAIEX|"
+    r"Taiwan(?:ese)?\\s+(?:stocks?|shares?|equities)|Taiwan Weighted)",
+    re.I,
+)
+ANALYST_ALIASES = {
+    "高盛": ("goldman sachs", "goldman"),
+    "摩根士丹利": ("morgan stanley",),
+    "摩根大通": ("j.p. morgan", "jp morgan", "jpmorgan"),
+    "花旗": ("citigroup", "citi"),
+    "瑞銀": ("ubs",),
+    "野村": ("nomura",),
+    "麥格理": ("macquarie",),
+}
+ANALYST_POSITIVE = ("bullish", "overweight", "upgrade", "outperform", "positive on",
+                    "optimistic", "top pick", "看多", "看好", "增持", "加碼", "偏多")
+ANALYST_NEGATIVE = ("bearish", "underweight", "downgrade", "underperform", "negative on",
+                    "pessimistic", "看空", "看淡", "減持", "降評", "偏空")
+
+
+def market_relevant_headline(item):
+    kind = str(item.get("kind") or "")
+    if kind == "market":
+        return True
+    if kind not in ("taiwan", "policy"):
+        return False
+    text = (str(item.get("title") or "") + " " + str(item.get("description") or "")).lower()
+    return any(term in text for term in MARKET_RELEVANCE_TERMS)
+
+
+def headline_sentiment(title):
+    title = str(title or "")
+    en_positive, en_negative = tally(title)
+    positive = en_positive + sum(term in title for term in POSITIVE_ZH)
+    negative = en_negative + sum(term in title for term in NEGATIVE_ZH)
+    return int(positive), int(negative)
+
+
+def explicit_analyst_view(item):
+    if str(item.get("kind") or "") != "analyst":
+        return None
+    title = str(item.get("title") or "")
+    lower = title.lower()
+    tag = str(item.get("tag") or "")
+    aliases = ANALYST_ALIASES.get(tag, ())
+    if not aliases or not any(alias in lower for alias in aliases):
+        return None
+    if not TAIWAN_MARKET_RE.search(title):
+        return None
+    if re.search(r"(?:not|no longer|isn't|is not)\\s+(?:bullish|bearish|overweight|underweight)|(?:不看多|不看空|並非看多|並非看空|不代表看多|不代表看空)", lower):
+        return None
+    positive = any(term in lower for term in ANALYST_POSITIVE)
+    negative = any(term in lower for term in ANALYST_NEGATIVE)
+    if positive == negative:
+        return None
+    attribution = re.search(
+        r"\\b(?:says?|said|sees?|expects?|forecast(?:s|ed)?|recommends?|rates?|"
+        r"bullish|bearish|overweight|underweight|upgrade[sd]?|downgrade[sd]?)\\b|"
+        r"(?:表示|認為|看好|看淡|看多|看空|建議|調升|調降)",
+        lower,
+    )
+    if not attribution:
+        return None
+    return "看多" if positive else "看空"
+
+
+def validate_analyst_calls(calls, analyst_headlines):
+    allowed = {
+        str(item.get("id")): (item, explicit_analyst_view(item))
+        for item in analyst_headlines
+    }
+    result, seen = [], set()
+    for call in calls if isinstance(calls, list) else []:
+        if not isinstance(call, dict):
+            continue
+        item, expected = allowed.get(str(call.get("id")), (None, None))
+        if not item or not expected or call.get("name") != item.get("tag"):
+            continue
+        if call.get("stance") != expected or str(item.get("id")) in seen:
+            continue
+        seen.add(str(item.get("id")))
+        result.append({"name": item.get("tag"), "id": item.get("id"), "stance": expected})
+    return result
+
+
 def lexicon(hl):
-    p = n = 0
-    for h in hl:
-        if h["kind"] == "market":
-            a, b = tally(h["title"]); p += a > b; n += b > a
-    score = round((p - n) / (p + n + 3), 2)  # 標題少或中性時自然趨近 0
+    weighted = []
+    positive_count = negative_count = 0
+    weights = {"market": 1.0, "taiwan": 0.8, "policy": 0.7}
+    for item in hl:
+        if not market_relevant_headline(item):
+            continue
+        positive, negative = headline_sentiment(item.get("title"))
+        if positive == negative:
+            continue
+        direction = 1 if positive > negative else -1
+        positive_count += int(direction > 0)
+        negative_count += int(direction < 0)
+        weighted.append((weights.get(item.get("kind"), 0.0), direction, item))
+    total_weight = sum(weight for weight, _, _ in weighted)
+    raw_score = (
+        sum(weight * direction for weight, direction, _ in weighted) / total_weight
+        if total_weight else 0.0
+    )
+    score = round(raw_score * len(weighted) / (len(weighted) + 5), 2) if weighted else 0.0
+    drivers = [{
+        "id": item.get("id"),
+        "impact": "正面" if direction > 0 else "負面",
+        "why": "標題字詞規則命中；非語意判讀",
+    } for _, direction, item in weighted[:4]]
     calls = []
-    for h in hl:
-        if h["kind"] == "analyst":
-            a, b = tally(h["title"])
-            if a != b: calls.append({"name": h["tag"], "id": h["id"], "stance": "看多" if a > b else "看空"})
-    return {"next_day": score, "next_week": score, "confidence": 0.3, "drivers": [],
-            "summary": f"內建規則：{p} 則偏多、{n} 則偏空標題（只比對字詞，不理解語意，隔日與一週同分）。", "analysts": calls}
+    for item in hl:
+        stance = explicit_analyst_view(item)
+        if stance:
+            calls.append({"name": item.get("tag"), "id": item.get("id"), "stance": stance})
+    summary = (
+        f"規則基準：納入 {len(weighted)} 則具方向字詞的市場相關標題，"
+        f"正向 {positive_count}、負向 {negative_count}；僅依標題字詞，非語意模型，"
+        "隔日與一週共用同一分數。"
+    )
+    return {"next_day": score, "next_week": score, "confidence": 0.3,
+            "drivers": drivers, "summary": summary, "analysts": calls}
 
 def post(url, headers, body):
     req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json", **headers})
@@ -255,45 +378,47 @@ MODELS = {"Claude": (ask_claude, ["ANTHROPIC_API_KEY"]), "ChatGPT": (ask_openai,
           "Gemini": (ask_gemini, ["GEMINI_API_KEY"])}
 clip = lambda x: round(max(-1.0, min(1.0, float(x))), 2)
 
-def run(name, fn, p):
+def run(name, fn, p, analyst_headlines=None):
     try:
-        d = json.loads(re.search(r"\{.*\}", fn(p), re.S).group(0))
+        d = json.loads(re.search(r"\\{.*\\}", fn(p), re.S).group(0))
         return name, {"next_day": clip(d["next_day"]), "next_week": clip(d["next_week"]), "confidence": clip(abs(float(d.get("confidence", 0)))),
                       "drivers": d.get("drivers", [])[:4], "summary": str(d.get("summary", "")),
-                      "analysts": [a for a in d.get("analysts", []) if isinstance(a, dict)][:15]}
+                      "analysts": validate_analyst_calls(d.get("analysts", []), analyst_headlines or [])}
     except Exception as e:
         return name, {"error": f"{type(e).__name__}: {e}"}
 
-
 def research_features(hl):
-    """計算方向中立的新聞環境特徵；不輸出買賣指令。"""
+    """Versioned, Taiwan-market-relevant news features; not a trading signal."""
     kinds = ("market", "taiwan", "policy", "analyst")
     counts = {kind: sum(1 for h in hl if h.get("kind") == kind) for kind in kinds}
+    relevant = [item for item in hl if market_relevant_headline(item)]
+    relevant_counts = {
+        kind: sum(1 for item in relevant if item.get("kind") == kind)
+        for kind in ("market", "taiwan", "policy")
+    }
     sources = {str(h.get("source") or h.get("tag") or "").strip()
                for h in hl if str(h.get("source") or h.get("tag") or "").strip()}
     dated = sum(bool(str(h.get("published") or "").strip()) for h in hl)
     linked = sum(bool(str(h.get("link") or "").strip()) for h in hl)
-    positive_words = ("上漲", "成長", "增加", "改善", "利多", "創高", "突破", "復甦", "降息", "回升")
-    negative_words = ("下跌", "衰退", "減少", "惡化", "利空", "暴跌", "制裁", "戰爭", "升息", "疲弱")
     pos = neg = 0
-    for item in hl:
-        title = str(item.get("title", ""))
-        en_pos, en_neg = tally(title)
-        low = title.lower()
-        p = en_pos + sum(word in title for word in positive_words)
-        q = en_neg + sum(word in title for word in negative_words)
-        pos += int(p > q)
-        neg += int(q > p)
-    score = round((pos - neg) / max(1, len(hl)), 4)
+    for item in relevant:
+        positive, negative = headline_sentiment(item.get("title"))
+        pos += int(positive > negative)
+        neg += int(negative > positive)
+    score = round((pos - neg) / max(1, len(relevant)), 4)
     return {
-        "headline_count": len(hl), "category_counts": counts,
+        "feature_version": 2,
+        "headline_count": len(hl),
+        "relevant_headline_count": len(relevant),
+        "category_counts": counts,
+        "relevant_category_counts": relevant_counts,
         "unique_source_count": len(sources),
         "published_time_coverage_pct": round(100 * dated / len(hl), 1) if hl else 0,
         "original_link_coverage_pct": round(100 * linked / len(hl), 1) if hl else 0,
-        "positive_headline_count": pos, "negative_headline_count": neg,
+        "positive_headline_count": pos,
+        "negative_headline_count": neg,
         "news_environment_score": score,
     }
-
 
 def latest_market_asof():
     """Use the latest completed TAIEX date, even when the full pipeline has not refreshed signals.json."""
@@ -422,17 +547,21 @@ def main():
     load_settings()
     hl = headlines()
     if len(hl) < 3: raise SystemExit(f"抓到的新聞標題只有 {len(hl)} 則；Google News 與 Bing News RSS 均不足，保留上一版資料。")
-    sec = lambda k: "\n".join(
-        f'{h["id"]}|{h["tag"]}|{h["title"]}|摘要：{h.get("description", "")}'
+    sec = lambda k: "\\n".join(
+        f'{h["id"]}|{h["tag"]}|來源：{h.get("source", "")}|發布：{h.get("published", "")}|'
+        f'{h["title"]}|摘要：{h.get("description", "")}'
         for h in hl if h["kind"] == k
     )
-    p = (PROMPT + "【國際市場新聞】\n" + sec("market") +
-         "\n【台灣新聞】\n" + sec("taiwan") +
-         "\n【台灣／美國政府政策與國際局勢】\n" + sec("policy") +
-         "\n【機構觀點】\n" + sec("analyst"))
+    p = (PROMPT + "【國際市場新聞】\\n" + sec("market") +
+         "\\n【台灣新聞】\\n" + sec("taiwan") +
+         "\\n【台灣／美國政府政策與國際局勢】\\n" + sec("policy") +
+         "\\n【機構觀點】\\n" + sec("analyst"))
     todo = {n: f for n, (f, keys) in MODELS.items() if all(os.environ.get(k) for k in keys)}
+    analyst_headlines = [h for h in hl if h.get("kind") == "analyst"]
     with ThreadPoolExecutor() as ex:  # 有金鑰的 AI 同時分析
-        res = {"內建規則": lexicon(hl)} | dict(ex.map(lambda kv: run(kv[0], kv[1], p), todo.items()))
+        res = {"內建規則": lexicon(hl)} | dict(
+            ex.map(lambda kv: run(kv[0], kv[1], p, analyst_headlines), todo.items())
+        )
     ok = {n: r for n, r in res.items() if "error" not in r}
     agg = {}
     for k in ("next_day", "next_week"):
