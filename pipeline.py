@@ -915,7 +915,11 @@ def build(df, chips=None, margin=None, h=1, futures=None):
     return X.loc[first:], y.loc[first:], fwd.loc[first:]
 
 def model():
-    return make_pipeline(StandardScaler(), LogisticRegression(C=0.5, max_iter=500))
+    # Conservative calibration/regularization refinement: the same-calendar
+    # walk-forward research found C=0.1 modestly improved Brier versus C=0.5.
+    # Keep the estimator family and feature set unchanged; retain the prior
+    # C=0.5 benchmark in model_improvement_research for ongoing comparison.
+    return make_pipeline(StandardScaler(), LogisticRegression(C=0.1, max_iter=500))
 
 def walk_forward(X, y, start=500, step=20, h=1):
     valid = X.notna().all(axis=1)
