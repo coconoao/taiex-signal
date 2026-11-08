@@ -45,6 +45,19 @@ class TestTaiwanMarketData(unittest.TestCase):
             with self.assertRaisesRegex(tw_market_data.MarketDataError, "http=403"):
                 tw_market_data._request_json("https://www.twse.com.tw/example")
 
+    def test_request_json_redirect_diagnostic_omits_query_string(self):
+        error = urllib.error.HTTPError(
+            "https://www.twse.com.tw/example", 307, "Temporary Redirect",
+            {"Location": "https://www.twse.com.tw/new/path?token=do-not-log"}, None
+        )
+        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaises(tw_market_data.MarketDataError) as raised:
+                tw_market_data._request_json("https://www.twse.com.tw/example")
+        message = str(raised.exception)
+        self.assertIn("http=307", message)
+        self.assertIn("redirect=www.twse.com.tw/new/path", message)
+        self.assertNotIn("token", message)
+
     def test_roc_date_converts_taiwan_calendar(self):
         self.assertEqual(
             tw_market_data._roc_date("115/11/06"), dt.date(2026, 11, 6)

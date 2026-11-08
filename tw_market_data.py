@@ -62,6 +62,14 @@ def _request_json(url: str) -> dict:
     reason = getattr(last_error, "reason", None)
     if code is not None:
         detail = f"{type(last_error).__name__}(http={code})"
+        if code in (301, 302, 303, 307, 308):
+            headers = getattr(last_error, "headers", None)
+            location = headers.get("Location") if headers is not None else None
+            if location:
+                target = urllib.parse.urlparse(urllib.parse.urljoin(url, location))
+                target_host = target.hostname or "unknown-host"
+                target_path = target.path or "/"
+                detail += f"(redirect={target_host}{target_path})"
     elif reason is not None:
         reason_type = type(reason).__name__
         reason_errno = getattr(reason, "errno", None)
