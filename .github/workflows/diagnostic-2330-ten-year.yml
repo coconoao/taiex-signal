@@ -29,7 +29,7 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install worker dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
-      - name: Run full isolated 2330 analysis
+      - name: Run isolated diagnostic with request tracing
         run: |
           python - <<'PY'
           import json
@@ -39,17 +39,45 @@ jobs:
           import sys
           import tempfile
           import time
+          import urllib.error
+          import urllib.request
 
           repo_root = str(pathlib.Path.cwd())
           sys.path.insert(0, repo_root)
-
-          # Match stock_worker.py: isolate the analysis from the dashboard's
-          # local signals.json and never read/write production storage.
           temp_dir = tempfile.TemporaryDirectory(prefix="stock-worker-diagnostic-")
           os.chdir(temp_dir.name)
 
           import stock
           import tw_market_data
+
+          # Trace status codes and month parameters without logging headers,
+          # credentials, or response bodies.
+          original_urlopen = urllib.request.urlopen
+          def traced_urlopen(*args, **kwargs):
+              request = args[0] if args else kwargs.get("url")
+              url = request.full_url if hasattr(request, "full_url") else str(request)
+              try:
+                  return original_urlopen(*args, **kwargs)
+              except urllib.error.HTTPError as exc:
+                  from urllib.parse import urlsplit, parse_qs
+                  query = parse_qs(urlsplit(url).query)
+                  month = query.get("date", query.get("startDate", ["unknown"]))[0]
+                  print(
+                      f"HTTP_FAILURE status={exc.code} month={month} "
+                      f"host={urlsplit(url).netloc} path={urlsplit(url).path}",
+                      flush=True,
+                  )
+                  raise
+          urllib.request.urlopen = traced_urlopen
+
+          # First isolate whether the current three-worker request fan-out is
+          # triggering rate limits. Retry the same complete ten-year fetch with
+          # one concurrent request, without changing production code.
+          original_executor = tw_market_data.ThreadPoolExecutor
+          class SerialExecutor(original_executor):
+              def __init__(self, max_workers=None, *args, **kwargs):
+                  super().__init__(max_workers=1, *args, **kwargs)
+          tw_market_data.ThreadPoolExecutor = SerialExecutor
 
           def stage(name, operation):
               started = time.perf_counter()
@@ -69,7 +97,7 @@ jobs:
               return result
 
           stock_history = stage(
-              "TWSE_2330_ten_year_history",
+              "TWSE_2330_ten_year_history_serial",
               lambda: tw_market_data.load_stock_history("2330", "TWSE", years=10),
           )
           print(
@@ -87,7 +115,7 @@ jobs:
               raise SystemExit("FAIL: ten-year 2330 history has fewer than 1500 sessions")
 
           market_history = stage(
-              "TAIEX_ten_year_history",
+              "TAIEX_ten_year_history_serial",
               lambda: tw_market_data.load_taiex_history(years=10),
           )
           print(
@@ -102,6 +130,8 @@ jobs:
           if len(market_history) < 1500:
               raise SystemExit("FAIL: ten-year TAIEX history has fewer than 1500 sessions")
 
+          # Restore the production concurrency for the actual full analysis.
+          tw_market_data.ThreadPoolExecutor = original_executor
           result = stage("stock_analyze_2330_full_pipeline", lambda: stock.analyze("2330"))
           required = ("beta", "historical_horizons", "long_term_model")
           missing = [key for key in required if key not in result]
