@@ -11,6 +11,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import json
+import random
 import threading
 import time
 import urllib.parse
@@ -25,9 +26,14 @@ class MarketDataError(RuntimeError):
 
 
 _HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; TaiwanMarketResearch/1.0)",
-    "Accept": "application/json,text/plain,*/*",
-    "Referer": "https://www.twse.com.tw/",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    "Referer": "https://www.twse.com.tw/zh/trading/historical/stock-day.html",
 }
 _CACHE_LOCK = threading.Lock()
 _STOCK_CACHE = {}
@@ -38,7 +44,7 @@ _CACHE_TTL_SECONDS = 4 * 60 * 60
 def _request_json(url: str) -> dict:
     request = urllib.request.Request(url, headers=_HEADERS)
     last_error = None
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             with urllib.request.urlopen(request, timeout=18) as response:
                 payload = response.read()
@@ -51,8 +57,8 @@ def _request_json(url: str) -> dict:
             code = getattr(exc, "code", None)
             if code in (401, 403):
                 break
-            if attempt == 0 and (code == 429 or (code and code >= 500)):
-                time.sleep(1.0)
+            if code in (429, 500, 502, 503, 504) and attempt < 2:
+                time.sleep(float(2 ** attempt) + random.uniform(0.0, 0.25))
                 continue
             break
 
@@ -60,14 +66,31 @@ def _request_json(url: str) -> dict:
     # request payloads. The adapter only calls fixed public exchange hosts.
     host = urllib.parse.urlparse(url).hostname or "unknown-host"
     reason = getattr(last_error, "reason", None)
-    if reason is not None:
+    if code is not None:
+        detail = f"{type(last_error).__name__}(http={code})"
+        if code in (301, 302, 303, 307, 308):
+            headers = getattr(last_error, "headers", None)
+            location = headers.get("Location") if headers is not None else None
+            if not location:
+                getheader = getattr(last_error, "getheader", None)
+                if callable(getheader):
+                    location = getheader("Location")
+            if not location:
+                info = getattr(last_error, "info", None)
+                response_headers = info() if callable(info) else None
+                if response_headers is not None:
+                    location = response_headers.get("Location")
+            if location:
+                target = urllib.parse.urlparse(urllib.parse.urljoin(url, location))
+                target_host = target.hostname or "unknown-host"
+                target_path = target.path or "/"
+                detail += f"(redirect={target_host}{target_path})"
+    elif reason is not None:
         reason_type = type(reason).__name__
         reason_errno = getattr(reason, "errno", None)
         detail = f"{type(last_error).__name__}/{reason_type}"
         if reason_errno is not None:
             detail += f"(errno={reason_errno})"
-    elif code is not None:
-        detail = f"{type(last_error).__name__}(http={code})"
     else:
         detail = type(last_error).__name__
     raise MarketDataError(f"官方行情來源連線失敗：{host} {detail}")
@@ -92,7 +115,12 @@ def _roc_date(value: str) -> dt.date:
     parts = raw.split("/")
     if len(parts) != 3:
         raise ValueError("日期格式錯誤")
-    year, month, day = (int(part) for part in parts)
+    try:
+        year, month, day = (int(part) for part in parts)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("日期包含非數字欄位") from exc
+    if year <= 0:
+        raise ValueError("民國年必須大於 0")
     if year < 1911:
         year += 1911
     return dt.date(year, month, day)
@@ -261,11 +289,11 @@ def _official_cash_dividend_references(code: str, source: str, rows):
     }
 
 
-def _fetch_months(fetcher, code: str, months):
+def _fetch_months(fetcher, code: str, months, max_workers: int = 2):
     collected = []
     errors = []
     # Two concurrent requests balance throughput with public exchange rate limits.
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(fetcher, code, month): month for month in months}
         for future in as_completed(futures):
             try:
@@ -307,6 +335,8 @@ def _to_adjusted_frame(rows, source: str, code: str | None = None, corporate_act
     corporate_action_references = corporate_action_references or {}
     for row in rows:
         raw_close = float(row["raw_close"])
+        if raw_close <= 0:
+            raise MarketDataError(f"{row['date']} 的原始收盤價不合理")
         change = row["change"]
         if previous_adjusted is None:
             adjusted_close = raw_close
@@ -322,14 +352,16 @@ def _to_adjusted_frame(rows, source: str, code: str | None = None, corporate_act
             if reference_close <= 0:
                 raise MarketDataError(f"{row['date']} 的調整參考價不合理")
             adjusted_close = previous_adjusted * raw_close / reference_close
+        # Keep OHLC on the same chained-adjusted price basis as Close.
+        adjustment_factor = adjusted_close / raw_close
         adjusted.append({
             "Date": pd.Timestamp(row["date"]),
             "Close": adjusted_close,
             "RawClose": raw_close,
             "Volume": float(row["volume"]),
-            "Open": row["open"],
-            "High": row["high"],
-            "Low": row["low"],
+            "Open": float(row["open"]) * adjustment_factor if row["open"] is not None else None,
+            "High": float(row["high"]) * adjustment_factor if row["high"] is not None else None,
+            "Low": float(row["low"]) * adjustment_factor if row["low"] is not None else None,
         })
         previous_adjusted = adjusted_close
     frame = pd.DataFrame(adjusted).set_index("Date").sort_index()
@@ -350,7 +382,9 @@ def load_stock_history(code: str, exchange_hint: str | None = None, years: int =
 
     months = _month_starts(years)
     source, fetcher = _identify_exchange(code, exchange_hint, months)
-    rows = _fetch_months(fetcher, code, months)
+    # TWSE applies stricter request throttling than TPEx; keep its monthly
+    # history requests serial while retaining limited TPEx concurrency.
+    rows = _fetch_months(fetcher, code, months, max_workers=1 if source == "TWSE" else 2)
     references = _official_cash_dividend_references(code, source, rows)
     frame = _to_adjusted_frame(rows, source, code, references)
     if len(frame) < 60:
@@ -382,7 +416,6 @@ def _taiex_month(month: dt.date):
 
 
 def load_taiex_history(years: int = 10):
-    global _INDEX_CACHE
     now = time.time()
     with _CACHE_LOCK:
         cached = _INDEX_CACHE.get(years)
@@ -391,7 +424,9 @@ def load_taiex_history(years: int = 10):
 
     months = _month_starts(years)
     records = []
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    # Keep TWSE benchmark requests serial to avoid exchange-side throttling
+    # on long historical ranges.
+    with ThreadPoolExecutor(max_workers=1) as pool:
         futures = [pool.submit(_taiex_month, month) for month in months]
         errors = []
         for future in as_completed(futures):
