@@ -74,7 +74,9 @@ class TestTaiwanMarketData(unittest.TestCase):
         self.assertAlmostEqual(frame["Open"].iloc[1], 100.0, places=5)
         self.assertAlmostEqual(frame["High"].iloc[1], 100.0, places=5)
         self.assertAlmostEqual(frame["Low"].iloc[1], 100.0, places=5)
-        self.assertAlmostEqual(frame["Open"].iloc[2], 100 * 96 / 95, places=5)
+        self.assertAlmostEqual(frame["Open"].iloc[2], 100.0, places=5)
+        self.assertAlmostEqual(frame["High"].iloc[2], 100 * 97 / 95, places=5)
+        self.assertAlmostEqual(frame["Low"].iloc[2], 100.0, places=5)
         self.assertEqual(frame.attrs["source"], "TWSE")
 
     def test_adjusted_series_fails_closed_on_unparsed_change(self):
