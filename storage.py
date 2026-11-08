@@ -18,18 +18,19 @@ FILES = (
     "news_gdelt_history.jsonl", "news_gdelt_research.json",
     "news_policy_archive.json", "news_policy_research.json",
     "news_mediacloud_history.jsonl", "news_mediacloud_research.json",
-    "news_enhanced_model.json",
+    "news_enhanced_model.json", "multi_market_research.json",
 )
 # These two artifacts are maintained by dedicated research workflows. Exclude
 # them from routine Render saves so stale process-local copies cannot overwrite
 # freshly computed research data in Supabase.
-MANAGED_RESEARCH_FILES = ("news_policy_archive.json", "news_policy_research.json", "news_gdelt_history.jsonl", "news_gdelt_research.json", "news_mediacloud_history.jsonl", "news_mediacloud_research.json", "news_enhanced_model.json")
+MANAGED_RESEARCH_FILES = ("news_policy_archive.json", "news_policy_research.json", "news_gdelt_history.jsonl", "news_gdelt_research.json", "news_mediacloud_history.jsonl", "news_mediacloud_research.json", "news_enhanced_model.json", "multi_market_research.json")
 AUTO_SAVE_FILES = tuple(name for name in FILES if name not in MANAGED_RESEARCH_FILES)
 POLICY_ARCHIVE_FILE = "news_policy_archive.json"
 POLICY_RESEARCH_FILE = "news_policy_research.json"
 GDELT_RESEARCH_FILES = ("news_gdelt_history.jsonl", "news_gdelt_research.json")
 MEDIACLOUD_RESEARCH_FILES = ("news_mediacloud_history.jsonl", "news_mediacloud_research.json")
 NEWS_ENHANCED_MODEL_FILE = "news_enhanced_model.json"
+MULTI_MARKET_RESEARCH_FILE = "multi_market_research.json"
 TABLE = "site_data"
 
 
@@ -133,8 +134,10 @@ if __name__ == "__main__":
         print("Saved GDELT research files:", save_data(names=GDELT_RESEARCH_FILES))
     elif action == "save-mediacloud-research":
         print("Saved Media Cloud research files:", save_data(names=MEDIACLOUD_RESEARCH_FILES))
-    elif action == "save-news-enhanced-model":
+    elif action == "save-news-enhanced-model|save-multi-market-research":
         print("Saved news-enhanced model:", save_data(names=(NEWS_ENHANCED_MODEL_FILE,)))
+    elif action == "save-multi-market-research":
+        print("Saved multi-market research:", save_data(names=(MULTI_MARKET_RESEARCH_FILE,)))
     else:
         raise SystemExit(
             "Usage: python storage.py restore|save|save-policy-archive|save-policy-research|save-gdelt-research|save-mediacloud-research|save-news-enhanced-model"
