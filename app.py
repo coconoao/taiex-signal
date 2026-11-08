@@ -76,6 +76,38 @@ def valid_session(token):
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+STOCK_WORKER_URL = os.environ.get("STOCK_WORKER_URL", "").rstrip("/")
+STOCK_WORKER_TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
+
+def request_stock_worker(code):
+    if not STOCK_WORKER_URL or not STOCK_WORKER_TOKEN:
+        raise RuntimeError("個股分析服務尚未設定")
+    code = str(code or "").strip().upper()
+    payload = json.dumps({"code": code}).encode("utf-8")
+    req = urllib.request.Request(
+        STOCK_WORKER_URL + "/analyze",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + STOCK_WORKER_TOKEN,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=240) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8"))
+            message = detail.get("error") or "個股分析服務回傳錯誤"
+        except Exception:
+            message = "個股分析服務回傳 HTTP %s" % exc.code
+        raise RuntimeError(str(message)[:1000])
+    except Exception as exc:
+        raise RuntimeError("無法連接個股分析服務：%s" % type(exc).__name__)
+    if not isinstance(result, dict):
+        raise RuntimeError("個股分析服務回傳格式錯誤")
+    return result
 
 
 def production_oauth_ready():
@@ -866,10 +898,11 @@ class H(SimpleHTTPRequestHandler):
             try:
                 if u.path == "/api/quote":
                     return self.send_json(quote())
+                code = urllib.parse.parse_qs(u.query).get("code", [""])[0]
+                if STOCK_WORKER_URL and STOCK_WORKER_TOKEN:
+                    return self.send_json(request_stock_worker(code))
                 import stock
-                return self.send_json(stock.analyze(
-                    urllib.parse.parse_qs(u.query).get("code", [""])[0]
-                ))
+                return self.send_json(stock.analyze(code))
             except Exception as e:
                 return self.send_json({"error": str(e)}, 400)
         if u.path == "/export":
