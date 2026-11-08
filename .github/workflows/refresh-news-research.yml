@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: taiex-daily-news-research
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   refresh-news:
@@ -48,6 +48,6 @@ jobs:
       - name: Persist official policy-news research
         run: python storage.py save-policy-research
       - name: Refresh independent GDELT history and current holiday window
-        run: python news_history_import.py --days 30
+        run: python news_history_import.py --current-only --days 30
       - name: Persist independent GDELT research
         run: python storage.py save-gdelt-research
