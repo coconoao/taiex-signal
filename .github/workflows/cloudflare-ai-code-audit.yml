@@ -27,7 +27,7 @@ concurrency:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - name: Checkout selected revision
         uses: actions/checkout@v4
@@ -158,15 +158,67 @@ jobs:
           fi
           MODEL_PATH=$(MODEL="$MODEL" python -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["MODEL"], safe="@/"))')
           URL="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_PATH}"
-          HTTP_CODE=$(curl --silent --show-error --max-time 90 \
-            --output cloudflare_response.json --write-out "%{http_code}" \
-            --request POST "$URL" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --header "Content-Type: application/json" \
-            --data-binary @source/cloudflare_request.json) || HTTP_CODE="000"
+          invoke_cloudflare() {
+            local input_file="$1"
+            local output_file="$2"
+            local max_time="$3"
+            local code
+            local curl_status=0
+            code=$(curl --silent --show-error --connect-timeout 15 --max-time "$max_time" \
+              --output "$output_file" --write-out "%{http_code}" \
+              --request POST "$URL" \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --data-binary "@${input_file}") || curl_status=$?
+            printf '%s %s\n' "$code" "$curl_status"
+          }
+
+          # A tiny request separates authentication/model/network failures from
+          # latency caused by the full source bundle.
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("cloudflare_probe.json").write_text(
+              json.dumps({"messages": [{"role": "user", "content": "請只回覆 OK。"}],
+                          "max_tokens": 16, "temperature": 0}),
+              encoding="utf-8"
+          )
+          PY
+          read -r PROBE_HTTP PROBE_CURL < <(invoke_cloudflare cloudflare_probe.json cloudflare_probe_response.json 45)
+          if [[ ! "$PROBE_HTTP" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Cloudflare preflight failed (HTTP ${PROBE_HTTP:-000}, curl exit ${PROBE_CURL}). The full source bundle was not submitted."
+            if [[ -s cloudflare_probe_response.json ]]; then
+              python audit-tools/.github/scripts/cloudflare_ai_response.py cloudflare_probe_response.json cloudflare_probe.md || true
+            else
+              echo "No response body was received; check Cloudflare API availability and outbound connectivity."
+            fi
+            exit 1
+          fi
+          python audit-tools/.github/scripts/cloudflare_ai_response.py cloudflare_probe_response.json cloudflare_probe.md
+
+          # Full audit gets a longer deadline and one retry for transient
+          # network, capacity, rate-limit, or upstream timeout failures.
+          HTTP_CODE="000"
+          CURL_STATUS=0
+          for attempt in 1 2; do
+            read -r HTTP_CODE CURL_STATUS < <(invoke_cloudflare source/cloudflare_request.json cloudflare_response.json 180)
+            if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+              break
+            fi
+            if [[ "$attempt" -eq 1 && ( "$HTTP_CODE" == "000" || "$HTTP_CODE" == "408" || "$HTTP_CODE" == "429" || "$HTTP_CODE" == "500" || "$HTTP_CODE" == "502" || "$HTTP_CODE" == "503" || "$HTTP_CODE" == "504" ) ]]; then
+              echo "Cloudflare returned HTTP ${HTTP_CODE:-000} (curl exit ${CURL_STATUS}); retrying once after 10 seconds."
+              sleep 10
+              continue
+            fi
+            break
+          done
           if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error::Cloudflare Workers AI request failed (HTTP ${HTTP_CODE}). Check token permissions, account ID, model availability, and quota."
-            python audit-tools/.github/scripts/cloudflare_ai_response.py cloudflare_response.json cloudflare_audit.md || true
+            echo "::error::Cloudflare full audit failed (HTTP ${HTTP_CODE:-000}, curl exit ${CURL_STATUS})."
+            if [[ -s cloudflare_response.json ]]; then
+              python audit-tools/.github/scripts/cloudflare_ai_response.py cloudflare_response.json cloudflare_audit.md || true
+            else
+              echo "No response body was received. Preflight succeeded, so the failure is specific to the full request or its processing time."
+            fi
             exit 1
           fi
           python audit-tools/.github/scripts/cloudflare_ai_response.py cloudflare_response.json cloudflare_audit.md
