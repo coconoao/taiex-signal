@@ -87,10 +87,6 @@ class TestTaiwanMarketData(unittest.TestCase):
         self.assertEqual(rows[0]["volume"], 12000.0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_x_prefixed_change_fails_closed_in_adjusted_series(self):
         rows = [
             {"date": dt.date(2026, 1, 2), "raw_close": 100.0, "change": 0.0,
@@ -100,3 +96,7 @@ if __name__ == "__main__":
         ]
         with self.assertRaisesRegex(tw_market_data.MarketDataError, "無法解析"):
             tw_market_data._to_adjusted_frame(rows, "TWSE")
+
+
+if __name__ == "__main__":
+    unittest.main()
