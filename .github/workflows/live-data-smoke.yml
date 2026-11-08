@@ -42,7 +42,7 @@ jobs:
           failures = []
           for name, fetch, filename in checks:
               path = root / filename
-              print(f"\\n=== {name}: requesting up to {len(dates)} recent weekdays ===", flush=True)
+              print(f"\n=== {name}: requesting up to {len(dates)} recent weekdays ===", flush=True)
               result = fetch(days_back=10, path=str(path), trading_days=dates)
               count = len(result)
               print(f"RESULT {name}: {count} records", flush=True)
@@ -51,7 +51,7 @@ jobs:
 
           if failures:
               raise SystemExit("No real records received from: " + ", ".join(failures))
-          print("\\nLIVE DATA SMOKE TEST PASSED: all three sources returned records.")
+          print("\nLIVE DATA SMOKE TEST PASSED: all three sources returned records.")
           PY
       - name: Verify official listed, OTC and TAIEX history adapters
         run: |
@@ -65,7 +65,7 @@ jobs:
           ]
           failures = []
           for name, fetch in checks:
-              print(f"\\n=== {name} ===", flush=True)
+              print(f"\n=== {name} ===", flush=True)
               try:
                   frame = fetch()
                   if len(frame) < 60:
@@ -79,6 +79,6 @@ jobs:
                   failures.append(f"{name}: {type(exc).__name__}: {exc}")
                   print(f"FAIL: {failures[-1]}", flush=True)
           if failures:
-              raise SystemExit("\\n".join(failures))
-          print("\\nOFFICIAL STOCK HISTORY SMOKE TEST PASSED.")
+              raise SystemExit("\n".join(failures))
+          print("\nOFFICIAL STOCK HISTORY SMOKE TEST PASSED.")
           PY
