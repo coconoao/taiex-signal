@@ -126,7 +126,9 @@ jobs:
           )
           Path("cloudflare_request.json").write_text(
               json.dumps({"messages": [{"role": "user", "content": prompt}],
-                          "max_tokens": 4096, "temperature": 0.1},
+                          "max_completion_tokens": 4096, "n": 1, "modalities": ["text"],
+                          "chat_template_kwargs": {"enable_thinking": False},
+                          "temperature": 0.1},
                          ensure_ascii=False),
               encoding="utf-8"
           )
@@ -180,7 +182,9 @@ jobs:
           from pathlib import Path
           Path("cloudflare_probe.json").write_text(
               json.dumps({"messages": [{"role": "user", "content": "請只回覆 OK。"}],
-                          "max_tokens": 16, "temperature": 0}),
+                          "max_completion_tokens": 16, "n": 1, "modalities": ["text"],
+                          "chat_template_kwargs": {"enable_thinking": False},
+                          "temperature": 0}),
               encoding="utf-8"
           )
           PY
