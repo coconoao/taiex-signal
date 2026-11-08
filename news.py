@@ -378,8 +378,38 @@ def ask_gemini(p):
              {"contents": [{"parts": [{"text": p}]}], "generationConfig": {"responseMimeType": "application/json"}})
     return "".join(x.get("text", "") for x in r["candidates"][0]["content"]["parts"])
 
+
+def ask_cloudflare(p):
+    """Run the separate news-research prompt through Cloudflare Workers AI."""
+    account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"].strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", account_id):
+        raise ValueError("CLOUDFLARE_ACCOUNT_ID 格式不正確")
+    model = os.environ.get("CLOUDFLARE_AI_MODEL", "@cf/zai-org/glm-4.7-flash").strip()
+    if not model.startswith("@cf/") or ".." in model or "?" in model:
+        raise ValueError("CLOUDFLARE_AI_MODEL 必須是有效的 Cloudflare Workers AI 模型 ID")
+    url = (
+        "https://api.cloudflare.com/client/v4/accounts/" + account_id
+        + "/ai/run/" + urllib.parse.quote(model, safe="@/")
+    )
+    result = post(
+        url,
+        {"Authorization": "Bearer " + os.environ["CLOUDFLARE_API_TOKEN"]},
+        {
+            "messages": [{"role": "user", "content": p}],
+            "max_tokens": 2000,
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+        },
+    )
+    response = (result.get("result") or {}).get("response")
+    if not isinstance(response, str) or not response.strip():
+        raise ValueError("Cloudflare Workers AI 未回傳文字結果")
+    return response
+
+
 MODELS = {"Claude": (ask_claude, ["ANTHROPIC_API_KEY"]), "ChatGPT": (ask_openai, ["OPENAI_API_KEY"]),
-          "Gemini": (ask_gemini, ["GEMINI_API_KEY"])}
+          "Gemini": (ask_gemini, ["GEMINI_API_KEY"]),
+          "Cloudflare": (ask_cloudflare, ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"])}
 clip = lambda x: round(max(-1.0, min(1.0, float(x))), 2)
 
 def run(name, fn, p, analyst_headlines=None):
