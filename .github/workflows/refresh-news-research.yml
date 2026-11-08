@@ -6,6 +6,10 @@ on:
       - "news_policy_research.py"
       - "news_history_import.py"
       - "news_mediacloud.py"
+      - "news_enhanced_model.py"
+      - "news.py"
+      - "news_snapshot.py"
+      - "news_research_maintenance.py"
       - "storage.py"
       - ".github/workflows/refresh-news-research.yml"
   schedule:
@@ -45,6 +49,8 @@ jobs:
         run: python news_snapshot.py
       - name: Label completed TAIEX sessions and update research summary
         run: python news_research_maintenance.py
+      - name: Train and score the separate news-enhanced research model
+        run: python news_enhanced_model.py
       - name: Persist routine news research
         run: python storage.py save
       - name: Persist official policy-news research
@@ -57,3 +63,5 @@ jobs:
         run: python news_mediacloud.py
       - name: Persist independent Media Cloud research
         run: python storage.py save-mediacloud-research
+      - name: Persist news-enhanced model output
+        run: python storage.py save-news-enhanced-model
