@@ -151,6 +151,26 @@ class TestTaiwanMarketData(unittest.TestCase):
                 tw_market_data._twse_month("2330", dt.date(2026, 11, 1)), []
             )
 
+    def test_taiex_history_preserves_safe_provider_diagnostic(self):
+        with (
+            patch.object(tw_market_data, "_month_starts", return_value=[dt.date(2026, 11, 1)]),
+            patch.object(
+                tw_market_data,
+                "_taiex_month",
+                side_effect=tw_market_data.MarketDataError(
+                    "private provider detail", diagnostic_code="twse_http_403"
+                ),
+            ),
+            patch.dict(tw_market_data._INDEX_CACHE, {}, clear=True),
+        ):
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data.load_taiex_history(years=4)
+        self.assertEqual(
+            caught.exception.diagnostic_code,
+            "history_fetch_failed:twse_http_403",
+        )
+        self.assertNotIn("private provider detail", caught.exception.diagnostic_code)
+
     def test_taiex_uses_official_indices_report_path(self):
         seen = []
 
