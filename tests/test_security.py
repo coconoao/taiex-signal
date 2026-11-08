@@ -39,6 +39,55 @@ class StockWorkerRoutingTests(unittest.TestCase):
             self.assertEqual(web_app.analyze_stock("2330"), {"code": "2330", "local": True})
 
 
+    def _worker_http_error(self, status):
+        return web_app.urllib.error.HTTPError(
+            "https://worker.example/analyze",
+            status,
+            "worker error",
+            None,
+            io.BytesIO(b'{"error":"worker failed"}'),
+        )
+
+    def test_worker_upstream_503_is_gateway_failure(self):
+        with patch.multiple(
+            web_app,
+            STOCK_WORKER_URL="https://worker.example",
+            STOCK_WORKER_TOKEN="test-token",
+        ), patch.object(
+            web_app.urllib.request,
+            "urlopen",
+            side_effect=self._worker_http_error(503),
+        ):
+            with self.assertRaises(web_app.StockWorkerGatewayError):
+                web_app.request_stock_worker("2330")
+
+    def test_worker_validation_422_is_preserved_as_value_error(self):
+        with patch.multiple(
+            web_app,
+            STOCK_WORKER_URL="https://worker.example",
+            STOCK_WORKER_TOKEN="test-token",
+        ), patch.object(
+            web_app.urllib.request,
+            "urlopen",
+            side_effect=self._worker_http_error(422),
+        ):
+            with self.assertRaisesRegex(ValueError, "worker failed"):
+                web_app.request_stock_worker("2330")
+
+    def test_worker_network_timeout_is_gateway_failure(self):
+        with patch.multiple(
+            web_app,
+            STOCK_WORKER_URL="https://worker.example",
+            STOCK_WORKER_TOKEN="test-token",
+        ), patch.object(
+            web_app.urllib.request,
+            "urlopen",
+            side_effect=TimeoutError("private timeout detail"),
+        ):
+            with self.assertRaises(web_app.StockWorkerGatewayError):
+                web_app.request_stock_worker("2330")
+
+
 class ProductionAuthConfigurationTests(unittest.TestCase):
     def test_public_deployment_requires_oauth_and_supabase(self):
         with patch.multiple(
