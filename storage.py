@@ -18,12 +18,12 @@ FILES = (
     "news_gdelt_history.jsonl", "news_gdelt_research.json",
     "news_policy_archive.json", "news_policy_research.json",
     "news_mediacloud_history.jsonl", "news_mediacloud_research.json",
-    "news_enhanced_model.json", "multi_market_research.json",
+    "news_enhanced_model.json", "multi_market_research.json", "model_improvement_research.json",
 )
 # These two artifacts are maintained by dedicated research workflows. Exclude
 # them from routine Render saves so stale process-local copies cannot overwrite
 # freshly computed research data in Supabase.
-MANAGED_RESEARCH_FILES = ("news_policy_archive.json", "news_policy_research.json", "news_gdelt_history.jsonl", "news_gdelt_research.json", "news_mediacloud_history.jsonl", "news_mediacloud_research.json", "news_enhanced_model.json", "multi_market_research.json")
+MANAGED_RESEARCH_FILES = ("news_policy_archive.json", "news_policy_research.json", "news_gdelt_history.jsonl", "news_gdelt_research.json", "news_mediacloud_history.jsonl", "news_mediacloud_research.json", "news_enhanced_model.json", "multi_market_research.json", "model_improvement_research.json")
 AUTO_SAVE_FILES = tuple(name for name in FILES if name not in MANAGED_RESEARCH_FILES)
 POLICY_ARCHIVE_FILE = "news_policy_archive.json"
 POLICY_RESEARCH_FILE = "news_policy_research.json"
@@ -31,6 +31,7 @@ GDELT_RESEARCH_FILES = ("news_gdelt_history.jsonl", "news_gdelt_research.json")
 MEDIACLOUD_RESEARCH_FILES = ("news_mediacloud_history.jsonl", "news_mediacloud_research.json")
 NEWS_ENHANCED_MODEL_FILE = "news_enhanced_model.json"
 MULTI_MARKET_RESEARCH_FILE = "multi_market_research.json"
+MODEL_IMPROVEMENT_RESEARCH_FILE = "model_improvement_research.json"
 TABLE = "site_data"
 
 
@@ -138,6 +139,8 @@ if __name__ == "__main__":
         print("Saved news-enhanced model:", save_data(names=(NEWS_ENHANCED_MODEL_FILE,)))
     elif action == "save-multi-market-research":
         print("Saved multi-market research:", save_data(names=(MULTI_MARKET_RESEARCH_FILE,)))
+    elif action == "save-model-improvement-research":
+        print("Saved model improvement research:", save_data(names=(MODEL_IMPROVEMENT_RESEARCH_FILE,)))
     else:
         raise SystemExit(
             "Usage: python storage.py restore|save|save-policy-archive|save-policy-research|save-gdelt-research|save-mediacloud-research|save-news-enhanced-model"
