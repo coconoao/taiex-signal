@@ -2,7 +2,7 @@ name: Validate application
 
 on:
   push:
-    branches: [main, feature/google-oauth-security, fix/pipeline-incremental-checkpoints]
+    branches: [main, feature/google-oauth-security, fix/pipeline-incremental-checkpoints, fix/worker-pr18-official-adapter]
   pull_request:
     branches: [main]
 

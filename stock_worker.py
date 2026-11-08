@@ -48,8 +48,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "請求格式錯誤"}, 400)
 
         try:
-            # The worker computes from Yahoo history; it must not depend on the
-            # main site's local signals.json snapshot or its demo-data guard.
+            # The worker computes from official TWSE/TPEx history; it must not
+            # depend on the main site's local signals.json snapshot or demo-data guard.
             os.chdir("/tmp")
             import stock
             result = stock.analyze(code)

@@ -1,6 +1,8 @@
 name: Live market-data smoke test
 
 on:
+  push:
+    branches: [fix/worker-pr18-official-adapter]
   workflow_dispatch:
 
 permissions:

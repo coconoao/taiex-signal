@@ -113,6 +113,61 @@ class TestTaiwanMarketData(unittest.TestCase):
             tw_market_data.load_taiex_history(years=10)
             self.assertEqual(fetch.call_count, 2)
 
+    def test_roc_date_parses_twse_chinese_date(self):
+        self.assertEqual(
+            tw_market_data._roc_date("114年12月11日"), dt.date(2025, 12, 11)
+        )
+
+    def test_twse_exright_parser_uses_cash_dividend_reference_only(self):
+        payload = {
+            "fields": ["資料日期", "股票代號", "除權息參考價", "權/息"],
+            "data": [
+                ["114年12月11日", "2330", "1,499.99", "息"],
+                ["114年12月12日", "2330", "100.00", "權"],
+            ],
+        }
+        with patch.object(tw_market_data, "_request_json", return_value=payload):
+            refs = tw_market_data._twse_exright_month(dt.date(2025, 12, 1))
+        self.assertEqual(refs[("2330", dt.date(2025, 12, 11))], 1499.99)
+        self.assertNotIn(("2330", dt.date(2025, 12, 12)), refs)
+
+    def test_tpex_exright_parser_reads_table_schema(self):
+        payload = {
+            "tables": [{
+                "fields": ["除權息日期", "代號", "除權息參考價", "權/息"],
+                "data": [
+                    ["114/12/31", "6488", "411.00", "除息"],
+                    ["114/12/30", "6488", "400.00", "除權"],
+                ],
+            }]
+        }
+        with patch.object(tw_market_data, "_request_json", return_value=payload):
+            refs = tw_market_data._tpex_exright_month(dt.date(2025, 12, 1))
+        self.assertEqual(refs[("6488", dt.date(2025, 12, 31))], 411.0)
+        self.assertNotIn(("6488", dt.date(2025, 12, 30)), refs)
+
+    def test_adjusted_close_uses_official_cash_dividend_reference(self):
+        rows = [
+            {"date": dt.date(2025, 12, 10), "raw_close": 1505.0, "change": 0.0,
+             "volume": 1000, "open": 1500, "high": 1505, "low": 1490},
+            {"date": dt.date(2025, 12, 11), "raw_close": 1500.0, "change": None,
+             "volume": 2000, "open": 1500, "high": 1510, "low": 1490},
+        ]
+        frame = tw_market_data._to_adjusted_frame(
+            rows, "TWSE", "2330", {dt.date(2025, 12, 11): 1499.99}
+        )
+        self.assertAlmostEqual(frame["Close"].iloc[1], 1505.0 * 1500.0 / 1499.99, places=5)
+
+    def test_adjustment_still_fails_closed_without_official_action_factor(self):
+        rows = [
+            {"date": dt.date(2025, 12, 10), "raw_close": 413.0, "change": 0.0,
+             "volume": 1000, "open": 413, "high": 413, "low": 413},
+            {"date": dt.date(2025, 12, 31), "raw_close": 410.0, "change": None,
+             "volume": 2000, "open": 411, "high": 412, "low": 409},
+        ]
+        with self.assertRaisesRegex(tw_market_data.MarketDataError, "沒有可核對"):
+            tw_market_data._to_adjusted_frame(rows, "TPEx", "6488", {})
+
 
 
 if __name__ == "__main__":

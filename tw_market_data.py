@@ -73,6 +73,7 @@ def _month_starts(years: int = 10):
 
 def _roc_date(value: str) -> dt.date:
     raw = str(value or "").strip().replace("*", "").replace("＊", "")
+    raw = raw.replace("年", "/").replace("月", "/").replace("日", "")
     parts = raw.split("/")
     if len(parts) != 3:
         raise ValueError("日期格式錯誤")
@@ -162,6 +163,89 @@ def _tpex_month(code: str, month: dt.date):
     return rows
 
 
+def _twse_exright_month(month: dt.date):
+    params = urllib.parse.urlencode({
+        "startDate": month.strftime("%Y%m01"),
+        "endDate": (dt.date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])).strftime("%Y%m%d"),
+        "response": "json",
+    })
+    url = "https://www.twse.com.tw/rwd/zh/exRight/TWT49U?" + params
+    payload = _request_json(url)
+    fields = payload.get("fields") or []
+    rows = payload.get("data") or []
+    if not fields:
+        return {}
+    positions = {name: index for index, name in enumerate(fields)}
+    required = ("資料日期", "股票代號", "除權息參考價", "權/息")
+    if any(name not in positions for name in required):
+        raise MarketDataError("TWSE 除權息資料欄位格式不符")
+    result = {}
+    for item in rows:
+        try:
+            day_text = str(item[positions["資料日期"]]).replace("年", "/").replace("月", "/").replace("日", "")
+            day = _roc_date(day_text)
+            symbol = str(item[positions["股票代號"]]).strip()
+            kind = str(item[positions["權/息"]]).strip()
+            reference = _number(item[positions["除權息參考價"]])
+            # Only cash-dividend-only rows are used as a fallback. Rights,
+            # stock dividends and capital-increase cases require their own
+            # verified share/price adjustment factors.
+            if symbol and kind in ("息", "除息") and reference and reference > 0:
+                result[(symbol, day)] = reference
+        except (ValueError, TypeError, IndexError):
+            continue
+    return result
+
+
+def _tpex_exright_month(month: dt.date):
+    last_day = calendar.monthrange(month.year, month.month)[1]
+    params = urllib.parse.urlencode({
+        "startDate": month.strftime("%Y/%m/01"),
+        "endDate": month.strftime(f"%Y/%m/{last_day:02d}"),
+        "response": "json",
+    })
+    url = "https://www.tpex.org.tw/www/zh-tw/bulletin/exDailyQ?" + params
+    payload = _request_json(url)
+    result = {}
+    for table in payload.get("tables") or []:
+        fields = table.get("fields") or []
+        rows = table.get("data") or []
+        positions = {name: index for index, name in enumerate(fields)}
+        required = ("除權息日期", "代號", "除權息參考價", "權/息")
+        if any(name not in positions for name in required):
+            continue
+        for item in rows:
+            try:
+                day = _roc_date(item[positions["除權息日期"]])
+                symbol = str(item[positions["代號"]]).strip()
+                kind = str(item[positions["權/息"]]).strip()
+                reference = _number(item[positions["除權息參考價"]])
+                if symbol and kind in ("息", "除息") and reference and reference > 0:
+                    result[(symbol, day)] = reference
+            except (ValueError, TypeError, IndexError):
+                continue
+    return result
+
+
+def _official_cash_dividend_references(code: str, source: str, rows):
+    missing = sorted({
+        row["date"].replace(day=1)
+        for row in rows
+        if row.get("change") is None
+    })
+    if not missing:
+        return {}
+    fetcher = _twse_exright_month if source == "TWSE" else _tpex_exright_month
+    references = {}
+    for month in missing:
+        references.update(fetcher(month))
+    return {
+        day: price
+        for (symbol, day), price in references.items()
+        if symbol == str(code).strip().upper()
+    }
+
+
 def _fetch_months(fetcher, code: str, months):
     collected = []
     errors = []
@@ -199,12 +283,13 @@ def _identify_exchange(code: str, hint: str | None, months):
     raise MarketDataError(f"官方交易所查無 {code} 的近期歷史行情")
 
 
-def _to_adjusted_frame(rows, source: str):
+def _to_adjusted_frame(rows, source: str, code: str | None = None, corporate_action_references=None):
     if not rows:
         raise MarketDataError("官方交易所沒有回傳可用的日線資料")
     rows = sorted(rows, key=lambda row: row["date"])
     adjusted = []
     previous_adjusted = None
+    corporate_action_references = corporate_action_references or {}
     for row in rows:
         raw_close = float(row["raw_close"])
         change = row["change"]
@@ -212,10 +297,13 @@ def _to_adjusted_frame(rows, source: str):
             adjusted_close = raw_close
         else:
             if change is None:
-                raise MarketDataError(
-                    f"{row['date']} 的官方漲跌價差無法解析，為避免除權息跳空污染模型，停止使用這批資料"
-                )
-            reference_close = raw_close - float(change)
+                reference_close = corporate_action_references.get(row["date"])
+                if reference_close is None:
+                    raise MarketDataError(
+                        f"{row['date']} 的官方漲跌價差無法解析，且沒有可核對的現金除息參考價，停止使用這批資料"
+                    )
+            else:
+                reference_close = raw_close - float(change)
             if reference_close <= 0:
                 raise MarketDataError(f"{row['date']} 的調整參考價不合理")
             adjusted_close = previous_adjusted * raw_close / reference_close
@@ -248,7 +336,8 @@ def load_stock_history(code: str, exchange_hint: str | None = None, years: int =
     months = _month_starts(years)
     source, fetcher = _identify_exchange(code, exchange_hint, months)
     rows = _fetch_months(fetcher, code, months)
-    frame = _to_adjusted_frame(rows, source)
+    references = _official_cash_dividend_references(code, source, rows)
+    frame = _to_adjusted_frame(rows, source, code, references)
     if len(frame) < 60:
         raise MarketDataError(f"{code} 的官方歷史資料不足 60 個交易日")
     with _CACHE_LOCK:
