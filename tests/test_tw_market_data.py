@@ -19,6 +19,21 @@ class TestTaiwanMarketData(unittest.TestCase):
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
                 )
 
+    def test_request_json_preserves_http_status_in_safe_diagnostic(self):
+        from urllib.error import HTTPError
+        error = HTTPError(
+            "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330",
+            403, "Forbidden", {}, None,
+        )
+        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                tw_market_data.MarketDataError,
+                r"twse\\.com\\.tw HTTPError\\(http=403\\)",
+            ):
+                tw_market_data._request_json(
+                    "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
+                )
+
     def test_roc_date_converts_taiwan_calendar(self):
         self.assertEqual(
             tw_market_data._roc_date("115/11/06"), dt.date(2026, 11, 6)
