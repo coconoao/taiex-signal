@@ -304,7 +304,7 @@ def analyze(stock_close, market_close, volume=None):
         "history_start": str(px.index.min().date()) if len(px) else None,
         "history_end": str(px.index.max().date()) if len(px) else None,
         "history_sessions": int(len(px)),
-        "history_years_requested": 10,
+        "history_years_requested": 4,
         "horizons": output,
         "disclaimer": "研究用途；歷史樣本外結果不代表未來表現，不構成投資建議或交易指示。",
     }
