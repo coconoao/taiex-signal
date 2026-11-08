@@ -68,11 +68,12 @@ def _apply_calibrator(cal, raw):
     return cal.predict_proba(_logit(raw))[:, 1]
 
 
-def _metrics(prob, y):
+def _metrics(prob, y, baseline_probability=None):
     p = np.clip(np.asarray(prob, dtype=float), 1e-6, 1 - 1e-6)
     actual = np.asarray(y, dtype=int)
     prevalence = float(np.mean(actual))
-    baseline = np.full(len(actual), prevalence)
+    baseline = (np.full(len(actual), prevalence) if baseline_probability is None
+                else np.clip(np.asarray(baseline_probability, dtype=float), 1e-6, 1 - 1e-6))
     brier = float(np.mean((p - actual) ** 2))
     base_brier = float(np.mean((baseline - actual) ** 2))
     return {
@@ -169,12 +170,6 @@ def walk_forward(X, y, horizon, factory):
     if len(hold_idx) < 50:
         return None
 
-    # Candidate selection uses development period only.
-    dev_scores = {}
-    for name, factory_candidate in factories().items():
-        # Walk-forward predictions above are for this candidate only; selection
-        # is performed by the caller across candidate-specific result objects.
-        pass
     return {
         "raw_probability": raw_pred,
         "probability": calibrated_pred,
@@ -194,13 +189,13 @@ def evaluate_candidate(X, y, fwd, horizon, name, factory):
     prob = result["probability"]
     actual = result["actual"]
     base = result["baseline_probability"]
-    hold_metrics = _metrics(prob.loc[hold], actual.loc[hold])
-    baseline_metrics = _metrics(base.loc[hold], actual.loc[hold])
+    hold_metrics = _metrics(prob.loc[hold], actual.loc[hold], base.loc[hold])
+    baseline_metrics = _metrics(base.loc[hold], actual.loc[hold], base.loc[hold])
     hold_fwd = fwd.reindex(hold)
     return {
         "status": "evaluated",
         "candidate": name,
-        "development": _metrics(prob.loc[dev], actual.loc[dev]),
+        "development": _metrics(prob.loc[dev], actual.loc[dev], base.loc[dev]),
         "untouched_holdout": hold_metrics,
         "holdout_prevalence_baseline": baseline_metrics,
         "holdout_reliability": _reliability_bins(prob.loc[hold], actual.loc[hold]),
@@ -211,6 +206,15 @@ def evaluate_candidate(X, y, fwd, horizon, name, factory):
         "holdout_end": str(hold.max().date()),
         "holdout_prediction_count": int(len(hold)),
         "holdout_brier_skill_vs_prevalence": hold_metrics["brier_skill_vs_prevalence"],
+        "holdout_yearly_blocks": {
+            str(year): _metrics(
+                prob.loc[hold][prob.loc[hold].index.year == year],
+                actual.loc[hold][actual.loc[hold].index.year == year],
+                base.loc[hold][base.loc[hold].index.year == year],
+            )
+            for year in sorted(set(hold.year))
+            if int((hold.year == year).sum()) >= 20
+        },
     }
 
 
@@ -219,10 +223,10 @@ def latest_estimate(X, y, horizon, factory, oos_probability, oos_actual):
     if not complete.any():
         return {"status": "insufficient", "note": "沒有完整的最新特徵列。"}
     asof = X.index[complete].max()
-    valid = complete & y.notna() & (X.index <= asof - pd.tseries.offsets.BDay(0))
+    # y.notna() means the entire forward-return window has matured in the
+    # observed trading calendar; never approximate sessions with business days.
+    valid = complete & y.notna() & (X.index < asof)
     idx = X.index[valid]
-    # Exclude rows whose forward label has not matured by the as-of date.
-    idx = idx[idx <= asof - pd.offsets.BDay(horizon)]
     if len(idx) < MIN_TRAIN or y.loc[idx].nunique() < 2:
         return {"status": "insufficient", "asof": str(asof.date()),
                 "training_samples": int(len(idx)), "note": "成熟的歷史標籤不足。"}
@@ -248,7 +252,6 @@ def latest_estimate(X, y, horizon, factory, oos_probability, oos_actual):
 
 def run():
     market, chips, margin, futures = mir.load_inputs()
-    X, _, _ = pipeline.build(market, chips, margin, futures=futures, h=1)
     experiments = {}
     latest = {}
     for horizon_name, horizon in HORIZONS.items():
