@@ -70,14 +70,13 @@ jobs:
                   raise
           urllib.request.urlopen = traced_urlopen
 
-          # First isolate whether the current three-worker request fan-out is
-          # triggering rate limits. Retry the same complete ten-year fetch with
-          # one concurrent request, without changing production code.
+          # Test a middle ground: two concurrent requests per batch. The initial
+          # three-worker run failed, while the serial run passed.
           original_executor = tw_market_data.ThreadPoolExecutor
-          class SerialExecutor(original_executor):
+          class TwoWorkerExecutor(original_executor):
               def __init__(self, max_workers=None, *args, **kwargs):
-                  super().__init__(max_workers=1, *args, **kwargs)
-          tw_market_data.ThreadPoolExecutor = SerialExecutor
+                  super().__init__(max_workers=2, *args, **kwargs)
+          tw_market_data.ThreadPoolExecutor = TwoWorkerExecutor
 
           def stage(name, operation):
               started = time.perf_counter()
@@ -97,7 +96,7 @@ jobs:
               return result
 
           stock_history = stage(
-              "TWSE_2330_ten_year_history_serial",
+              "TWSE_2330_ten_year_history_two_workers",
               lambda: tw_market_data.load_stock_history("2330", "TWSE", years=10),
           )
           print(
@@ -115,7 +114,7 @@ jobs:
               raise SystemExit("FAIL: ten-year 2330 history has fewer than 1500 sessions")
 
           market_history = stage(
-              "TAIEX_ten_year_history_serial",
+              "TAIEX_ten_year_history_two_workers",
               lambda: tw_market_data.load_taiex_history(years=10),
           )
           print(
