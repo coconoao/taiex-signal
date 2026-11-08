@@ -286,8 +286,12 @@ def stale():
 
 def scheduler():
     last = None
-    # Recompute once on every process start so restored/repo-bundled outputs cannot mask stale data.
-    run_jobs("pipeline-fast", "news", "news_enhanced_model")
+    # Supabase/GitHub Actions is the canonical writer for market signals and backtests.
+    # Do not recompute pipeline-fast on Render startup: its partial cache can produce
+    # a different, lower-coverage backtest and overwrite the restored canonical file.
+    # Refresh only independent news artifacts; the scheduled GitHub workflow owns
+    # the full market pipeline and persists signals.json / weekly.json.
+    run_jobs("news", "news_enhanced_model")
     while True:
         now = dt.datetime.now(TZ)
         if now.weekday() < 5 and (now.hour, now.minute) == (8, 30) and last != now.date():
