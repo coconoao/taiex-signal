@@ -22,6 +22,7 @@ from pipeline import (
     _fetch_taifex_openapi_latest,
     load_live,
     TICKERS,
+    write_taiwan_data_status,
 )
 
 
@@ -79,6 +80,45 @@ class LoadLiveTests(unittest.TestCase):
             self.assertEqual(result["TAIEX"].dropna().iloc[-1],
                              cached["TAIEX"].iloc[-1])
 
+
+class TaiwanDataStatusTests(unittest.TestCase):
+    def test_coverage_uses_taiwan_sessions_not_cross_market_dates(self):
+        import json
+        import os
+        import numpy as np
+
+        dates = pd.bdate_range(
+            end=pd.Timestamp.now(tz="Asia/Taipei").normalize().tz_localize(None),
+            periods=3,
+        )
+        market = pd.DataFrame({"TAIEX": [100.0, 101.0, np.nan]}, index=dates)
+        chips = pd.DataFrame({"foreign_net": [1.0] * 3, "trust_net": [2.0] * 3}, index=dates)
+        margin = pd.DataFrame({
+            "margin_bal": [100.0] * 3, "margin_units": [10.0] * 3,
+            "short_units": [1.0] * 3,
+        }, index=dates)
+        futures = pd.DataFrame({"foreign_oi_net": [5.0] * 3}, index=dates)
+        fake_storage = types.SimpleNamespace(enabled=lambda: False)
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.getcwd()
+            try:
+                os.chdir(directory)
+                with patch.dict(sys.modules, {"storage": fake_storage}):
+                    write_taiwan_data_status(market, chips, margin, futures)
+                with open("taiwan_data_status.json", encoding="utf-8") as stream:
+                    status = json.load(stream)
+            finally:
+                os.chdir(previous)
+
+        for layer in ("institutional", "margin", "futures"):
+            self.assertEqual(status["layers"][layer]["expected_rows"], 2)
+            self.assertEqual(status["layers"][layer]["coverage_pct"], 100.0)
+            self.assertEqual(status["layers"][layer]["missing_rows"], 0)
+        self.assertEqual(status["layers"]["futures"]["source_window_start"], "2018-06-05")
+        self.assertEqual(status["layers"]["futures"]["source_window_expected_rows"], 2)
+
+
 class PendingDatesTests(unittest.TestCase):
     def test_limits_backfill_and_keeps_latest_missing_dates(self):
         today = pd.Timestamp("2026-11-06")
@@ -86,7 +126,8 @@ class PendingDatesTests(unittest.TestCase):
         result = _pending_dates(pd.DataFrame(), today, 500, trading_days)
         self.assertEqual(len(result), BACKFILL_DATES_PER_RUN + RECENT_DATES_PER_RUN)
         self.assertEqual(result[:RECENT_DATES_PER_RUN].tolist(), trading_days[-RECENT_DATES_PER_RUN:].tolist())
-        self.assertEqual(result[RECENT_DATES_PER_RUN:].tolist(), trading_days[:BACKFILL_DATES_PER_RUN].tolist())
+        expected_backfill = trading_days[-(BACKFILL_DATES_PER_RUN + RECENT_DATES_PER_RUN):-RECENT_DATES_PER_RUN]
+        self.assertEqual(result[RECENT_DATES_PER_RUN:].tolist(), expected_backfill.tolist())
 
     def test_excludes_dates_already_saved_and_fills_oldest_gaps_next(self):
         today = pd.Timestamp("2026-11-06")
