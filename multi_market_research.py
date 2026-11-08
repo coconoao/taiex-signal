@@ -19,7 +19,6 @@ MARKETS = {
     "NASDAQ": {"ticker": "^IXIC", "label": "美國 Nasdaq Composite"},
     "NIKKEI225": {"ticker": "^N225", "label": "日本 Nikkei 225"},
     "KOSPI": {"ticker": "^KS11", "label": "韓國 KOSPI"},
-    "TAIEX": {"ticker": "^TWII", "label": "台灣加權指數（對照）"},
 }
 STEP = 5
 MIN_TRAIN = 500
