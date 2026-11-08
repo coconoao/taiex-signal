@@ -16,6 +16,27 @@ class ModelImprovementResearchTests(unittest.TestCase):
         self.assertLess(result["brier"], result["baseline_brier"])
         self.assertGreater(result["brier_skill"], 0)
 
+    def test_sparse_unused_features_do_not_reduce_market_only_samples(self):
+        dates = pd.bdate_range("2020-01-01", periods=180)
+        market = pd.DataFrame({"market": np.sin(np.arange(180) / 7)}, index=dates)
+        full = market.copy()
+        full["sparse_chip"] = np.nan
+        full.loc[dates[:120], "sparse_chip"] = np.arange(120, dtype=float)
+        y = pd.Series((np.arange(180) % 3 == 0).astype(float), index=dates)
+
+        class FixedClassifier:
+            def fit(self, x, target):
+                self.p = float(target.mean())
+                return self
+            def predict_proba(self, x):
+                return np.column_stack([np.full(len(x), 1-self.p), np.full(len(x), self.p)])
+
+        _, _, market_result = walk_forward_candidate(market, y, FixedClassifier, step=5)
+        _, _, full_result = walk_forward_candidate(full, y, FixedClassifier, step=5)
+        self.assertEqual(market_result["status"], "available")
+        self.assertEqual(full_result["status"], "insufficient")
+        self.assertGreater(len(market.dropna()), len(full.dropna()))
+
     def test_walk_forward_predictions_are_chronological_and_oos(self):
         dates = pd.bdate_range("2020-01-01", periods=160)
         X = pd.DataFrame({"x": np.sin(np.arange(160) / 7)}, index=dates)
