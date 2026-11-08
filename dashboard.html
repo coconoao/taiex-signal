@@ -147,6 +147,13 @@ details[open]>summary{margin-bottom:12px}
       <p class="note">約 1 個月＝21 個交易日、3 個月＝63 個交易日、6 個月＝126 個交易日。每格依序顯示「不重疊樣本／逐日重疊觀察」；正報酬比例亦依此順序。逐日觀察數較多，但相鄰期間高度重疊、彼此相關，不可視為同等數量的獨立樣本；Wilson 95% 參考區間只用不重疊樣本計算，但未校正時間序列相依性，因此不應視為精確的不確定性界線。歷史統計不代表未來發生機率。</p>
     </section>
 
+    <section id="longTermForecast">
+      <h2>長線模型研究估計</h2>
+      <p class="note">分別檢視約 1、3、6 個月（21、63、126 個交易日）的正報酬研究估計。只有具備足夠歷史樣本外校準時才顯示數值；此研究候選尚未取代正式模型，也不是買賣指示。</p>
+      <div id="longTermForecastRows" class="mcs"><p class="note">正在載入長線研究資料…</p></div>
+      <p class="note" id="longTermForecastNote">研究模型持續驗證中；未達正式採用條件時不顯示未校準分數。</p>
+    </section>
+
     <section id="bestTestModel">
       <h2>目前表現最佳的測試模型</h2>
       <p class="note" id="bestTestModelMeta">正在讀取同日期樣本外比較…</p>
@@ -753,12 +760,39 @@ function renderMultiHorizonResearch(r) {
       : (v.status === "insufficient" ? "資料累積中" : "驗證中");
     return `<div class="mc"><b>${label}</b><p class="note">中長期研究模型</p><div class="big">${category}</div></div>`;
   }).join("");
-  const note = $("multiHorizonModelNote");
+  const longTermRows = $("longTermForecastRows");
+   if (longTermRows) {
+     longTermRows.innerHTML = Object.entries(labels).map(([h, label]) => {
+       const v = latest[h] || {};
+       const exp = experiments[h] || {};
+       const gate = exp.promotion_gate?.current_candidate_gate || {};
+       const calibrated = v.status === "available"
+         && v.calibration_status === "past_oos_calibrated"
+         && v.estimated_positive_return_probability_pct != null
+         && Number.isFinite(Number(v.estimated_positive_return_probability_pct));
+       const estimate = calibrated
+         ? Number(v.estimated_positive_return_probability_pct).toFixed(1) + "%"
+         : (v.status === "insufficient" ? "資料累積中" : "尚未完成校準");
+       const state = calibrated
+         ? (gate.eligible === true ? "研究驗證中" : "尚未達正式採用門檻")
+         : "暫不顯示未校準分數";
+       return `<div class="mc"><b>${label}</b><div class="big">${estimate}</div><p class="note">${state}｜資料日期 ${esc(v.asof || "—")}</p></div>`;
+     }).join("");
+   }
+   const longTermNote = $("longTermForecastNote");
+   if (longTermNote) longTermNote.textContent =
+     "以上是歷史樣本外資料校準的研究估計，不是保證或交易指示。即使通過內部研究門檻，仍須完成同期間基準比較、後續保留期驗證及正式審查，才可考慮納入正式模型。";
+   const note = $("multiHorizonModelNote");
   if (note) note.textContent = "候選模型必須先通過樣本外基準、跨年度穩定度及非重疊有效樣本門檻，才會顯示研究分類；目前未有候選模型通過完整正式更換條件，因此正式模型不變。此處內容僅供一般市場研究，不代表未來報酬保證或持有／賣出指示。";
 }
 const loadMultiHorizonResearch = () => getJSON("multi_horizon_model_research.json")
   .then(renderMultiHorizonResearch)
-  .catch(() => { $("multiHorizonMeta").textContent = "多期間研究報告尚未產生或暫時無法載入。"; });
+  .catch(() => {
+    const message = "多期間研究報告尚未產生或暫時無法載入。";
+    $("multiHorizonMeta").textContent = message;
+    const rows = $("longTermForecastRows");
+    if (rows) rows.textContent = message;
+  });
 function renderBestTestModel(r) {
   const paired = r.same_calendar_comparison || {};
   const models = paired.experiments || {};
