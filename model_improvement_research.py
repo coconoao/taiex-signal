@@ -317,6 +317,9 @@ def run():
                 incumbent_pred.loc[common_pred],
                 paired_y.loc[common_pred],
             )
+        paired_result["current_judgment"] = current_research_judgment(
+            paired_X, paired_y, paired_factory
+        )
         paired_result["feature_count"] = int(paired_X.shape[1])
         paired_result["sample_calendar"] = "identical_all_features_complete_case_calendar"
         paired_result["comparison_start"] = (
