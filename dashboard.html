@@ -131,6 +131,12 @@ details[open]>summary{margin-bottom:12px}
       <div id="gdeltResearchIndicator"></div>
       <p class="note">資料來源：GDELT Project。此資料為全球新聞報導索引，不等於完整台灣媒體新聞庫；標題分類為字詞規則，歷史關聯不是未來預測或買賣訊號。</p>
     </section>
+    <section><h2>Media Cloud 獨立新聞資料（標題索引）</h2>
+      <p class="note" id="mediaCloudResearchMeta">等待 Media Cloud 資料…</p>
+      <div id="mediaCloudResearchIndicator"></div>
+      <div id="mediaCloudResearchItems"></div>
+      <p class="note">只顯示 Media Cloud 可提供的標題與中繼資料，不保存新聞全文。此來源收錄範圍依各媒體開始被追蹤的日期而異；主題分類只依標題關鍵字計數，不代表語意分析、因果關係或市場預測。</p>
+    </section>
     <section><h2>官方政策新聞 × 台股歷史對照</h2>
       <p class="note" id="policyResearchMeta">等待建立歷史對照資料…</p>
       <div id="policyResearchStats"></div>
@@ -389,7 +395,7 @@ function openChatGPTWindow() {
 $("openChatGPTSettings").addEventListener("click", openChatGPTWindow);
 
 /* ---- 新聞資料：提供複製到 Gemini 或 ChatGPT ---- */
-let NEWS = null, WK = null, NEWS_RESEARCH = null, GDELT_RESEARCH = null, POLICY_ARCHIVE = null, POLICY_RESEARCH = null;
+let NEWS = null, WK = null, NEWS_RESEARCH = null, GDELT_RESEARCH = null, MEDIACLOUD_RESEARCH = null, POLICY_ARCHIVE = null, POLICY_RESEARCH = null;
 function mergedNews() {
   if (!NEWS) return null;
   const n = JSON.parse(JSON.stringify(NEWS));
@@ -492,6 +498,47 @@ function renderGdeltResearch(r) {
   box.innerHTML = `<div class="mc"><b>${mood}</b><div class="big">${score > 0 ? "+" : ""}${score.toFixed(2)}</div><p class="note">新聞標題 ${f.headline_count || 0} 則｜正面 ${f.positive_headline_count || 0}｜負面 ${f.negative_headline_count || 0}</p></div>${historical}<p class="note">${esc(h.note || "資料不足，暫不顯示歷史統計。")}</p>`;
   meta.textContent = `資料來源 GDELT DOC 2.0｜行情基準日 ${base.asof || "—"}｜${isCurrent ? "最新新聞環境" : "最近歷史快照"}｜新聞觀測 ${active.window_start_local || "—"} 至 ${active.window_end_local || active.captured_at || "—"}｜歷史快照 ${r.history_count || 0} 天｜已標記隔日結果 ${r.labeled_count || 0} 筆｜本次新增 ${r.fetched_this_run || 0} 天`;
 }
+function renderMediaCloudResearch(r) {
+  const meta = $("mediaCloudResearchMeta"), box = $("mediaCloudResearchIndicator"), items = $("mediaCloudResearchItems");
+  if (!r) {
+    meta.textContent = "尚未取得 Media Cloud 資料檔。";
+    box.textContent = "等待研究流程執行。";
+    items.textContent = "";
+    return;
+  }
+  if (r.status === "needs_api_key") {
+    meta.textContent = "Media Cloud 尚未啟用：需要在 GitHub Actions Secrets 設定 MEDIACLOUD_API_KEY。";
+    box.textContent = r.note || "目前未設定 API Key，因此尚未向來源擷取資料。";
+    items.textContent = "";
+    return;
+  }
+  const current = r.current;
+  if (!current || !current.features) {
+    meta.textContent = r.current_error
+      ? "Media Cloud 更新失敗｜最近嘗試 " + (r.last_attempted_at || "—") + "｜" + r.current_error
+      : "目前沒有成功的 Media Cloud 快照。";
+    box.textContent = "系統不會以空資料覆蓋先前成功快照。";
+    items.textContent = "";
+    return;
+  }
+  const f = current.features, langs = f.language_counts || {}, topics = f.topic_counts || {};
+  const languageText = Object.entries(langs).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>esc(k)+ "：" + esc(v)).join("、") || "—";
+  const topicText = Object.entries(topics).sort((a,b)=>b[1]-a[1]).map(([k,v])=>esc(k)+ "：" + esc(v)).join("、") || "—";
+  const cards = [
+    ["新聞標題筆數", f.headline_count || 0],
+    ["不同媒體來源", f.unique_source_count || 0],
+    ["原始連結覆蓋率", (f.original_link_coverage_pct ?? 0) + "%"],
+    ["歷史日快照", r.history_count || 0]
+  ];
+  box.innerHTML = '<div class="mcs">' + cards.map(([k,v]) => '<div class="mc"><b>'+esc(k)+'</b><div class="big">'+esc(v)+'</div></div>').join("") + '</div>' +
+    '<p class="note">語言分布：'+languageText+'</p><p class="note">標題主題計數：'+topicText+'</p>';
+  const rows = (current.stories || []).slice(0,10);
+  items.innerHTML = rows.map(story => {
+    const href = safeNewsHref(story.url);
+    return '<article style="padding:8px 0;border-bottom:1px solid var(--line)"><b>'+esc(story.title || "（無標題）")+'</b><p class="note">'+esc(story.published_date || "日期未提供")+' · '+esc(story.source || "來源未提供")+' · '+esc(story.language || "語言未標示")+'</p>'+(href ? '<a href="'+esc(href)+'" target="_blank" rel="noopener noreferrer">查看原始報導</a>' : '')+'</article>';
+  }).join("") || '<p class="note">目前查詢期間沒有回傳標題。</p>';
+  meta.textContent = '來源：Media Cloud Online News Archive｜觀測期間 '+(current.window_start || "—")+' 至 '+(current.window_end || "—")+'｜最後更新 '+(r.last_successful_at || r.updated_at || "—")+'｜'+(r.current_error ? "上次更新有錯誤，顯示保留資料：" + r.current_error : "資料更新成功")+(r.has_more_results ? "｜尚有下一頁，本次只讀取第一頁" : "");
+}
 function renderPolicyResearch(r) {
   const meta = $("policyResearchMeta"), box = $("policyResearchStats"), note = $("policyResearchNote");
   if (!r || !r.all_matched) {
@@ -534,7 +581,7 @@ function renderPolicyArchive(a) {
     </article>`;
   }).join("");
 }
-function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); renderSummary(); renderNewsResearch(NEWS_RESEARCH); renderGdeltResearch(GDELT_RESEARCH); renderPolicyResearch(POLICY_RESEARCH); renderPolicyArchive(POLICY_ARCHIVE); }
+function renderNews() { const n = mergedNews(); newsCard(n, "next_day", $("newsD")); renderSummary(); renderNewsResearch(NEWS_RESEARCH); renderGdeltResearch(GDELT_RESEARCH); renderMediaCloudResearch(MEDIACLOUD_RESEARCH); renderPolicyResearch(POLICY_RESEARCH); renderPolicyArchive(POLICY_ARCHIVE); }
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
 const loadDaily = () => getJSON("signals.json").then(d => { $("err").hidden = true; renderDaily(d); ["hero", "layers", "bt"].forEach(i => $(i).hidden = false); })
@@ -544,6 +591,7 @@ const loadNews = () => Promise.all([
   getJSON("news.json").then(n => { NEWS = n; }).catch(() => { NEWS = null; }),
   getJSON("news_research.json").then(r => { NEWS_RESEARCH = r; }).catch(() => { NEWS_RESEARCH = null; }),
   getJSON("news_gdelt_research.json").then(r => { GDELT_RESEARCH = r; }).catch(() => { GDELT_RESEARCH = null; }),
+  getJSON("news_mediacloud_research.json").then(r => { MEDIACLOUD_RESEARCH = r; }).catch(() => { MEDIACLOUD_RESEARCH = null; }),
   getJSON("news_policy_archive.json").then(r => { POLICY_ARCHIVE = r; }).catch(() => { POLICY_ARCHIVE = null; }),
   getJSON("news_policy_research.json").then(r => { POLICY_RESEARCH = r; }).catch(() => { POLICY_RESEARCH = null; })
 ]).then(renderNews);
