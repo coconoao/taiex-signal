@@ -22,6 +22,12 @@ class StorageTests(unittest.TestCase):
                 self.assertEqual(stream.read(), "{\"ok\": true}")
             self.assertFalse(os.path.exists(os.path.join(directory, "..", "secrets.txt")))
 
+    def test_dedicated_research_files_are_excluded_from_routine_saves(self):
+        self.assertNotIn("news_gdelt_history.jsonl", storage.AUTO_SAVE_FILES)
+        self.assertNotIn("news_gdelt_research.json", storage.AUTO_SAVE_FILES)
+        self.assertNotIn("news_policy_archive.json", storage.AUTO_SAVE_FILES)
+        self.assertNotIn("news_policy_research.json", storage.AUTO_SAVE_FILES)
+
     def test_save_only_known_existing_files(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(storage, "enabled", return_value=True), patch.object(storage, "_request") as request:
             with open(os.path.join(directory, "news.json"), "w", encoding="utf-8") as stream:
