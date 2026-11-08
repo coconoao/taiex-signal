@@ -444,7 +444,7 @@ def latest_market_asof():
 
 
 def save_research_snapshot(hl):
-    """保存當日新聞快照；以台灣最近已完成交易日作為對齊日期。"""
+    """保存每個交易日的原始快照；舊版快照只重算衍生特徵，不改動新聞原文。"""
     market_asof = latest_market_asof()
     if not market_asof:
         try:
@@ -467,81 +467,95 @@ def save_research_snapshot(hl):
                         records.append(row)
                 except Exception:
                     continue
-    # One immutable snapshot per completed TAIEX session; reruns and holidays
-    # must not overwrite an already captured session with a different news window.
-    if any(str(row.get("asof")) == str(asof) for row in records):
-        print(f"新聞研究快照 {asof} 已存在，保留原始紀錄。", flush=True)
-        return
-    market_context = {}
-    try:
-        signal_data = json.load(open("signals.json", encoding="utf-8"))
-        probability = float(signal_data.get("prob_up"))
-        if signal_data.get("asof") == asof and 0 <= probability <= 1:
-            market_context = {
-                "prob_up": probability,
-                "missing_layer_count": len(signal_data.get("missing_layers") or []),
-            }
-    except (OSError, ValueError, TypeError):
-        pass
-    snapshot = {
-        "asof": asof, "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "market_context": market_context,
-        "features": research_features(hl),
-        "articles": [{
-            "kind": str(h.get("kind", "")), "category": str(h.get("tag", "")),
-            "title": str(h.get("title", ""))[:500],
-            "source": str(h.get("source", ""))[:160],
-            "published": str(h.get("published", ""))[:100],
-            "link": str(h.get("link", ""))[:1000],
-        } for h in hl],
-        "outcome": None,
-    }
-    records.append(snapshot)
+
+    existing = next((row for row in records if str(row.get("asof")) == str(asof)), None)
+    if existing:
+        old_features = existing.get("features") or {}
+        if int(old_features.get("feature_version") or 0) == 2:
+            print(f"新聞研究快照 {asof} 已存在，保留原始紀錄。", flush=True)
+            return
+        # Rebuild only derived features from the immutable stored article list.
+        stored_articles = existing.get("articles") or []
+        existing["features"] = research_features(stored_articles)
+        snapshot = existing
+        print(f"新聞研究快照 {asof} 已由舊版衍生特徵升級至 v2；原始標題與時間不變。", flush=True)
+    else:
+        market_context = {}
+        try:
+            signal_data = json.load(open("signals.json", encoding="utf-8"))
+            probability = float(signal_data.get("prob_up"))
+            if signal_data.get("asof") == asof and 0 <= probability <= 1:
+                market_context = {
+                    "prob_up": probability,
+                    "missing_layer_count": len(signal_data.get("missing_layers") or []),
+                }
+        except (OSError, ValueError, TypeError):
+            pass
+        snapshot = {
+            "asof": asof, "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "market_context": market_context,
+            "features": research_features(hl),
+            "articles": [{
+                "kind": str(h.get("kind", "")), "category": str(h.get("tag", "")),
+                "title": str(h.get("title", ""))[:500],
+                "source": str(h.get("source", ""))[:160],
+                "published": str(h.get("published", ""))[:100],
+                "link": str(h.get("link", ""))[:1000],
+            } for h in hl],
+            "outcome": None,
+        }
+        records.append(snapshot)
+
     records.sort(key=lambda row: str(row.get("asof", "")))
     with open(path + ".tmp", "w", encoding="utf-8") as stream:
         for row in records[-1500:]:
             stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
     os.replace(path + ".tmp", path)
+
     labeled = sum(isinstance(row.get("outcome"), dict) for row in records)
     context = {"status": "insufficient", "sample_count": 0,
-               "note": "相似新聞環境的歷史樣本不足 20 筆，暫不顯示統計比例。"}
-    current_score = snapshot["features"].get("news_environment_score")
+               "note": "相似新聞環境的已標記樣本不足 20 筆，暫不顯示統計比例。"}
+    current_score = (records[-1].get("features") or {}).get("news_environment_score") if records else None
     peers = []
-    for row in records[:-1]:
-        features, outcome = row.get("features") or {}, row.get("outcome") or {}
-        score, value = features.get("news_environment_score"), outcome.get("next_session_return_pct")
-        if score is None or value is None:
-            continue
-        try:
-            if abs(float(score) - float(current_score)) <= 0.20:
-                peers.append(float(value))
-        except (TypeError, ValueError):
-            continue
+    if current_score is not None:
+        for row in records[:-1]:
+            features, outcome = row.get("features") or {}, row.get("outcome") or {}
+            score, value = features.get("news_environment_score"), outcome.get("next_session_return_pct")
+            if score is None or value is None:
+                continue
+            try:
+                if abs(float(score) - float(current_score)) <= 0.20:
+                    peers.append(float(value))
+            except (TypeError, ValueError):
+                continue
     context["sample_count"] = len(peers)
     if len(peers) >= 20:
         ordered = sorted(peers)
-        mean = sum(ordered) / len(ordered)
         quantile = lambda q: round(ordered[min(len(ordered)-1, int((len(ordered)-1)*q))], 3)
         context = {
             "status": "available", "sample_count": len(ordered),
             "positive_return_pct": round(100 * sum(x > 0 for x in ordered) / len(ordered), 1),
             "negative_return_pct": round(100 * sum(x < 0 for x in ordered) / len(ordered), 1),
-            "average_return_pct": round(mean, 3),
+            "average_return_pct": round(sum(ordered) / len(ordered), 3),
             "median_return_pct": round((ordered[(len(ordered)-1)//2] + ordered[len(ordered)//2]) / 2, 3),
             "p10_return_pct": quantile(0.10), "p90_return_pct": quantile(0.90),
             "score_tolerance": 0.20,
             "note": "僅為相似新聞環境下的歷史描述統計，不是未來機率或買賣訊號。",
         }
     summary = {
-        "updated_at": snapshot["captured_at"], "latest": snapshot,
+        "updated_at": records[-1].get("captured_at") if records else dt.datetime.now(dt.timezone.utc).isoformat(),
+        "latest": records[-1] if records else None,
         "history_count": len(records), "labeled_count": labeled,
         "historical_context": context,
         "note": "新聞特徵僅作資料研究；歷史結果只在後續交易日收盤資料到齊後標記，不回填未來資訊。",
     }
     with open("news_research.json.tmp", "w", encoding="utf-8") as stream:
         json.dump(summary, stream, ensure_ascii=False)
+        stream.flush()
+        os.fsync(stream.fileno())
     os.replace("news_research.json.tmp", "news_research.json")
-
 
 def main():
     load_settings()
