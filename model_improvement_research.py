@@ -130,43 +130,60 @@ def walk_forward_candidate(X, y, factory, step=STEP):
 
 def run():
     market, chips, margin, futures = load_inputs()
-    X, y, _ = pipeline.build(market, chips, margin, futures=futures)
-    valid = X.notna().all(axis=1) & y.notna()
-    X, y = X.loc[valid], y.loc[valid]
-    if len(X) < 100:
-        raise RuntimeError(f"完整特徵樣本不足 100 筆：{len(X)}")
+    X_raw, y_raw, _ = pipeline.build(market, chips, margin, futures=futures)
 
-    market_cols = [c for c in X.columns if not c.startswith(("籌碼:", "信用:", "期貨:"))]
+    # Report feature coverage before complete-case filtering; otherwise every
+    # reported feature would misleadingly appear to have 100% coverage.
+    feature_coverage = {
+        str(col): round(float(X_raw[col].notna().mean() * 100), 1)
+        for col in X_raw.columns
+    }
+    valid = X_raw.notna().all(axis=1) & y_raw.notna()
+    X, y = X_raw.loc[valid], y_raw.loc[valid]
+    complete_samples = int(len(X))
+
     experiments = {}
     specs = candidates()
-    for name, factory in specs.items():
-        use = X[market_cols] if name == "logistic_market_features_only" else X
-        step = STEP
-        pred, base, result = walk_forward_candidate(use, y, factory, step=step)
-        experiments[name] = result
+    if complete_samples >= 100:
+        market_cols = [c for c in X.columns
+                       if not c.startswith(("籌碼:", "信用:", "期貨:"))]
+        for name, factory in specs.items():
+            use = X[market_cols] if name == "logistic_market_features_only" else X
+            _, _, result = walk_forward_candidate(use, y, factory, step=STEP)
+            experiments[name] = result
+        # Exact production LogisticRegression(C=0.5) cadence reference.
+        _, _, experiments["production_cadence_step20"] = walk_forward_candidate(
+            X, y, specs["logistic_current_step5"], step=20
+        )
+    else:
+        for name in specs:
+            experiments[name] = {
+                "status": "insufficient",
+                "available_complete_samples": complete_samples,
+                "minimum_training_rows": MIN_TRAIN,
+                "note": "完整特徵樣本不足，暫不執行候選模型比較。",
+            }
+        experiments["production_cadence_step20"] = {
+            "status": "insufficient",
+            "available_complete_samples": complete_samples,
+            "minimum_training_rows": MIN_TRAIN,
+            "note": "完整特徵樣本不足，暫不執行候選模型比較。",
+        }
 
-    # Exact production LogisticRegression(C=0.5) cadence reference.
-    _, _, experiments["production_cadence_step20"] = walk_forward_candidate(
-        X, y, specs["logistic_current_step5"], step=20
-    )
-    # Feature coverage and the calendar are part of the result, not hidden.
-    feature_coverage = {
-        str(col): round(float(X[col].notna().mean() * 100), 1)
-        for col in X.columns
-    }
     return {
         "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "status": "research_only",
+        "status": "evaluated" if complete_samples >= MIN_TRAIN + 30 else "insufficient",
         "target": "TAIEX next-session direction",
-        "available_complete_samples": int(len(X)),
-        "feature_count": int(X.shape[1]),
+        "available_complete_samples": complete_samples,
+        "minimum_training_rows": MIN_TRAIN,
+        "minimum_oos_samples": 30,
+        "feature_count": int(X_raw.shape[1]),
         "feature_coverage_pct": feature_coverage,
-        "method": "Expanding-window chronological walk-forward; first test after at least 100 training rows, refit every 5 sessions (production cadence comparator every 20); no random shuffle; identical chronological target labels; yearly subperiod metrics.",
+        "method": "Expanding-window chronological walk-forward; at least 100 training rows and 30 out-of-sample rows required; refit every 5 sessions (production cadence comparator every 20); no random shuffle; common complete-case sample calendar; yearly subperiod metrics.",
         "experiments": experiments,
         "promotion_policy": "No automatic promotion. Require repeatable improvement across multiple time blocks, improved Brier/log loss versus baseline, adequate coverage, and a later untouched holdout before any production change.",
         "disclaimer": "Historical research only. Metrics are not a guarantee of future performance and are not investment advice or trading instructions.",
     }
-
 
 if __name__ == "__main__":
     result = run()
