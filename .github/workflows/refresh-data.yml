@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/refresh-data.yml"
+      - "pipeline.py"
   schedule:
     - cron: "30 0 * * 1-5"
   workflow_dispatch:
