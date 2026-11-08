@@ -53,10 +53,16 @@ class TaiwanNewsRelevanceTests(unittest.TestCase):
             "id": 4, "kind": "analyst", "tag": "高盛",
             "title": "Goldman Sachs says Taiwan stocks are not bearish",
         }
+        quoted_not_a_view = {
+            "id": 5, "kind": "analyst", "tag": "野村",
+            "title": "Taiwan Stocks Plunge 1,612 Points; Guo Cites Nomura Report: "
+                     "Negative Cash Flow Misread, Not a Bearish Signal",
+        }
         self.assertIsNone(news.explicit_analyst_view(irrelevant))
         self.assertIsNone(news.explicit_analyst_view(not_attributed))
         self.assertEqual(news.explicit_analyst_view(explicit), "看多")
         self.assertIsNone(news.explicit_analyst_view(negated))
+        self.assertIsNone(news.explicit_analyst_view(quoted_not_a_view))
 
     def test_ai_analyst_calls_are_checked_against_source_title(self):
         headline = {
