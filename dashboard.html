@@ -696,27 +696,21 @@ const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then
 }).catch(() => { $("multiMarketMeta").textContent = "目前尚無其他市場研究結果，或資料來源暫時不可用。"; });
 function renderMultiHorizonResearch(r) {
   const labels = { "1m": "1 個月", "3m": "3 個月", "6m": "6 個月" };
-  const modelLabels = {
-    logistic_baseline: "邏輯迴歸",
-    logistic_regularized: "正則化邏輯迴歸",
-    random_forest: "隨機森林",
-    hist_gradient_boosting: "梯度提升樹"
-  };
-  $("multiHorizonMeta").textContent = `研究更新：${(r.computed_at || "").slice(0, 10) || "—"}｜目前顯示各期間歷史模擬開發集選出的實驗候選模型`;
+  $("multiHorizonMeta").textContent = `研究更新：${(r.computed_at || "").slice(0, 10) || "—"}｜中長期模型持續進行樣本外驗證`;
   const latest = r.latest_estimates || {};
   const experiments = r.experiments || {};
   $("multiHorizonLatest").innerHTML = Object.entries(labels).map(([h, label]) => {
     const v = latest[h] || {};
     const exp = experiments[h] || {};
-    const candidate = String(exp.selected_candidate || "").split("__").pop();
-    const modelName = modelLabels[candidate] || (candidate ? "實驗候選模型" : "尚無候選模型");
+    const gate = exp.promotion_gate?.current_candidate_gate || {};
     const calibrated = v.status === "available" && v.calibration_status === "past_oos_calibrated";
-    const category = calibrated ? (v.research_category || "研究中") :
-      (v.status === "insufficient" ? "資料累積中" : "校準驗證中");
-    return `<div class="mc"><b>${label}</b><p class="note">暫定實驗候選｜${modelName}</p><div class="big">${category}</div></div>`;
+    const category = gate.eligible === true && calibrated
+      ? (v.research_category || "研究中")
+      : (v.status === "insufficient" ? "資料累積中" : "驗證中");
+    return `<div class="mc"><b>${label}</b><p class="note">中長期研究模型</p><div class="big">${category}</div></div>`;
   }).join("");
   const note = $("multiHorizonModelNote");
-  if (note) note.textContent = "以上為各期間歷史模擬開發集選出的暫定候選模型，尚未成為正式模型。獨立留出期的穩定度與基準比較仍在驗證；目前分類僅供研究觀察，不代表未來報酬機率或持有／賣出指示。";
+  if (note) note.textContent = "候選模型必須先通過樣本外基準、跨年度穩定度及非重疊有效樣本門檻，才會顯示研究分類；目前未有候選模型通過完整正式更換條件，因此正式模型不變。此處內容僅供一般市場研究，不代表未來報酬保證或持有／賣出指示。";
 }
 const loadMultiHorizonResearch = () => getJSON("multi_horizon_model_research.json")
   .then(renderMultiHorizonResearch)
