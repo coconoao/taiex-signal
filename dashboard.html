@@ -120,22 +120,21 @@ details[open]>summary{margin-bottom:12px}
       <div class="charttools" aria-label="歷史回測圖表操作"><button class="btn sm ghost" id="curveZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="curveZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="curvePan" type="button">平移</button><button class="btn sm ghost" id="curveZoom" type="button">框選縮放</button><button class="btn sm ghost" id="curveReset" type="button">重設</button><button class="btn sm ghost" id="curveRange1m" type="button">1 個月</button><button class="btn sm ghost" id="curveRange3m" type="button">3 個月</button><button class="btn sm ghost" id="curveRange6m" type="button">6 個月</button><button class="btn sm ghost" id="curveRangeYtd" type="button">今年</button><button class="btn sm ghost" id="curveRange1y" type="button">1 年</button><button class="btn sm ghost" id="curveRangeAll" type="button">全部</button></div><p class="note">可拖曳下方滑桿選日期；點選「框選縮放」後，在圖表上拖曳選取區域。此圖為歷史滾動樣本外模擬，非實際成交；績效曲線按完整交易日計算，模型無有效預測的日期沿用前次部位；方向與機率指標只計實際樣本外預測日。程式假設每次部位變動成本 0.2%，未必涵蓋所有交易摩擦。</p><div id="curve" class="chartbox" role="img" aria-label="歷史累積報酬互動線圖"></div>
       <p class="legend"><span style="background:var(--accent)"></span>依訊號操作<span style="background:var(--hold)"></span>買進持有</p></details>
     </section>
-    <section id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
-    <section id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
-    <section id="multiHorizonModelResearch"><h2>中長期報酬機率研究模型</h2>
-      <p class="note" id="multiHorizonMeta">載入 1／3／6 個月研究結果中…</p>
-      <div id="multiHorizonLatest" class="mcs"><p class="note">等待研究結果…</p></div>
-      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>候選模型</th><th>開發期 Brier</th><th>未觸碰測試期 Brier</th><th>Brier Skill</th><th>測試樣本</th></tr></thead><tbody id="multiHorizonRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div>
-      <p class="note">目標為未來 21／63／126 個交易日正報酬。採時間順序 walk-forward、依預測期間清除重疊標籤、過去樣本外預測校準，並保留最後 20% 時序樣本作候選選擇以外的測試。未通過校準條件時不顯示機率數字。這是大盤統計研究，不是個人化持有／賣出建議，也不保證未來結果。</p>
+    <section hidden id="multiMarketResearch"><h2>其他市場樣本外研究</h2><p class="note" id="multiMarketMeta">載入獨立市場研究資料中…</p><div id="multiMarketRows" class="mcs"></div><p class="note">美國 S&P 500、Nasdaq Composite、日本 Nikkei 225、韓國 KOSPI。各市場獨立建模，至少使用 500 個交易日訓練，每 5 個目標市場交易日重新訓練；跨市場特徵至少落後一個目標市場交易日。只呈現樣本外研究統計，不是交易訊號或未來表現保證。</p></section>
+    <section hidden id="strategyResearch"><h2>模型＋持有策略歷史研究</h2><p class="note" id="strategyResearchMeta">載入策略回測中…</p><div style="overflow-x:auto"><table><thead><tr><th>候選模型</th><th>報酬門檻</th><th>策略累積報酬</th><th>買進持有</th><th>最大回撤</th><th>交易次數</th></tr></thead><tbody id="strategyResearchRows"><tr><td colspan="6">載入中…</td></tr></tbody></table></div><p class="note">研究假設：模型偏正向分類後，下一交易日收盤建立假設部位；達到門檻或最多持有 20 個交易日退出。已計入每次進出場成本；不代表盤中可成交價格、未來報酬或交易指示。不同模型的樣本期間可能不同，不能直接橫向排名。</p></section>
+    <section id="multiHorizonModelResearch"><h2>中長期市場研究</h2>
+      <p class="note" id="multiHorizonMeta">正在更新研究摘要…</p>
+      <div id="multiHorizonLatest" class="mcs"><p class="note">研究資料載入中…</p></div>
+      <p class="note">提供不同期間的大盤歷史研究概況，不是個人化持有／賣出建議，也不保證未來結果。</p>
     </section>
-    <section id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
+    <section hidden id="modelImprovementResearch"><h2>台股模型改良實驗</h2>
       <p class="note" id="modelImprovementMeta">載入獨立模型實驗報告中…</p>
       <div id="modelImprovementSummary" class="mcs"></div><h3>測試模型最新資料日判讀</h3><div id="modelImprovementLive" class="mcs"><p class="note">等待最新研究結果…</p></div>
       <div style="overflow-x:auto"><table><thead><tr><th>候選實驗</th><th>狀態</th><th>樣本外筆數</th></tr></thead><tbody id="modelImprovementRows"><tr><td colspan="3">載入中…</td></tr></tbody></table></div>
       <p class="note" id="modelImprovementYearly"></p>
       <p class="note">各候選模型依自身特徵完整度使用不同樣本日曆；日期區間不同的模型不可直接比較。即時判讀是在最新可用資料日重新訓練後產生的研究分類，不是逐秒盤中預測、未來機率或買賣指示。準確率與 Brier 等指標僅描述歷史樣本外表現。全特徵模型資料不足時會明確標示，不會降低門檻。</p>
     </section>
-    <section id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
+    <section hidden id="newsEnhancedModel"><h2>新聞增強研究模型</h2>
       <p class="note" id="newsEnhancedModelMeta">載入獨立模型資料中…</p>
       <div id="newsEnhancedModelSignal"></div>
       <div id="newsEnhancedModelMetrics"></div>
@@ -696,25 +695,16 @@ const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then
   $("multiMarketMeta").textContent = `更新時間 ${r.computed_at || "—"}｜資料來源 ${r.data_source || "—"}`;
 }).catch(() => { $("multiMarketMeta").textContent = "目前尚無其他市場研究結果，或資料來源暫時不可用。"; });
 function renderMultiHorizonResearch(r) {
-  $("multiHorizonMeta").textContent = `報告時間 ${r.computed_at || "—"}｜預測目標：未來 1／3／6 個月正報酬｜訓練最低樣本 ${r.minimum_training_samples ?? "—"}`;
-  const latest = r.latest_estimates || {};
   const labels = { "1m": "1 個月", "3m": "3 個月", "6m": "6 個月" };
-  $("multiHorizonLatest").innerHTML = Object.entries(latest).map(([h, v]) => {
-    const calibrated = v.calibration_status === "past_oos_calibrated";
-    const value = v.status === "available" && calibrated
-      ? Number(v.estimated_positive_return_probability_pct).toFixed(1) + "%"
-      : v.status === "available" ? "尚未可靠校準" : "資料不足";
-    return `<div class="mc"><b>${labels[h] || h}正報酬估計</b><div class="big">${value}</div><p class="note">資料日 ${v.asof || "—"}｜成熟訓練樣本 ${v.training_samples ?? 0} 筆</p><p class="note">${v.note || ""}</p></div>`;
-  }).join("") || '<p class="note">尚無多期間研究判讀。</p>';
-  const rows = [];
-  for (const [h, item] of Object.entries(r.experiments || {})) {
-    const label = labels[h] || h;
-    for (const [name, v] of Object.entries(item.candidates || {})) {
-      const hold = v.untouched_holdout || {};
-      rows.push(`<tr><td>${label}</td><td>${name}</td><td>${v.development?.brier ?? "—"}</td><td>${hold.brier ?? "—"}</td><td>${hold.brier_skill_vs_prevalence ?? "—"}</td><td>${hold.sample_count ?? 0}</td></tr>`);
-    }
-  }
-  $("multiHorizonRows").innerHTML = rows.join("") || '<tr><td colspan="6">目前尚無足夠樣本完成比較。</td></tr>';
+  $("multiHorizonMeta").textContent = `研究更新：${(r.computed_at || "").slice(0, 10) || "—"}`;
+  const latest = r.latest_estimates || {};
+  $("multiHorizonLatest").innerHTML = Object.entries(labels).map(([h, label]) => {
+    const v = latest[h] || {};
+    const calibrated = v.status === "available" && v.calibration_status === "past_oos_calibrated";
+    const category = calibrated ? (v.research_category || "研究中") :
+      (v.status === "insufficient" ? "資料累積中" : "校準驗證中");
+    return `<div class="mc"><b>${label}</b><div class="big">${category}</div></div>`;
+  }).join("");
 }
 const loadMultiHorizonResearch = () => getJSON("multi_horizon_model_research.json")
   .then(renderMultiHorizonResearch)
