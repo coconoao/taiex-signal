@@ -181,7 +181,7 @@ jobs:
           {
             echo "## Cloudflare AI 程式碼診斷"
             echo
-            echo "目標版本：`\${{ inputs.target_ref }}`"
+            echo "目標版本：`${{ inputs.target_ref }}`"
             echo
             cat cloudflare_audit.md
             echo
