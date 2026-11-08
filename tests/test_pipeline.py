@@ -10,6 +10,7 @@ import pandas as pd
 
 from pipeline import (
     BACKFILL_DATES_PER_RUN,
+    backtest,
     RECENT_DATES_PER_RUN,
     _checkpoint_if_needed,
     _merge_and_save,
@@ -285,6 +286,27 @@ class FetchCheckpointIntegrationTests(unittest.TestCase):
         self.assertEqual(len(result), 6)
         self.assertEqual(len(saved), 6)
         self.assertEqual(observed_rows_at_save, [5, 6])
+
+
+class BacktestCalendarTests(unittest.TestCase):
+    def test_sparse_predictions_use_full_daily_calendar_for_performance(self):
+        import numpy as np
+
+        dates = pd.bdate_range("2026-01-05", periods=20)
+        forward_returns = pd.Series(np.full(len(dates), 0.001), index=dates)
+        # Only two model predictions span a 20-session backtest interval.
+        probabilities = pd.Series([0.70, 0.70], index=[dates[0], dates[-1]])
+
+        result = backtest(probabilities, forward_returns)
+
+        self.assertEqual(result["days"], 2)
+        self.assertEqual(result["prediction_days"], 2)
+        self.assertEqual(result["period_sessions"], 20)
+        self.assertEqual(result["period_start"], str(dates[0].date()))
+        self.assertEqual(result["period_end"], str(dates[-1].date()))
+        self.assertEqual(len(result["curve"]["dates"]), 4)
+        self.assertEqual(result["curve"]["dates"][0], str(dates[0].date()))
+        self.assertEqual(result["curve"]["dates"][-1], str(dates[15].date()))
 
 
 if __name__ == "__main__":
