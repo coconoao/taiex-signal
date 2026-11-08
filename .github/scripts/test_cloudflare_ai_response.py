@@ -30,7 +30,7 @@ class CloudflareAIResponseTests(unittest.TestCase):
             })
 
     def test_output_redacts_quoted_and_unquoted_credentials(self):
-        value = 'API_KEY="quoted-secret-value"\\naccess_token=unquoted_secret_value_123'
+        value = 'API_KEY="quoted-secret-value"\naccess_token=unquoted_secret_value_123'
         redacted = _redact_sensitive_text(value)
         self.assertNotIn("quoted-secret-value", redacted)
         self.assertNotIn("unquoted_secret_value_123", redacted)
