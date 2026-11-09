@@ -394,6 +394,12 @@ def run_jobs(*whats):
     try:
         for w in whats:
             JOB["running"] = w
+            if w == "news" and not os.environ.get("GEMINI_API_KEY"):
+                code = 1
+                log = (log + "[news] skipped: Gemini news analysis is owned by GitHub Actions; no local Gemini key is configured.\\n")[-3000:]
+                JOB["log"] = log
+                exit_code = code
+                break
             script = "pipeline" if w == "pipeline-fast" else w
             args = (["--demo"] if DEMO and script == "pipeline" else
                     ["--skip-backfill"] if w == "pipeline-fast" else [])
@@ -497,11 +503,11 @@ def scheduler():
     # a different, lower-coverage backtest and overwrite the restored canonical file.
     # Refresh only independent news artifacts; the scheduled GitHub workflow owns
     # the full market pipeline and persists signals.json / weekly.json.
-    run_jobs("news", "news_enhanced_model")
+    run_jobs("news_enhanced_model")
     while True:
         now = dt.datetime.now(TZ)
         if now.weekday() < 5 and (now.hour, now.minute) == (8, 30) and last != now.date():
-            last = now.date(); run_jobs("pipeline", "news", "news_enhanced_model")
+            last = now.date(); run_jobs("pipeline", "news_enhanced_model")
         time.sleep(20)
 
 def _spot_session(now):
