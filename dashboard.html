@@ -1175,8 +1175,10 @@ function renderStock(s, cached=false) {
     '<p class="note">財報來自 Yahoo，台股欄位常不完整，請對照公開資訊觀測站。沒有「當時公布」的歷史財報可回測，因此只作參考，不調整模型。</p>';
 }
 $("go").onclick = async () => {
+  if (window._stockAnalysisActive) return;
   const code = $("code").value.trim();
   if (!code) return;
+  window._stockAnalysisActive = true;
   const button = $("go");
   button.disabled = true;
   $("stockOut").innerHTML = '<p class="note">正在啟動個股分析工作…</p>';
@@ -1214,6 +1216,7 @@ $("go").onclick = async () => {
     $("stockOut").innerHTML = '<p class="note">個股查詢失敗：' + esc(message) + '</p>';
   } finally {
     button.disabled = false;
+    window._stockAnalysisActive = false;
   }
 };
 $("code").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
