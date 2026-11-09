@@ -356,17 +356,27 @@ def lexicon(hl):
 
 def post(url, headers, body):
     req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json", **headers})
-    # Gemini can take longer on large multi-section news prompts. Use low thinking
-    # for this bounded classification task and retry transient read timeouts once.
-    for attempt in range(2):
+    # Gemini can be temporarily overloaded. Use low thinking for this bounded
+    # classification task and retry only transient timeouts / HTTP overloads.
+    for attempt in range(3):
         try:
             with urllib.request.urlopen(req, timeout=120) as response:
                 return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {408, 429, 500, 502, 503, 504} or attempt == 2:
+                raise
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = min(30, max(1, int(retry_after))) if retry_after else 2 ** (attempt + 1)
+            except (TypeError, ValueError):
+                delay = 2 ** (attempt + 1)
+            exc.close()
+            time.sleep(delay)
         except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
             reason = getattr(exc, "reason", exc)
-            if not isinstance(reason, (TimeoutError, socket.timeout)) or attempt == 1:
+            if not isinstance(reason, (TimeoutError, socket.timeout)) or attempt == 2:
                 raise
-            time.sleep(2)
+            time.sleep(2 ** (attempt + 1))
 
 def ask_claude(p):
     r = post("https://api.anthropic.com/v1/messages", {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01"},
