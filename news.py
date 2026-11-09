@@ -1,8 +1,5 @@
 """新聞與機構觀點分析 → news.json（僅供參考，未納入回測模型）。
-兩種模式並存：
-  1. 內建規則：不需要任何金鑰，永遠執行（只比對字詞，不理解語意，準確度有限）。
-  2. AI 模式：在儀表板「設定」頁（或環境變數）填入金鑰後，Claude / ChatGPT / Gemini 會同時分析，結果並排顯示。
-     ANTHROPIC_API_KEY（CLAUDE_MODEL 預設 claude-sonnet-5-5）；OPENAI_API_KEY + OPENAI_MODEL；GEMINI_API_KEY + GEMINI_MODEL
+僅使用 Gemini 進行新聞語意分析；GitHub Actions 透過 GEMINI_API_KEY 注入金鑰。
 資料來源：國際市場新聞、中央社台灣新聞 RSS，以及台灣／美國政府政策與國際局勢的近 7 日公開資訊。
 機構觀點只計入「標題明確寫出該機構對台股方向」者；每日結果累積到 news_history.jsonl，日後可算各機構命中率。
 用法：python news.py   （時間同 pipeline.py：台股交易日 8:30 前後）
@@ -378,8 +375,7 @@ def ask_gemini(p):
              {"contents": [{"parts": [{"text": p}]}], "generationConfig": {"responseMimeType": "application/json"}})
     return "".join(x.get("text", "") for x in r["candidates"][0]["content"]["parts"])
 
-MODELS = {"Claude": (ask_claude, ["ANTHROPIC_API_KEY"]), "ChatGPT": (ask_openai, ["OPENAI_API_KEY"]),
-          "Gemini": (ask_gemini, ["GEMINI_API_KEY"])}
+MODELS = {"Gemini": (ask_gemini, ["GEMINI_API_KEY"])}
 clip = lambda x: round(max(-1.0, min(1.0, float(x))), 2)
 
 def run(name, fn, p, analyst_headlines=None):
@@ -390,6 +386,31 @@ def run(name, fn, p, analyst_headlines=None):
                       "analysts": validate_analyst_calls(d.get("analysts", []), analyst_headlines or [])}
     except Exception as e:
         return name, {"error": f"{type(e).__name__}: {e}"}
+
+def model_statuses(todo, results):
+    """Expose provider readiness without ever exposing API credentials."""
+    status = {}
+    for name in MODELS:
+        if name not in todo:
+            status[name] = {"status": "not_configured", "message": "未設定伺服器 API 金鑰"}
+        elif results.get(name, {}).get("error"):
+            status[name] = {"status": "error", "message": str(results[name]["error"])}
+        else:
+            status[name] = {"status": "ok"}
+    return status
+
+def aggregate_model_results(results):
+    """Aggregate successful Gemini output; return neutral empty metadata when unavailable."""
+    aggregate = {}
+    for key in ("next_day", "next_week"):
+        values = [result[key] for result in results.values()
+                  if "error" not in result and key in result]
+        aggregate[key] = (
+            {"mean": round(sum(values) / len(values), 2),
+             "spread": round(max(values) - min(values), 2), "n": len(values)}
+            if values else {"mean": 0, "spread": 0, "n": 0}
+        )
+    return aggregate
 
 def research_features(hl):
     """Versioned, Taiwan-market-relevant news features; not a trading signal."""
@@ -576,15 +597,11 @@ def main():
          "\\n【機構觀點】\\n" + sec("analyst"))
     todo = {n: f for n, (f, keys) in MODELS.items() if all(os.environ.get(k) for k in keys)}
     analyst_headlines = [h for h in hl if h.get("kind") == "analyst"]
-    with ThreadPoolExecutor() as ex:  # 有金鑰的 AI 同時分析
-        res = {"內建規則": lexicon(hl)} | dict(
-            ex.map(lambda kv: run(kv[0], kv[1], p, analyst_headlines), todo.items())
-        )
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        res = dict(ex.map(lambda kv: run(kv[0], kv[1], p, analyst_headlines), todo.items()))
+    model_status = model_statuses(todo, res)
     ok = {n: r for n, r in res.items() if "error" not in r}
-    agg = {}
-    for k in ("next_day", "next_week"):
-        v = [r[k] for r in ok.values()]
-        agg[k] = {"mean": round(sum(v) / len(v), 2), "spread": round(max(v) - min(v), 2), "n": len(v)}
+    agg = aggregate_model_results(ok)
     rows = {}
     for n, r in ok.items():
         for a in r["analysts"]:
@@ -597,13 +614,16 @@ def main():
     event_history = save_policy_event_history(events)
     out = {"asof": dt.date.today().isoformat(), "demo": False, "headlines": hl, "policy_events": events,
            "policy_event_history_count": len(event_history), "prompt": p, "models": res, "agg": agg,
-           "missing": [n for n in MODELS if n not in todo],
+           "model_status": model_status, "missing": [n for n in MODELS if n not in todo],
            "analyst": {"rows": list(rows.values()), "score": round(sum(vals) / len(vals), 2) if vals else None}}
     json.dump(out, open("news.json", "w", encoding="utf-8"), ensure_ascii=False)
     with open("news_history.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"asof": out["asof"], "agg": agg, "analyst": [{"name": r["name"], "stances": r["stances"]} for r in rows.values()],
                             "models": {n: {k: r[k] for k in ("next_day", "next_week")} for n, r in ok.items()}}, ensure_ascii=False) + "\n")
     for n, r in res.items(): print(n, r.get("error") or f"隔日 {r['next_day']:+.2f}  一週 {r['next_week']:+.2f}")
+    for n, status in model_status.items():
+        if status["status"] == "not_configured":
+            print(f"{n}: 未啟用（伺服器尚未設定 API 金鑰）")
 
 if __name__ == "__main__":
     main()

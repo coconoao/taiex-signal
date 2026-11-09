@@ -22,8 +22,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: taiex-daily-news-research
-  cancel-in-progress: true
+  # Share the same writer lock as refresh-data.yml; both workflows persist news.json.
+  group: taiex-data-refresh
+  cancel-in-progress: false
 
 jobs:
   refresh-news:
@@ -35,6 +36,7 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       MEDIACLOUD_API_KEY: ${{ secrets.MEDIACLOUD_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
