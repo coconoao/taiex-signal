@@ -7,89 +7,78 @@ import tw_market_data
 
 class TestTaiwanMarketData(unittest.TestCase):
     def test_request_json_logs_safe_network_diagnostic(self):
-        error = __import__("urllib.error").error.URLError(
-            OSError(101, "Network is unreachable")
-        )
-        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+        error = OSError(101, "Network is unreachable")
+        with patch.object(tw_market_data.curl_requests, "get", side_effect=error):
             with self.assertRaisesRegex(
                 tw_market_data.MarketDataError,
-                r"twse\.com\.tw URLError/OSError\(errno=101\)",
+                r"twse\\.com\\.tw OSError\\(errno=101\\)",
             ):
                 tw_market_data._request_json(
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
                 )
 
     def test_request_json_preserves_http_status_in_safe_diagnostic(self):
-        from urllib.error import HTTPError
-        error = HTTPError(
-            "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330",
-            403, "Forbidden", {}, None,
-        )
-        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+        from types import SimpleNamespace
+        response = SimpleNamespace(status_code=403, headers={}, content=b"")
+        with patch.object(tw_market_data.curl_requests, "get", return_value=response):
             with self.assertRaisesRegex(
                 tw_market_data.MarketDataError,
-                r"twse\.com\.tw HTTPError\(http=403\)",
+                r"twse\\.com\\.tw HTTPError\\(http=403\\)",
             ):
                 tw_market_data._request_json(
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
                 )
 
     def test_request_json_follows_same_host_https_308_redirect(self):
-        from io import BytesIO
-        from urllib.error import HTTPError
-
-        redirect = HTTPError(
-            "https://www.twse.com.tw/old-path",
-            308, "Permanent Redirect", {"Location": "/new-path"}, None,
-        )
-        response = BytesIO(b'{"stat":"OK","data":[]}')
-        response.__enter__ = lambda: response
-        response.__exit__ = lambda *args: None
+        from types import SimpleNamespace
+        redirect = SimpleNamespace(status_code=308, headers={"Location": "/new-path"}, content=b"")
+        response = SimpleNamespace(status_code=200, headers={}, content=b'{"stat":"OK","data":[]}')
         with patch.object(
-            tw_market_data.urllib.request, "urlopen",
+            tw_market_data.curl_requests, "get",
             side_effect=[redirect, response],
-        ) as open_url:
-            payload = tw_market_data._request_json(
-                "https://www.twse.com.tw/old-path"
-            )
+        ) as get:
+            payload = tw_market_data._request_json("https://www.twse.com.tw/old-path")
         self.assertEqual(payload, {"stat": "OK", "data": []})
-        self.assertEqual(open_url.call_count, 2)
-        self.assertEqual(
-            open_url.call_args_list[1].args[0].full_url,
-            "https://www.twse.com.tw/new-path",
-        )
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args_list[1].args[0], "https://www.twse.com.tw/new-path")
+        self.assertEqual(get.call_args_list[1].kwargs["impersonate"], "chrome")
 
     def test_request_json_rejects_cross_host_308_redirect(self):
-        from urllib.error import HTTPError
-
-        redirect = HTTPError(
-            "https://www.twse.com.tw/old-path",
-            308, "Permanent Redirect",
-            {"Location": "https://attacker.example/new-path"}, None,
+        from types import SimpleNamespace
+        redirect = SimpleNamespace(
+            status_code=308,
+            headers={"Location": "https://attacker.example/new-path"},
+            content=b"",
         )
         with patch.object(
-            tw_market_data.urllib.request, "urlopen", side_effect=redirect
-        ) as open_url:
+            tw_market_data.curl_requests, "get", return_value=redirect
+        ) as get:
             with self.assertRaises(tw_market_data.MarketDataError) as caught:
-                tw_market_data._request_json(
-                    "https://www.twse.com.tw/old-path"
-                )
+                tw_market_data._request_json("https://www.twse.com.tw/old-path")
         self.assertEqual(caught.exception.diagnostic_code, "twse_http_308")
-        self.assertEqual(open_url.call_count, 1)
+        self.assertEqual(get.call_count, 1)
 
     def test_request_json_attaches_safe_http_diagnostic_code(self):
-        from urllib.error import HTTPError
-        error = HTTPError(
-            "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=SECRET",
-            403, "Forbidden", {}, None,
-        )
-        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+        from types import SimpleNamespace
+        response = SimpleNamespace(status_code=403, headers={}, content=b"")
+        with patch.object(tw_market_data.curl_requests, "get", return_value=response):
             with self.assertRaises(tw_market_data.MarketDataError) as caught:
                 tw_market_data._request_json(
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=SECRET"
                 )
         self.assertEqual(caught.exception.diagnostic_code, "twse_http_403")
         self.assertNotIn("SECRET", caught.exception.diagnostic_code)
+
+    def test_request_json_uses_bounded_socket_timeout_and_chrome_impersonation(self):
+        response = type("Response", (), {"status_code": 200, "headers": {}, "content": b'{"ok":true}'})()
+        with patch.object(tw_market_data.curl_requests, "get", return_value=response) as get:
+            self.assertEqual(
+                tw_market_data._request_json("https://www.twse.com.tw/test"),
+                {"ok": True},
+            )
+        self.assertEqual(get.call_args.kwargs["timeout"], 8)
+        self.assertEqual(get.call_args.kwargs["impersonate"], "chrome")
+        self.assertFalse(get.call_args.kwargs["allow_redirects"])
 
     def test_fetch_months_preserves_provider_diagnostic_category(self):
         def fail(*args):
