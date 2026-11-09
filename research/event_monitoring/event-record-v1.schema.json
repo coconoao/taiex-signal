@@ -173,6 +173,7 @@
           "entity_type": {
             "enum": [
               "person",
+              "role",
               "company",
               "government",
               "agency",
