@@ -985,9 +985,10 @@ def walk_forward(X, y, start=500, step=20, h=1):
 
 
 def three_day_point_forecast(df, chips, margin, futures=None):
-    """Direct Ridge forecasts for D+1/D+2/D+3; report walk-forward point errors."""
+    """Build schema-v2 direct D+1/D+2/D+3 forecasts and point-in-time OOS history."""
     close = pd.to_numeric(df["TAIEX"], errors="coerce").dropna().sort_index()
     horizons = {}
+    history_records = []
     for h in (1, 2, 3):
         Xh, _, fwd = build(df, chips, margin, h=h, futures=futures)
         valid_features = Xh.notna().all(axis=1)
@@ -1006,8 +1007,6 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             }
             continue
 
-        # Expanding-window, purged walk-forward evaluation. Every training
-        # target must have matured by the first test feature date.
         oos_pred, oos_actual, oos_base = [], [], []
         first_test = min(max(100, h + 30), max(h + 30, len(train_idx) // 2))
         for i in range(first_test, len(train_idx), 20):
@@ -1022,6 +1021,34 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             actual_points = close.shift(-h).reindex(test_idx).to_numpy(dtype=float)
             predicted_points = base_points * (1.0 + predicted_returns)
             mask = np.isfinite(predicted_points) & np.isfinite(actual_points) & np.isfinite(base_points)
+            for asof_date, predicted, actual, base_point, predicted_return in zip(
+                test_idx[mask], predicted_points[mask], actual_points[mask],
+                base_points[mask], predicted_returns[mask]
+            ):
+                pos = close.index.get_loc(asof_date)
+                if pos + h >= len(close.index):
+                    continue
+                target_date = close.index[pos + h]
+                abs_error = abs(float(predicted) - float(actual))
+                relative_error = abs_error / max(abs(float(actual)), 1.0)
+                history_records.append({
+                    "schema_version": 2,
+                    "record_type": "index_forecast_out_of_sample",
+                    "instrument": "TAIEX",
+                    "forecast_asof": str(asof_date.date()),
+                    "target_date": str(target_date.date()),
+                    "horizon_sessions": h,
+                    "base_close": round(float(base_point), 2),
+                    "predicted_close": round(float(predicted), 2),
+                    "predicted_return_pct": round(float(predicted_return) * 100, 5),
+                    "actual_close": round(float(actual), 2),
+                    "absolute_error_points": round(abs_error, 2),
+                    "absolute_error_pct": round(relative_error * 100, 5),
+                    "within_0_2_pct": bool(relative_error <= 0.002),
+                    "model": "Ridge direct-horizon",
+                    "model_version": "ridge-direct-3session-v2",
+                    "evaluation": "purged_expanding_window_oos",
+                })
             oos_pred.extend(predicted_points[mask].tolist())
             oos_actual.extend(actual_points[mask].tolist())
             oos_base.extend(base_points[mask].tolist())
@@ -1055,15 +1082,60 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             "predicted_return_pct": round(predicted_return * 100, 4),
             "training_samples": int(len(train_idx)),
             "model": "Ridge direct-horizon",
-            **metrics,
+            "validation": metrics,
         }
-    return {
-        "asof": str(close.index[-1].date()),
-        "base_close": round(float(close.iloc[-1]), 2),
+
+    latest_asof = str(close.index[-1].date())
+    base_close = round(float(close.iloc[-1]), 2)
+    sessions = []
+    previous = base_close
+    previous_available = base_close > 0
+    for h in (1, 2, 3):
+        item = horizons.get(str(h), {"status": "insufficient"})
+        session = {
+            "horizon_sessions": h,
+            "label": "D+" + str(h),
+            "target_date": item.get("target_date"),
+            "status": item.get("status", "insufficient"),
+            "training_samples": int(item.get("training_samples", 0)),
+            "forecast_close": item.get("forecast_close"),
+            "predicted_return_pct": item.get("predicted_return_pct"),
+            "validation": item.get("validation", {}),
+            "model": item.get("model", "Ridge direct-horizon"),
+        }
+        point = item.get("forecast_close")
+        if item.get("status") == "research" and point is not None and previous_available:
+            delta = float(point) - previous
+            pct = delta / previous * 100 if previous else 0.0
+            direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
+            session["change_vs_previous"] = {
+                "reference_close": round(previous, 2),
+                "points": round(delta, 2),
+                "pct": round(pct, 4),
+                "direction": direction,
+                "color": "red" if direction == "up" else "green" if direction == "down" else "neutral",
+            }
+            previous = float(point)
+        else:
+            session["change_vs_previous"] = None
+            if item.get("status") != "research":
+                previous_available = False
+        sessions.append(session)
+
+    forecast = {
+        "schema_version": 2,
+        "record_type": "index_forecast_snapshot",
+        "instrument": {"symbol": "TAIEX", "name": "臺灣加權股價指數", "unit": "index_points"},
+        "asof": latest_asof,
+        "base_close": base_close,
+        "horizon_unit": "trading_sessions",
+        "method": "direct_horizon_ridge",
+        "model_version": "ridge-direct-3session-v2",
         "status": "research",
-        "horizons": horizons,
-        "note": "D+1/D+2/D+3 為直接點位估計；樣本外 MAE 與 ±0.2% 命中率只描述歷史測試，不代表未來保證。",
+        "sessions": sessions,
+        "note": "D+1/D+2/D+3 為獨立直接點位估計；歷史誤差來自逐時點樣本外測試，不代表未來保證。",
     }
+    return forecast, history_records
 
 def backtest(prob, fwd):
     # Classification metrics use only dates with an actual out-of-sample prediction.
@@ -1463,29 +1535,39 @@ if __name__ == "__main__":
         # potentially stale cache while the scheduled backfill owns Supabase.
         write_taiwan_data_status(df, chips, margin, futures)
     X, y, fwd = build(df, chips, margin, futures=futures)
-    three_day_forecast = three_day_point_forecast(df, chips, margin, futures=futures)
+    three_day_forecast, forecast_history = three_day_point_forecast(df, chips, margin, futures=futures)
+    history_tmp = "index_forecasts_history.jsonl.tmp"
+    with open(history_tmp, "w", encoding="utf-8") as stream:
+        for record in forecast_history:
+            stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(history_tmp, "index_forecasts_history.jsonl")
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])
     layers = contrib.groupby(lambda c: c.split(":")[0]).sum()
     out = {
-        "asof": str(latest.date()), "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "three_day_forecast": three_day_forecast,
-        "data_basis": "latest_available_taiwan_trading_day", "demo": demo, "prob_up": round(pu, 3),
-        "signal": "買進" if pu > BUY else "賣出／減碼" if pu < SELL else "觀望",
-        "thresholds": {"buy": BUY, "sell": SELL},
-        "missing_layers": [k for k in ("籌碼", "信用", "期貨") if k not in layers.index],
+        "schema_version": 2,
+        "record_type": "index_forecast_snapshot",
+        "asof": three_day_forecast["asof"],
+        "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "demo": demo,
+        "instrument": three_day_forecast["instrument"],
+        "market": {"close": three_day_forecast["base_close"], "close_date": three_day_forecast["asof"]},
+        "forecast": three_day_forecast,
         "data_status": df.attrs.get("data_status", {}),
-        "layers": {k: round(float(v), 3) for k, v in layers.items()},
-        "features": [{"name": k, "contrib": round(float(v), 3)}
-                     for k, v in contrib.reindex(contrib.abs().sort_values(ascending=False).index).items()],
-        "backtest": backtest(prob, fwd),
+        "legacy_direction_model": {
+            "retained_for_research_only": True,
+            "note": "舊版方向分類器不再作為首頁預測；歷史原始輸出另存於 signals_legacy_v1.json。",
+            "backtest": backtest(prob, fwd),
+        },
     }
     tmp = "signals.json.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False)
         f.flush(); os.fsync(f.fileno())
     os.replace(tmp, "signals.json")
-    print(f"{out['asof']}  三日點位預測狀態：{three_day_forecast['status']}")
+    print(f"{out['asof']}  三日點位預測狀態：{three_day_forecast['status']}（歷史樣本外 {len(forecast_history)} 筆）")
     X5, y5, f5 = build(df, chips, margin, h=5, futures=futures)
     p5, l5, c5 = walk_forward(X5, y5, h=5)
     tmp = "weekly_prob.csv.tmp"
