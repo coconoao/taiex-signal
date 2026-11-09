@@ -93,6 +93,20 @@ class EventMonitorTests(unittest.TestCase):
         self.assertEqual(merged[0]["timestamps"]["forecast_eligible_at_utc"], "2026-11-09T23:00:00Z")
         self.assertEqual(merged[0]["timestamps"]["last_seen_at_utc"], "2026-11-10T03:30:00Z")
 
+    def test_material_source_update_preserves_prior_version(self):
+        first = event_monitor.build_event(self.item(), self.watchlist, self.now)
+        revised_item = self.item(description="Updated White House release with additional policy detail.")
+        revised = event_monitor.build_event(
+            revised_item, self.watchlist, self.now + dt.timedelta(hours=2)
+        )
+        merged = event_monitor.merge_history([first], [revised])
+        versions = sorted(row["version"] for row in merged)
+        self.assertEqual(versions, [1, 2])
+        latest = next(row for row in merged if row["version"] == 2)
+        self.assertTrue(latest["classification"]["is_material_update"])
+        self.assertEqual(latest["classification"]["supersedes_event_version"], 1)
+        self.assertEqual(latest["timestamps"]["first_seen_at_utc"], "2026-11-10T00:30:00Z")
+
     def test_run_writes_local_research_jsonl_only(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
