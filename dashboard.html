@@ -379,22 +379,24 @@ function renderDaily(d) {
   const horizons = forecast.horizons || {};
   const labels = [["1","第 1 個交易日（D+1）"],["2","第 2 個交易日（D+2）"],["3","第 3 個交易日（D+3）"]];
   let previous = Number(forecast.base_close);
+  let previousAvailable = Number.isFinite(previous) && previous > 0;
   const cards = labels.map(([key,label]) => {
     const item = horizons[key] || {};
     if (item.status !== "research" || !Number.isFinite(Number(item.forecast_close))) {
       return `<article class="forecast-card"><b>${label}</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ${Number(item.training_samples || 0).toLocaleString("zh-TW")}／至少 120</p></article>`;
     }
     const point = Number(item.forecast_close);
-    const delta = point - previous;
-    const change = previous > 0 ? delta / previous * 100 : 0;
-    const color = delta > 0 ? "var(--up)" : delta < 0 ? "var(--down)" : "var(--hold)";
+    const delta = previousAvailable ? point - previous : null;
+    const change = previousAvailable ? delta / previous * 100 : null;
+    const color = !previousAvailable ? "var(--hold)" : delta > 0 ? "var(--up)" : delta < 0 ? "var(--down)" : "var(--hold)";
     const sign = delta > 0 ? "+" : "";
-    const changeText = delta > 0 ? "上漲" : delta < 0 ? "下跌" : "持平";
+    const changeText = !previousAvailable ? "前一日估計不足，暫無比較" : delta > 0 ? "上漲" : delta < 0 ? "下跌" : "持平";
     const mae = item.mae_points == null ? "樣本不足" : Number(item.mae_points).toLocaleString("zh-TW") + " 點";
     const hit = item.within_0_2_pct_pct == null ? "樣本不足" : Number(item.within_0_2_pct_pct).toFixed(1) + "%";
     const baselineMae = item.flat_baseline_mae_points == null ? "—" : Number(item.flat_baseline_mae_points).toLocaleString("zh-TW") + " 點";
-    const card = `<article class="forecast-card"><b>${label}</b><div class="forecast-value" style="color:${color}">${Math.round(point).toLocaleString("zh-TW")} 點</div><div class="forecast-change" style="color:${color}">${changeText} ${sign}${delta.toFixed(0)} 點（${sign}${change.toFixed(2)}%）</div><div class="forecast-meta">樣本外 MAE ${mae}（持平基準 ${baselineMae}）｜±0.2% 命中率 ${hit}｜訓練樣本 ${Number(item.training_samples || 0).toLocaleString("zh-TW")}</div></article>`;
+    const card = `<article class="forecast-card"><b>${label}</b><div class="forecast-value" style="color:${color}">${Math.round(point).toLocaleString("zh-TW")} 點</div><div class="forecast-change" style="color:${color}">${previousAvailable ? changeText + " " + sign + delta.toFixed(0) + " 點（" + sign + change.toFixed(2) + "%）" : changeText}</div><div class="forecast-meta">樣本外 MAE ${mae}（持平基準 ${baselineMae}）｜±0.2% 命中率 ${hit}｜訓練樣本 ${Number(item.training_samples || 0).toLocaleString("zh-TW")}</div></article>`;
     previous = point;
+    previousAvailable = true;
     return card;
   }).join("");
   $("threeDayForecast").innerHTML = cards || '<p class="note">目前沒有可用的三日預測資料。</p>';
