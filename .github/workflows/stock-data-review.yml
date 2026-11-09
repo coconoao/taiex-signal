@@ -60,7 +60,7 @@ jobs:
           import json
           from pathlib import Path
           diff = Path("pr_diff.txt").read_text(encoding="utf-8", errors="replace")
-          limit = 45000
+          limit = 90000
           if len(diff) > limit:
               diff = diff[:limit] + "\n[DIFF TRUNCATED; do not assume omitted changes are safe.]"
           prompt = """你是資深軟體工程師，請以繁體中文審查以下個股資料擷取可靠性修正。
