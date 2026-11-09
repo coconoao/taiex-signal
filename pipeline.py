@@ -1485,7 +1485,7 @@ if __name__ == "__main__":
         json.dump(out, f, ensure_ascii=False)
         f.flush(); os.fsync(f.fileno())
     os.replace(tmp, "signals.json")
-    print(f"{out['asof']}  隔日上漲機率 {pu:.1%}  訊號：{out['signal']}")
+    print(f"{out['asof']}  三日點位預測狀態：{three_day_forecast['status']}")
     X5, y5, f5 = build(df, chips, margin, h=5, futures=futures)
     p5, l5, c5 = walk_forward(X5, y5, h=5)
     tmp = "weekly_prob.csv.tmp"
