@@ -105,6 +105,44 @@ class TestTaiwanMarketData(unittest.TestCase):
         )
         self.assertNotIn("2330", caught.exception.diagnostic_code)
 
+    def test_request_json_uses_bounded_socket_timeout(self):
+        error = __import__("urllib.error").error.URLError(TimeoutError("timed out"))
+        with patch.object(
+            tw_market_data.urllib.request, "urlopen", side_effect=error
+        ) as open_url:
+            with self.assertRaises(tw_market_data.MarketDataError):
+                tw_market_data._request_json(
+                    "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
+                )
+        self.assertEqual(open_url.call_args.kwargs["timeout"], 8)
+
+    def test_exchange_probe_checks_only_latest_month_per_provider(self):
+        months = [
+            dt.date(2026, 9, 1),
+            dt.date(2026, 10, 1),
+            dt.date(2026, 11, 1),
+        ]
+        timeout = tw_market_data.MarketDataError(
+            "timeout", diagnostic_code="twse_timeout"
+        )
+        tpex_timeout = tw_market_data.MarketDataError(
+            "timeout", diagnostic_code="tpex_timeout"
+        )
+        with (
+            patch.object(
+                tw_market_data, "_twse_month", side_effect=timeout
+            ) as twse_mock,
+            patch.object(
+                tw_market_data, "_tpex_month", side_effect=tpex_timeout
+            ) as tpex_mock,
+        ):
+            with self.assertRaises(tw_market_data.MarketDataError):
+                tw_market_data._identify_exchange("2330", None, months)
+        self.assertEqual(twse_mock.call_count, 1)
+        self.assertEqual(tpex_mock.call_count, 1)
+        self.assertEqual(twse_mock.call_args.args[1], dt.date(2026, 11, 1))
+        self.assertEqual(tpex_mock.call_args.args[1], dt.date(2026, 11, 1))
+
     def test_exchange_probe_preserves_safe_provider_failure_categories(self):
         def twse_failure(*args):
             raise tw_market_data.MarketDataError(
