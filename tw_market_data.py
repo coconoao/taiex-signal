@@ -41,8 +41,11 @@ _CACHE_TTL_SECONDS = 4 * 60 * 60
 
 def _request_json(url: str) -> dict:
     request = urllib.request.Request(url, headers=_HEADERS)
+    original_host = urllib.parse.urlparse(url).hostname
     last_error = None
-    for attempt in range(2):
+    redirect_count = 0
+    attempt = 0
+    while attempt < 2:
         try:
             with urllib.request.urlopen(request, timeout=18) as response:
                 payload = response.read()
@@ -58,9 +61,26 @@ def _request_json(url: str) -> dict:
         except Exception as exc:
             last_error = exc
             code = getattr(exc, "code", None)
+            if code == 308:
+                # urllib's default redirect handler does not follow HTTP 308.
+                # Follow only HTTPS redirects that stay on the original,
+                # allowlisted exchange host; never forward requests elsewhere.
+                location = getattr(exc, "headers", {}).get("Location")
+                target = urllib.parse.urljoin(request.full_url, location or "")
+                target_parts = urllib.parse.urlparse(target)
+                if (
+                    location
+                    and redirect_count < 3
+                    and target_parts.scheme == "https"
+                    and target_parts.hostname == original_host
+                ):
+                    request = urllib.request.Request(target, headers=_HEADERS)
+                    redirect_count += 1
+                    continue
             if code in (401, 403):
                 break
             if attempt == 0 and (code == 429 or (code and code >= 500)):
+                attempt += 1
                 time.sleep(1.0)
                 continue
             break
