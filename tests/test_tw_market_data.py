@@ -167,6 +167,11 @@ class TestTaiwanMarketData(unittest.TestCase):
         self.assertIsNone(tw_market_data._number("X0.00"))
         self.assertIsNone(tw_market_data._number("--"))
 
+    def test_number_rejects_non_finite_values(self):
+        self.assertIsNone(tw_market_data._number("nan"))
+        self.assertIsNone(tw_market_data._number("inf"))
+        self.assertIsNone(tw_market_data._number("-inf"))
+
     def test_adjusted_close_uses_exchange_reference_price_change(self):
         rows = [
             {"date": dt.date(2026, 1, 2), "raw_close": 100.0, "change": 0.0,
@@ -383,11 +388,11 @@ class TestTaiwanMarketData(unittest.TestCase):
             patch.object(tw_market_data, "_tpex_month") as tpex,
         ):
             source, fetcher = tw_market_data._identify_exchange("1234", None, months)
+            self.assertIs(fetcher, twse)
+            self.assertEqual(twse.call_count, 2)
+            self.assertEqual(twse.call_args_list[1].args[1], dt.date(2026, 10, 1))
+            tpex.assert_not_called()
         self.assertEqual(source, "TWSE")
-        self.assertIs(fetcher, tw_market_data._twse_month)
-        self.assertEqual(twse.call_count, 2)
-        self.assertEqual(twse.call_args_list[1].args[1], dt.date(2026, 10, 1))
-        tpex.assert_not_called()
 
     def test_tpex_month_reads_data_from_later_table(self):
         payload = {
