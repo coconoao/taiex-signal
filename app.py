@@ -510,6 +510,40 @@ def _twse_last_close_quote():
     }
 
 
+def _yahoo_last_close_quote():
+    """Return recent Yahoo TAIEX daily closes as a labelled, non-real-time fallback."""
+    import pandas as pd
+    import yfinance as yf
+
+    raw = yf.download("^TWII", period="10d", interval="1d",
+                      auto_adjust=False, progress=False, threads=False, timeout=12)
+    if raw is None or raw.empty:
+        return None
+    close = raw["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    close = close.dropna()
+    if len(close) < 2:
+        return None
+    latest_stamp, previous_stamp = close.index[-1], close.index[-2]
+    latest_day = latest_stamp.date()
+    now = dt.datetime.now(TZ)
+    if latest_day > now.date() or (now.date() - latest_day).days > 10:
+        return None
+    latest, previous = float(close.iloc[-1]), float(close.iloc[-2])
+    if not (1000 <= latest <= 100000 and 1000 <= previous <= 100000):
+        return None
+    change = latest - previous
+    return {
+        "last": round(latest, 2), "change": round(change, 2),
+        "pct": round(change / previous * 100, 2),
+        "time": latest_day.isoformat(), "market": "spot_close",
+        "label": "加權指數最近收盤（Yahoo）",
+        "source": "Yahoo Finance 日線資料（非即時）",
+        "delay_note": "官方 TWSE 收盤來源暫不可用；此數值為最近已完成交易日收盤"
+    }
+
+
 def quote():
     # Intraday Yahoo quotes are attempted first; official TWSE daily close is the
     # safe fallback and is never presented as a live/intraday value.
@@ -540,7 +574,15 @@ def quote():
     if fallback:
         QUOTE.update(t=time.time(), v=fallback)
         return fallback
-    raise RuntimeError("Yahoo 即時行情與 TWSE 官方日收盤備援目前都無法取得資料")
+    try:
+        fallback = _yahoo_last_close_quote()
+    except Exception as exc:
+        print(f"Yahoo 加權指數日收盤備援暫不可用：{type(exc).__name__}", flush=True)
+        fallback = None
+    if fallback:
+        QUOTE.update(t=time.time(), v=fallback)
+        return fallback
+    raise RuntimeError("Yahoo 即時行情、TWSE 官方日收盤與 Yahoo 日收盤備援目前都無法取得資料")
 
 def us_market_quote():
     """美股最新可取得的 5 分鐘行情；Yahoo 非官方資料，可能延遲或缺漏，快取 60 秒。"""
