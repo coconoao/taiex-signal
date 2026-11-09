@@ -4,3 +4,4 @@ scikit-learn
 yfinance
 lxml
 tzdata
+curl_cffi>=0.17.0
