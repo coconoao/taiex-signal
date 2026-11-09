@@ -1,0 +1,438 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TAIEX Signal event record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "cluster_id",
+    "version",
+    "headline",
+    "source",
+    "timestamps",
+    "evidence",
+    "event_type",
+    "classification",
+    "taiwan_impact",
+    "extraction"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "event-record-v1"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cluster_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "headline": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "summary_factual": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "domain",
+        "url",
+        "source_class"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "source_class": {
+          "enum": [
+            "official_government",
+            "official_company",
+            "public_figure_statement",
+            "news_wire",
+            "news_media",
+            "aggregator",
+            "research_database",
+            "other"
+          ]
+        },
+        "source_item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "timestamps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "published_at_raw",
+        "published_at_utc",
+        "first_seen_at_utc",
+        "last_seen_at_utc",
+        "forecast_eligible_at_utc",
+        "timestamp_quality"
+      ],
+      "properties": {
+        "event_time_raw": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "published_at_raw": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "published_timezone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "published_at_utc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "first_seen_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_seen_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "forecast_eligible_at_utc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "timestamp_quality": {
+          "enum": [
+            "source_timestamp_verified",
+            "source_timestamp_unzoned",
+            "crawl_time_only",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entity_id",
+          "name",
+          "entity_type"
+        ],
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "entity_type": {
+            "enum": [
+              "person",
+              "role",
+              "company",
+              "government",
+              "agency",
+              "country",
+              "organization",
+              "product",
+              "other"
+            ]
+          },
+          "match_method": {
+            "enum": [
+              "exact_alias",
+              "official_account",
+              "contextual",
+              "human_verified",
+              "unknown"
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "event_type": {
+      "enum": [
+        "policy_trade",
+        "monetary_macro",
+        "geopolitics",
+        "semiconductor_ai",
+        "corporate",
+        "market_structure",
+        "shock",
+        "other"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "attribution",
+        "review_required",
+        "review_status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "official_confirmed",
+            "corroborated_reporting",
+            "single_source_reporting",
+            "allegation",
+            "unverified_claim",
+            "opinion_or_analysis",
+            "corrected",
+            "retracted",
+            "unknown"
+          ]
+        },
+        "attribution": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "supporting_source_urls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "contradicting_source_urls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "review_required": {
+          "type": "boolean"
+        },
+        "review_status": {
+          "enum": [
+            "not_reviewed",
+            "reviewed",
+            "rejected",
+            "needs_followup"
+          ]
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "topics",
+        "novelty",
+        "duplicate_cluster_confidence",
+        "is_material_update"
+      ],
+      "properties": {
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "novelty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "duplicate_cluster_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "is_material_update": {
+          "type": "boolean"
+        },
+        "supersedes_event_version": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "taiwan_impact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relevance",
+        "transmission_channels",
+        "affected_sectors",
+        "direction_scenario",
+        "horizon_sessions",
+        "volatility_potential",
+        "confidence"
+      ],
+      "properties": {
+        "relevance": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "none",
+            "unknown"
+          ]
+        },
+        "transmission_channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "affected_sectors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "direction_scenario": {
+          "enum": [
+            "positive",
+            "negative",
+            "mixed",
+            "unknown"
+          ]
+        },
+        "horizon_sessions": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "volatility_potential": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1000
+        }
+      }
+    },
+    "extraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "model_name",
+        "model_version",
+        "extracted_at_utc"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "rules",
+            "llm",
+            "human",
+            "hybrid"
+          ]
+        },
+        "model_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extracted_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "raw_content_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "correction_notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}
