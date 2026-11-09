@@ -87,7 +87,9 @@ def _fetch_twse_taiex_recent(now, calendar_days=7):
     start_day = end_day - pd.Timedelta(days=calendar_days)
     days = pd.bdate_range(start_day, end_day)
     rows = {}
-    for day in days:
+    # Probe the newest trading dates first. A transient upstream failure on an
+    # older date must not prevent us from seeing today's newly published close.
+    for day in reversed(days):
         try:
             value = _fetch_twse_taiex_day(day)
             if value is not None:
