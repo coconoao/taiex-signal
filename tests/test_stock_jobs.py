@@ -73,6 +73,32 @@ class SiteStockJobTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
         self.assertIn("/analysis-jobs/" + "B" * 24, request.full_url)
 
+    def test_completed_remote_failure_persists_failed_state(self):
+        site_id = "C" * 24
+        with web_app._SITE_STOCK_JOB_LOCK:
+            web_app._SITE_STOCK_JOBS[site_id] = {
+                "state": "running",
+                "remote_id": "D" * 24,
+                "created_at": web_app.time.time(),
+            }
+        response = io.BytesIO(json.dumps({
+            "state": "completed",
+            "analysis_http_status": 503,
+            "result": {"error": "upstream unavailable"},
+        }).encode("utf-8"))
+        with patch.multiple(
+            web_app,
+            STOCK_WORKER_URL="https://worker.example",
+            STOCK_WORKER_TOKEN="test-token",
+        ), patch.object(web_app.urllib.request, "urlopen", return_value=response):
+            payload, status = web_app.get_site_stock_job(site_id)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["state"], "failed")
+        self.assertEqual(payload["error"], "upstream unavailable")
+        self.assertEqual(web_app._SITE_STOCK_JOBS[site_id]["state"], "failed")
+        self.assertEqual(web_app._SITE_STOCK_JOBS[site_id]["error"], "upstream unavailable")
+        self.assertIn("finished_at", web_app._SITE_STOCK_JOBS[site_id])
+
     def test_worker_start_failure_marks_site_job_failed(self):
         site_id = "A" * 24
         with web_app._SITE_STOCK_JOB_LOCK:
