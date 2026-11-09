@@ -83,6 +83,10 @@ def _prune_jobs_locked(now=None):
 
 
 def _run_analysis_job(job_id, code):
+    with _JOB_LOCK:
+        job = _JOBS.get(job_id)
+        if job is not None:
+            job["state"] = "running"
     result, status = analyze_code(code)
     with _JOB_LOCK:
         job = _JOBS.get(job_id)
