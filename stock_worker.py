@@ -12,6 +12,7 @@ from tw_market_data import MarketDataError
 
 TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
 MAX_BODY = 4096
+DIAGNOSTICS_UI_ENABLED = os.environ.get("STAGING_DIAGNOSTICS_UI", "").lower() == "true"
 _SAFE_DIAGNOSTIC = re.compile(
     r"(?:no_recent_history|provider_invalid_json_shape|provider_error|"
     r"(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_invalid_json_shape|provider_error)|"
@@ -69,6 +70,41 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
+        if self.path == "/diagnostics" and DIAGNOSTICS_UI_ENABLED:
+            page = """<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Worker staging test</title>
+<style>body{font:16px system-ui;max-width:640px;margin:32px auto;padding:0 16px}input,button{box-sizing:border-box;width:100%;padding:12px;margin:8px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f4f4;padding:12px}</style>
+<h2>Staging 個股資料連線測試</h2>
+<p>Token 僅在本頁記憶體中使用，不會儲存或顯示在網址。</p>
+<label>Staging Bearer Token<input id="token" type="password" autocomplete="off" autocapitalize="off"></label>
+<label>股票代號<input id="code" value="2330" inputmode="numeric"></label>
+<button id="run">開始測試</button><pre id="result">尚未測試</pre>
+<script>
+document.getElementById("run").addEventListener("click",async()=>{
+ const token=document.getElementById("token").value;
+ const code=document.getElementById("code").value.trim();
+ const out=document.getElementById("result");
+ if(!token){out.textContent="請輸入 staging token";return}
+ out.textContent="測試中，請稍候…";
+ try{
+  const response=await fetch("/analyze",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({code})});
+  const body=await response.json();
+  out.textContent="HTTP "+response.status+"\\n"+JSON.stringify(body,null,2);
+ }catch(e){out.textContent="連線失敗："+e.name}
+});
+</script></html>"""
+            raw = page.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         if self.path == "/healthz":
             return self._json({"ok": True, "service": "stock-worker"})
         return self._json({"error": "not found"}, 404)
