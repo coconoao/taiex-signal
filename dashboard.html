@@ -372,21 +372,21 @@ function drawCurve(c) {
 }
 
 function renderDaily(d) {
-  $("meta").textContent = \`台股最近可用交易日：\${d.asof}。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。\`;
+  $("meta").textContent = "台股最近可用交易日：" + d.asof + "。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。";
   $("demo").hidden = !d.demo;
   $("miss").hidden = true;
   const forecast = d.forecast || {};
   const sessions = Array.isArray(forecast.sessions) ? forecast.sessions : [];
   if (Number(d.schema_version || 0) < 2 || !sessions.length || !Number.isFinite(Number(forecast.base_close))) {
-    $("threeDayMeta").textContent = \`資料日期 \${d.asof}｜三日點位模型尚未完成資料轉換或首次回補。\`;
+    $("threeDayMeta").textContent = "資料日期 " + d.asof + "｜三日點位模型尚未完成資料轉換或首次回補。";
     $("threeDayForecast").innerHTML = '<p class="note">正在整理舊行情並建立三日歷史樣本外資料；完成後會顯示三個交易日的預估點位。</p>';
     return;
   }
   const cards = [1,2,3].map(h => {
     const item = sessions.find(x => Number(x.horizon_sessions) === h) || {};
-    const label = item.target_date ? \`第 \${h} 個交易日（\${item.target_date}）\` : \`第 \${h} 個交易日（D+\${h}）\`;
+    const label = item.target_date ? "第 " + h + " 個交易日（" + item.target_date + "）" : "第 " + h + " 個交易日（D+" + h + "）";
     if (item.status !== "research" || !Number.isFinite(Number(item.forecast_close))) {
-      return \`<article class="forecast-card"><b>\${label}</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 \${Number(item.training_samples || 0).toLocaleString("zh-TW")}／至少 120</p></article>\`;
+      return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '／至少 120</p></article>';
     }
     const point = Number(item.forecast_close);
     const comparison = item.change_vs_previous || null;
@@ -395,15 +395,15 @@ function renderDaily(d) {
     const sign = comparison && Number(comparison.points) > 0 ? "+" : "";
     const changeText = !comparison ? "前一日估計不足，暫無比較" :
       direction === "up" ? "上漲" : direction === "down" ? "下跌" : "持平";
-    const change = comparison ? \`\${changeText} \${sign}\${Number(comparison.points).toFixed(0)} 點（\${sign}\${Number(comparison.pct).toFixed(2)}%）\` : changeText;
+    const change = comparison ? changeText + " " + sign + Number(comparison.points).toFixed(0) + " 點（" + sign + Number(comparison.pct).toFixed(2) + "%）" : changeText;
     const validation = item.validation || {};
     const mae = validation.mae_points == null ? "樣本不足" : Number(validation.mae_points).toLocaleString("zh-TW") + " 點";
     const hit = validation.within_0_2_pct_pct == null ? "樣本不足" : Number(validation.within_0_2_pct_pct).toFixed(1) + "%";
     const baselineMae = validation.flat_baseline_mae_points == null ? "—" : Number(validation.flat_baseline_mae_points).toLocaleString("zh-TW") + " 點";
-    return \`<article class="forecast-card"><b>\${label}</b><div class="forecast-value" style="color:\${color}">\${Math.round(point).toLocaleString("zh-TW")} 點</div><div class="forecast-change" style="color:\${color}">\${change}</div><div class="forecast-meta">樣本外 MAE \${mae}（持平基準 \${baselineMae}）｜±0.2% 命中率 \${hit}｜訓練樣本 \${Number(item.training_samples || 0).toLocaleString("zh-TW")}</div></article>\`;
+    return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + change + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.2% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
   }).join("");
   $("threeDayForecast").innerHTML = cards || '<p class="note">目前沒有可用的三日預測資料。</p>';
-  $("threeDayMeta").textContent = \`基準收盤 \${Number(forecast.base_close).toLocaleString("zh-TW")} 點｜資料日期 \${forecast.asof || d.asof}｜模型：\${forecast.model_version || "direct-horizon"}（研究中）\`;
+  $("threeDayMeta").textContent = "基準收盤 " + Number(forecast.base_close).toLocaleString("zh-TW") + " 點｜資料日期 " + (forecast.asof || d.asof) + "｜模型：" + (forecast.model_version || "direct-horizon") + "（研究中）";
 }
 function renderWeekly(w) {
   const hh = w.horizon_history || {};
