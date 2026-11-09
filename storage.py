@@ -183,8 +183,13 @@ def migrate_legacy_signals_v2(directory="."):
         "demo": bool(old.get("demo", False)) if isinstance(old, dict) else False,
         "instrument": {"symbol": "TAIEX", "name": "臺灣加權股價指數", "unit": "index_points"},
         "forecast": {
+            "schema_version": 2,
+            "record_type": "index_forecast_snapshot",
             "status": "pending_backfill",
             "method": "direct_horizon_ridge",
+            "model_version": "ridge-direct-3session-v2",
+            "instrument": {"symbol": "TAIEX", "name": "臺灣加權股價指數", "unit": "index_points"},
+            "asof": old.get("asof") if isinstance(old, dict) else None,
             "horizon_unit": "trading_sessions",
             "base_close": None,
             "sessions": [],
