@@ -13,6 +13,8 @@ on:
           - "90"
         default: "90"
   push:
+    branches:
+      - main
     paths:
       - ".github/workflows/backfill-news-history.yml"
 
@@ -25,6 +27,7 @@ concurrency:
 
 jobs:
   backfill:
+    if: github.ref == 'refs/heads/main'
     # A change to this workflow file launches one 90-day bootstrap run.
     runs-on: ubuntu-24.04
     timeout-minutes: 60
