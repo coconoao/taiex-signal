@@ -38,6 +38,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Restore previous data
         run: python storage.py restore
+      - name: Migrate legacy market and forecast data to schema v2
+        run: python storage.py migrate-v2
       - name: Refresh Taiwan market pipeline
         run: python pipeline.py
         # Keep persistence and news refresh running if model training lacks enough complete samples.
