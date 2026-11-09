@@ -1,0 +1,123 @@
+name: Staging stock-analysis smoke test
+
+on:
+  pull_request:
+    branches: [worker-production]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-smoke-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    # Keep the staging credential away from forked PRs and unrelated pull requests.
+    if: github.event.pull_request.number == 50 && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check whether the staging secret is configured
+        id: credential
+        shell: bash
+        env:
+          STAGING_WORKER_TOKEN: ${{ secrets.STAGING_WORKER_TOKEN }}
+        run: |
+          if [[ -z "$STAGING_WORKER_TOKEN" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Add STAGING_WORKER_TOKEN in repository Settings > Secrets and variables > Actions, then re-run this workflow."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Staging credential is configured."
+          fi
+
+      - name: Run 2330 staging analysis
+        if: steps.credential.outputs.configured == 'true'
+        env:
+          STAGING_WORKER_URL: https://taiex-stock-worker-oregon-test.onrender.com
+          STAGING_WORKER_TOKEN: ${{ secrets.STAGING_WORKER_TOKEN }}
+          STOCK_CODE: "2330"
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          base = os.environ["STAGING_WORKER_URL"].rstrip("/")
+          token = os.environ["STAGING_WORKER_TOKEN"]
+          code = os.environ.get("STOCK_CODE", "2330")
+
+          def request_json(path, payload=None):
+              data = None if payload is None else json.dumps(payload).encode("utf-8")
+              headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+              if data is not None:
+                  headers["Content-Type"] = "application/json"
+              request = urllib.request.Request(base + path, data=data, headers=headers)
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      raw = response.read()
+                      return response.status, json.loads(raw.decode("utf-8"))
+              except urllib.error.HTTPError as exc:
+                  raw = exc.read()
+                  try:
+                      body = json.loads(raw.decode("utf-8"))
+                  except Exception:
+                      body = {}
+                  raise RuntimeError("HTTP " + str(exc.code) + ": " + str(body.get("error", "request failed")))
+
+          # Health check is public and does not transmit the credential.
+          health_request = urllib.request.Request(base + "/healthz", headers={"Accept": "application/json"})
+          with urllib.request.urlopen(health_request, timeout=20) as response:
+              if response.status != 200:
+                  raise SystemExit("Staging health check failed: HTTP " + str(response.status))
+              print("Staging health check: passed")
+
+          status, created = request_json("/analysis-jobs", {"code": code})
+          job_id = created.get("job_id")
+          if status != 202 or not job_id:
+              raise SystemExit("Could not create analysis job: HTTP " + str(status))
+
+          print("Analysis job accepted for " + code + "; polling every 3 seconds.")
+          deadline = time.monotonic() + 540
+          while time.monotonic() < deadline:
+              time.sleep(3)
+              status, result = request_json("/analysis-jobs/" + job_id)
+              if status == 202:
+                  print("Analysis still running.")
+                  continue
+              if status != 200 or result.get("state") != "completed":
+                  raise SystemExit("Unexpected job response: HTTP " + str(status))
+
+              analysis_status = int(result.get("analysis_http_status", 500))
+              data = result.get("result") or {}
+              if analysis_status >= 400:
+                  print("Analysis failed: HTTP " + str(analysis_status))
+                  print("Reason: " + str(data.get("error", "No safe error detail returned")))
+                  raise SystemExit(1)
+
+              print("Analysis completed: HTTP " + str(analysis_status))
+              for key, label in (
+                  ("code", "Symbol"),
+                  ("asof", "Data date"),
+                  ("last", "Latest close"),
+                  ("market_data_source", "Market data source"),
+                  ("history_sessions", "History sessions"),
+              ):
+                  value = data.get(key)
+                  print(label + ": " + (str(value) if value is not None else "not supplied"))
+
+              horizons = (data.get("long_term_model") or {}).get("horizons") or {}
+              for horizon in ("1m", "3m", "6m"):
+                  item = horizons.get(horizon) or {}
+                  print(horizon + " model status: " + str(item.get("status", "unavailable")))
+              print("Disclaimer: research output only; not a trading instruction.")
+              sys.exit(0)
+
+          raise SystemExit("Analysis job did not finish within 9 minutes.")
+          PY

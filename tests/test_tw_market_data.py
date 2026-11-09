@@ -7,25 +7,20 @@ import tw_market_data
 
 class TestTaiwanMarketData(unittest.TestCase):
     def test_request_json_logs_safe_network_diagnostic(self):
-        error = __import__("urllib.error").error.URLError(
-            OSError(101, "Network is unreachable")
-        )
-        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+        error = OSError(101, "Network is unreachable")
+        with patch.object(tw_market_data.curl_requests, "get", side_effect=error):
             with self.assertRaisesRegex(
                 tw_market_data.MarketDataError,
-                r"twse\.com\.tw URLError/OSError\(errno=101\)",
+                r"twse\.com\.tw OSError\(errno=101\)",
             ):
                 tw_market_data._request_json(
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
                 )
 
     def test_request_json_preserves_http_status_in_safe_diagnostic(self):
-        from urllib.error import HTTPError
-        error = HTTPError(
-            "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330",
-            403, "Forbidden", {}, None,
-        )
-        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+        from types import SimpleNamespace
+        response = SimpleNamespace(status_code=403, headers={}, content=b"")
+        with patch.object(tw_market_data.curl_requests, "get", return_value=response):
             with self.assertRaisesRegex(
                 tw_market_data.MarketDataError,
                 r"twse\.com\.tw HTTPError\(http=403\)",
@@ -34,19 +29,56 @@ class TestTaiwanMarketData(unittest.TestCase):
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
                 )
 
-    def test_request_json_attaches_safe_http_diagnostic_code(self):
-        from urllib.error import HTTPError
-        error = HTTPError(
-            "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=SECRET",
-            403, "Forbidden", {}, None,
+    def test_request_json_follows_same_host_https_308_redirect(self):
+        from types import SimpleNamespace
+        redirect = SimpleNamespace(status_code=308, headers={"Location": "/new-path"}, content=b"")
+        response = SimpleNamespace(status_code=200, headers={}, content=b'{"stat":"OK","data":[]}')
+        with patch.object(
+            tw_market_data.curl_requests, "get",
+            side_effect=[redirect, response],
+        ) as get:
+            payload = tw_market_data._request_json("https://www.twse.com.tw/old-path")
+        self.assertEqual(payload, {"stat": "OK", "data": []})
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args_list[1].args[0], "https://www.twse.com.tw/new-path")
+        self.assertEqual(get.call_args_list[1].kwargs["impersonate"], "chrome")
+
+    def test_request_json_rejects_cross_host_308_redirect(self):
+        from types import SimpleNamespace
+        redirect = SimpleNamespace(
+            status_code=308,
+            headers={"Location": "https://attacker.example/new-path"},
+            content=b"",
         )
-        with patch.object(tw_market_data.urllib.request, "urlopen", side_effect=error):
+        with patch.object(
+            tw_market_data.curl_requests, "get", return_value=redirect
+        ) as get:
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data._request_json("https://www.twse.com.tw/old-path")
+        self.assertEqual(caught.exception.diagnostic_code, "twse_http_308")
+        self.assertEqual(get.call_count, 1)
+
+    def test_request_json_attaches_safe_http_diagnostic_code(self):
+        from types import SimpleNamespace
+        response = SimpleNamespace(status_code=403, headers={}, content=b"")
+        with patch.object(tw_market_data.curl_requests, "get", return_value=response):
             with self.assertRaises(tw_market_data.MarketDataError) as caught:
                 tw_market_data._request_json(
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=SECRET"
                 )
         self.assertEqual(caught.exception.diagnostic_code, "twse_http_403")
         self.assertNotIn("SECRET", caught.exception.diagnostic_code)
+
+    def test_request_json_uses_bounded_socket_timeout_and_chrome_impersonation(self):
+        response = type("Response", (), {"status_code": 200, "headers": {}, "content": b'{"ok":true}'})()
+        with patch.object(tw_market_data.curl_requests, "get", return_value=response) as get:
+            self.assertEqual(
+                tw_market_data._request_json("https://www.twse.com.tw/test"),
+                {"ok": True},
+            )
+        self.assertEqual(get.call_args.kwargs["timeout"], 15)
+        self.assertEqual(get.call_args.kwargs["impersonate"], "chrome")
+        self.assertFalse(get.call_args.kwargs["allow_redirects"])
 
     def test_fetch_months_preserves_provider_diagnostic_category(self):
         def fail(*args):
@@ -62,6 +94,33 @@ class TestTaiwanMarketData(unittest.TestCase):
         )
         self.assertNotIn("2330", caught.exception.diagnostic_code)
 
+    def test_exchange_probe_checks_only_latest_month_per_provider(self):
+        months = [
+            dt.date(2026, 9, 1),
+            dt.date(2026, 10, 1),
+            dt.date(2026, 11, 1),
+        ]
+        timeout = tw_market_data.MarketDataError(
+            "timeout", diagnostic_code="twse_timeout"
+        )
+        tpex_timeout = tw_market_data.MarketDataError(
+            "timeout", diagnostic_code="tpex_timeout"
+        )
+        with (
+            patch.object(
+                tw_market_data, "_twse_month", side_effect=timeout
+            ) as twse_mock,
+            patch.object(
+                tw_market_data, "_tpex_month", side_effect=tpex_timeout
+            ) as tpex_mock,
+        ):
+            with self.assertRaises(tw_market_data.MarketDataError):
+                tw_market_data._identify_exchange("2330", None, months)
+        self.assertEqual(twse_mock.call_count, 1)
+        self.assertEqual(tpex_mock.call_count, 1)
+        self.assertEqual(twse_mock.call_args.args[1], dt.date(2026, 11, 1))
+        self.assertEqual(tpex_mock.call_args.args[1], dt.date(2026, 11, 1))
+
     def test_exchange_probe_preserves_safe_provider_failure_categories(self):
         def twse_failure(*args):
             raise tw_market_data.MarketDataError(
@@ -75,11 +134,13 @@ class TestTaiwanMarketData(unittest.TestCase):
 
         months = [dt.date(2026, 9, 1), dt.date(2026, 10, 1), dt.date(2026, 11, 1)]
         with (
-            patch.object(tw_market_data, "_twse_month", side_effect=twse_failure),
-            patch.object(tw_market_data, "_tpex_month", side_effect=tpex_failure),
+            patch.object(tw_market_data, "_twse_month", side_effect=twse_failure) as twse_mock,
+            patch.object(tw_market_data, "_tpex_month", side_effect=tpex_failure) as tpex_mock,
         ):
             with self.assertRaises(tw_market_data.MarketDataError) as caught:
                 tw_market_data._identify_exchange("2330", None, months)
+        self.assertEqual(twse_mock.call_count, 1)
+        self.assertEqual(tpex_mock.call_count, 1)
         self.assertIn("twse_http_403", caught.exception.diagnostic_code)
         self.assertIn("tpex_network_errno_101", caught.exception.diagnostic_code)
         self.assertNotIn("2330", caught.exception.diagnostic_code)
