@@ -53,7 +53,7 @@ class StockWorkerRoutingTests(unittest.TestCase):
             web_app,
             STOCK_WORKER_URL="https://worker.example",
             STOCK_WORKER_TOKEN="test-token",
-        ), patch.object(
+        ), patch.object(web_app, "warm_stock_worker"), patch.object(
             web_app.urllib.request,
             "urlopen",
             side_effect=self._worker_http_error(503),
@@ -81,7 +81,7 @@ class StockWorkerRoutingTests(unittest.TestCase):
             web_app,
             STOCK_WORKER_URL="https://worker.example",
             STOCK_WORKER_TOKEN="test-token",
-        ), patch.object(
+        ), patch.object(web_app, "warm_stock_worker"), patch.object(
             web_app.urllib.request,
             "urlopen",
             side_effect=TimeoutError("private timeout detail"),
