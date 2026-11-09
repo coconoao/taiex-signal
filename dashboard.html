@@ -383,6 +383,7 @@ function renderDaily(d) {
   const cards = labels.map(([key,label]) => {
     const item = horizons[key] || {};
     if (item.status !== "research" || !Number.isFinite(Number(item.forecast_close))) {
+      previousAvailable = false;
       return `<article class="forecast-card"><b>${label}</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ${Number(item.training_samples || 0).toLocaleString("zh-TW")}／至少 120</p></article>`;
     }
     const point = Number(item.forecast_close);
