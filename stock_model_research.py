@@ -141,6 +141,19 @@ def _metrics(probability, actual, baseline, horizon=21):
     }
 
 
+def _holdout_passes(metrics):
+    """Require a meaningful untouched holdout that beats the baseline Brier score."""
+    if not isinstance(metrics, dict):
+        return False
+    count = metrics.get("sample_count", 0)
+    skill = metrics.get("brier_skill")
+    return (
+        isinstance(count, int) and count >= 20
+        and isinstance(skill, (int, float))
+        and np.isfinite(skill) and skill > 0
+    )
+
+
 def _fit_calibrator(raw, labels):
     if len(raw) < MIN_CALIBRATION or len(np.unique(labels)) < 2:
         return None
@@ -268,15 +281,7 @@ def _one_horizon(features, close, horizon):
     # A fitted calibrator is not evidence of predictive value. Only expose a
     # probability when the untouched chronological holdout beats the baseline
     # on the proper scoring rule (Brier score).
-    holdout_skill = holdout_metrics.get("brier_skill")
-    holdout_count = int(holdout_metrics.get("sample_count", 0))
-    holdout_passed = (
-        holdout_count >= 20
-        and isinstance(holdout_skill, (int, float))
-        and np.isfinite(holdout_skill)
-        and holdout_skill > 0
-    )
-    estimate_available = calibrated is not None and holdout_passed
+    estimate_available = calibrated is not None and _holdout_passes(holdout_metrics)
 
     return {
         "status": "available" if estimate_available else (
