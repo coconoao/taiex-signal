@@ -29,9 +29,16 @@ class MarketDataError(RuntimeError):
 
 
 _HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; TaiwanMarketResearch/1.0)",
-    "Accept": "application/json,text/plain,*/*",
-    "Referer": "https://www.twse.com.tw/",
+    # Match a normal browser request to the TWSE historical-data page.
+    # Some edge nodes treat generic client headers differently.
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    "Referer": "https://www.twse.com.tw/zh/trading/historical/stock-day.html",
 }
 _CACHE_LOCK = threading.Lock()
 _STOCK_CACHE = {}
