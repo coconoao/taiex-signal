@@ -20,10 +20,34 @@ class GeminiNewsLatencyTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once_with(2)
 
+    def test_post_retries_transient_http_503(self):
+        response = io.BytesIO(b'{"ok": true}')
+        error = news.urllib.error.HTTPError(
+            "https://example.invalid", 503, "Service Unavailable", {}, io.BytesIO(b"")
+        )
+        with (
+            patch.object(news.urllib.request, "urlopen", side_effect=[error, response]) as urlopen,
+            patch.object(news.time, "sleep") as sleep,
+        ):
+            result = news.post("https://example.invalid", {}, {"test": True})
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(2)
+
     def test_post_does_not_retry_non_timeout_url_error(self):
         error = news.urllib.error.URLError("connection refused")
         with patch.object(news.urllib.request, "urlopen", side_effect=error) as urlopen:
             with self.assertRaises(news.urllib.error.URLError):
+                news.post("https://example.invalid", {}, {"test": True})
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_post_does_not_retry_non_transient_http_error(self):
+        error = news.urllib.error.HTTPError(
+            "https://example.invalid", 400, "Bad Request", {}, io.BytesIO(b"")
+        )
+        with patch.object(news.urllib.request, "urlopen", side_effect=error) as urlopen:
+            with self.assertRaises(news.urllib.error.HTTPError):
                 news.post("https://example.invalid", {}, {"test": True})
         self.assertEqual(urlopen.call_count, 1)
 
