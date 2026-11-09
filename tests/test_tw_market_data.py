@@ -617,7 +617,7 @@ class TestTaiwanMarketData(unittest.TestCase):
         month = dt.date(2025, 12, 1)
         clock = iter([
             1000.0, 1000.0, 1000.0,
-            1001.0, 1001.0,
+            1001.0,
             1301.0, 1301.0, 1301.0,
         ])
         with (
