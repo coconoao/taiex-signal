@@ -33,7 +33,9 @@ class FourYearResearchFeasibilityTests(unittest.TestCase):
         for horizon in ("1m", "3m", "6m"):
             with self.subTest(horizon=horizon):
                 estimate = result["horizons"][horizon]
-                self.assertIn(estimate["status"], ("available", "uncalibrated"))
+                self.assertIn(estimate["status"], ("available", "uncalibrated", "not_validated"))
+                if estimate["status"] == "not_validated":
+                    self.assertIsNone(estimate["estimated_positive_return_probability_pct"])
                 self.assertGreaterEqual(estimate["training_samples"], 500)
                 holdout = estimate["untouched_holdout"]
                 self.assertIsNotNone(holdout)
