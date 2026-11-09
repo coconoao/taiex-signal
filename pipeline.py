@@ -878,7 +878,7 @@ def build(df, chips=None, margin=None, h=1, futures=None):
         first = max(first, chips_aligned.index[chips_valid].min())
     elif chips is not None:
         print(f"籌碼有效資料不足（完整有效交易日 {chips_count} 日，至少 140 日），本次略過此層")
-    margin_aligned = margin.reindex(X.index) if margin is not None else None
+    # Credit/margin statistics are published after the cash-market close.\n    # Carry only the last known observation forward for up to three Taiwan\n    # sessions so a delayed daily release does not freeze the whole forecast\n    # at the previous session. The separate source-coverage report keeps the\n    # true publication date visible; this never backfills future observations.\n    margin_aligned = margin.reindex(X.index).ffill(limit=3) if margin is not None else None
     margin_valid = (margin_aligned["margin_bal"].notna()
                     if margin_aligned is not None and "margin_bal" in margin_aligned.columns
                     else pd.Series(False, index=X.index))
