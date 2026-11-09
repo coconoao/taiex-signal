@@ -48,6 +48,9 @@ _INDEX_CACHE = {}
 _EXRIGHT_CACHE = {}
 _EXRIGHT_CACHE_TTL_SECONDS = 24 * 60 * 60
 _EXRIGHT_EMPTY_CACHE_TTL_SECONDS = 5 * 60
+_ACTION_ERROR_CACHE_TTL_SECONDS = 15
+_ACTION_FETCH_LOCKS = {}
+_ACTION_ERROR_CACHE = {}
 _CACHE_TTL_SECONDS = 4 * 60 * 60
 
 
@@ -517,23 +520,62 @@ def _cached_action_month(source: str, action: str, month: dt.date):
         cached = _EXRIGHT_CACHE.get(key)
         if cached and now - cached[0] < cached[2]:
             return dict(cached[1])
+        failed = _ACTION_ERROR_CACHE.get(key)
+        if failed and now - failed[0] < _ACTION_ERROR_CACHE_TTL_SECONDS:
+            error = failed[1]
+            if isinstance(error, MarketDataError):
+                raise MarketDataError(
+                    str(error), diagnostic_code=error.diagnostic_code
+                ) from error
+            raise MarketDataError(
+                "官方公司行動資料來源暫時失敗",
+                diagnostic_code="provider_error",
+            ) from error
+        fetch_lock = _ACTION_FETCH_LOCKS.setdefault(key, threading.Lock())
 
-    if action == "exright":
-        fetcher = _twse_exright_month if source == "TWSE" else _tpex_exright_month
-    elif action == "reduction":
-        fetcher = _twse_reduction_month if source == "TWSE" else _tpex_reduction_month
-    elif action == "par_value" and source == "TWSE":
-        fetcher = _twse_par_value_month
-    elif action == "etf_split":
-        fetcher = _twse_etf_split_month if source == "TWSE" else _tpex_etf_split_month
-    else:
-        return {}
+    # Serialize the cache miss per source/action/month, then recheck after
+    # acquiring the lock so concurrent stock queries share one provider call.
+    with fetch_lock:
+        now = time.time()
+        with _CACHE_LOCK:
+            cached = _EXRIGHT_CACHE.get(key)
+            if cached and now - cached[0] < cached[2]:
+                return dict(cached[1])
+            failed = _ACTION_ERROR_CACHE.get(key)
+            if failed and now - failed[0] < _ACTION_ERROR_CACHE_TTL_SECONDS:
+                error = failed[1]
+                if isinstance(error, MarketDataError):
+                    raise MarketDataError(
+                        str(error), diagnostic_code=error.diagnostic_code
+                    ) from error
+                raise MarketDataError(
+                    "官方公司行動資料來源暫時失敗",
+                    diagnostic_code="provider_error",
+                ) from error
 
-    references = fetcher(month)
-    ttl = _EXRIGHT_CACHE_TTL_SECONDS if references else _EXRIGHT_EMPTY_CACHE_TTL_SECONDS
-    with _CACHE_LOCK:
-        _EXRIGHT_CACHE[key] = (now, dict(references), ttl)
-    return dict(references)
+        if action == "exright":
+            fetcher = _twse_exright_month if source == "TWSE" else _tpex_exright_month
+        elif action == "reduction":
+            fetcher = _twse_reduction_month if source == "TWSE" else _tpex_reduction_month
+        elif action == "par_value" and source == "TWSE":
+            fetcher = _twse_par_value_month
+        elif action == "etf_split":
+            fetcher = _twse_etf_split_month if source == "TWSE" else _tpex_etf_split_month
+        else:
+            return {}
+
+        try:
+            references = fetcher(month)
+        except Exception as exc:
+            with _CACHE_LOCK:
+                _ACTION_ERROR_CACHE[key] = (time.time(), exc)
+            raise
+
+        ttl = _EXRIGHT_CACHE_TTL_SECONDS if references else _EXRIGHT_EMPTY_CACHE_TTL_SECONDS
+        with _CACHE_LOCK:
+            _ACTION_ERROR_CACHE.pop(key, None)
+            _EXRIGHT_CACHE[key] = (time.time(), dict(references), ttl)
+        return dict(references)
 
 
 def _cached_exright_month(source: str, month: dt.date):
