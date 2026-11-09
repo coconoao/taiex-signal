@@ -105,12 +105,13 @@ def analyze(code):
     returns = pd.concat(
         [px.pct_change(), mk.pct_change()], axis=1, keys=["s", "m"]
     ).dropna().tail(252)
-    if len(returns) < 30:
-        raise ValueError("此標的與加權指數的共同歷史資料不足 30 個交易日，暫時無法計算 Beta。")
-    market_var = float(returns["m"].var())
-    if not np.isfinite(market_var) or market_var <= 0:
-        raise ValueError("無法計算 Beta：大盤報酬資料不足或變異數為零。")
-    beta = round(float(returns["s"].cov(returns["m"]) / market_var), 2)
+    beta = None
+    if len(returns) >= 30:
+        market_var = float(returns["m"].var())
+        if np.isfinite(market_var) and market_var > 0:
+            beta_value = float(returns["s"].cov(returns["m"]) / market_var)
+            if np.isfinite(beta_value):
+                beta = round(beta_value, 2)
 
     asset_type = "ETF" if code.startswith(("00", "01", "02")) else "股票"
 
@@ -146,8 +147,14 @@ def analyze(code):
         "stock_expected": stock_expected,
         "historical_horizons": historical_horizons,
         "long_term_model": long_term,
-        "mom20": round(float(px.iloc[-1] / px.iloc[-21] - 1) * 100, 1),
-        "vol60": round(float(px.pct_change().tail(60).std() * np.sqrt(252)) * 100, 1),
+        "mom20": (
+            round(float(px.iloc[-1] / px.iloc[-21] - 1) * 100, 1)
+            if len(px) >= 21 else None
+        ),
+        "vol60": (
+            round(float(px.pct_change().tail(60).std() * np.sqrt(252)) * 100, 1)
+            if len(px) >= 3 and np.isfinite(px.pct_change().tail(60).std()) else None
+        ),
         "fundamentals": [],
     }
 
