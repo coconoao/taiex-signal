@@ -43,8 +43,13 @@ jobs:
           weekly = json.loads((directory / "weekly.json").read_text(encoding="utf-8"))
           if signals.get("demo") is not True:
               raise SystemExit("Expected demo output marker")
-          if not signals.get("backtest", {}).get("curve", {}).get("dates"):
-              raise SystemExit("Backtest curve is empty")
+          if signals.get("schema_version") != 2:
+              raise SystemExit("Expected schema-v2 daily forecast output")
+          forecast = signals.get("forecast", {})
+          if forecast.get("schema_version") != 2 or len(forecast.get("sessions", [])) != 3:
+              raise SystemExit("Expected three schema-v2 forecast sessions")
+          if not signals.get("legacy_direction_model", {}).get("backtest", {}).get("curve", {}).get("dates"):
+              raise SystemExit("Legacy research backtest curve is empty")
           if not weekly.get("asof") or "prob_up" not in weekly:
               raise SystemExit("Weekly report is incomplete")
           print("Demo pipeline generated valid daily, weekly, and chart data.")
