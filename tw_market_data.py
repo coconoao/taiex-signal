@@ -315,10 +315,10 @@ def _twse_exright_month(month: dt.date):
             symbol = str(item[positions["股票代號"]]).strip()
             kind = str(item[positions["權/息"]]).strip()
             reference = _number(item[positions["除權息參考價"]])
-            # Only cash-dividend-only rows are used as a fallback. Rights,
-            # stock dividends and capital-increase cases require their own
-            # verified share/price adjustment factors.
-            if symbol and kind in ("息", "除息") and reference and reference > 0:
+            # The exchange's official reference price already incorporates
+            # cash dividends, stock dividends, and cash-capital-increase
+            # allocation factors. Use every explicitly classified event.
+            if symbol and kind and reference and reference > 0:
                 result[(symbol, day)] = reference
         except (ValueError, TypeError, IndexError):
             continue
@@ -348,7 +348,7 @@ def _tpex_exright_month(month: dt.date):
                 symbol = str(item[positions["代號"]]).strip()
                 kind = str(item[positions["權/息"]]).strip()
                 reference = _number(item[positions["除權息參考價"]])
-                if symbol and kind in ("息", "除息") and reference and reference > 0:
+                if symbol and kind and reference and reference > 0:
                     result[(symbol, day)] = reference
             except (ValueError, TypeError, IndexError):
                 continue
