@@ -340,5 +340,121 @@ class TestTaiwanMarketData(unittest.TestCase):
 
 
 
+    def test_request_json_retries_invalid_json_before_success(self):
+        from types import SimpleNamespace
+        invalid = SimpleNamespace(status_code=200, headers={}, content=b"<html>temporary edge response</html>")
+        valid = SimpleNamespace(status_code=200, headers={}, content=b'{"ok":true}')
+        with (
+            patch.object(tw_market_data.curl_requests, "get", side_effect=[invalid, valid]) as get,
+            patch.object(tw_market_data.time, "sleep"),
+        ):
+            self.assertEqual(
+                tw_market_data._request_json("https://www.twse.com.tw/test"),
+                {"ok": True},
+            )
+        self.assertEqual(get.call_count, 2)
+
+    def test_request_json_retries_transient_network_error(self):
+        from types import SimpleNamespace
+        error = OSError(101, "Network is unreachable")
+        valid = SimpleNamespace(status_code=200, headers={}, content=b'{"ok":true}')
+        with (
+            patch.object(tw_market_data.curl_requests, "get", side_effect=[error, valid]) as get,
+            patch.object(tw_market_data.time, "sleep"),
+        ):
+            self.assertEqual(
+                tw_market_data._request_json("https://www.twse.com.tw/test"),
+                {"ok": True},
+            )
+        self.assertEqual(get.call_count, 2)
+
+    def test_exchange_probe_uses_older_month_when_latest_month_is_empty(self):
+        months = [
+            dt.date(2026, 9, 1),
+            dt.date(2026, 10, 1),
+            dt.date(2026, 11, 1),
+        ]
+        older_rows = [{
+            "date": dt.date(2026, 10, 5), "raw_close": 100.0, "change": 0.0,
+            "volume": 1000, "open": 100, "high": 100, "low": 100,
+        }]
+        with (
+            patch.object(tw_market_data, "_twse_month", side_effect=[[], older_rows]) as twse,
+            patch.object(tw_market_data, "_tpex_month") as tpex,
+        ):
+            source, fetcher = tw_market_data._identify_exchange("1234", None, months)
+        self.assertEqual(source, "TWSE")
+        self.assertIs(fetcher, tw_market_data._twse_month)
+        self.assertEqual(twse.call_count, 2)
+        self.assertEqual(twse.call_args_list[1].args[1], dt.date(2026, 10, 1))
+        tpex.assert_not_called()
+
+    def test_tpex_month_reads_data_from_later_table(self):
+        payload = {
+            "tables": [
+                {"data": []},
+                {"data": [[
+                    "115/11/06", "12", "100", "10", "11", "9", "10.5", "0"
+                ]]},
+            ]
+        }
+        with patch.object(tw_market_data, "_request_json", return_value=payload):
+            rows = tw_market_data._tpex_month("6488", dt.date(2026, 11, 1))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["volume"], 12000.0)
+
+    def test_exright_month_cache_avoids_repeated_provider_requests(self):
+        month = dt.date(2025, 12, 1)
+        refs = {("2330", dt.date(2025, 12, 11)): 1499.99}
+        with (
+            patch.object(tw_market_data, "_EXRIGHT_CACHE", {}),
+            patch.object(tw_market_data, "_twse_exright_month", return_value=refs) as fetch,
+            patch.object(tw_market_data.time, "time", return_value=1000.0),
+        ):
+            first = tw_market_data._cached_exright_month("TWSE", month)
+            second = tw_market_data._cached_exright_month("TWSE", month)
+        self.assertEqual(first, refs)
+        self.assertEqual(second, refs)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_load_stock_history_accepts_short_listing_history(self):
+        start = dt.date(2026, 1, 2)
+        rows = []
+        previous = 100.0
+        for i in range(22):
+            close = 100.0 + i
+            rows.append({
+                "date": start + dt.timedelta(days=i),
+                "raw_close": close,
+                "change": 0.0 if i == 0 else close - previous,
+                "volume": 1000.0,
+                "open": close,
+                "high": close,
+                "low": close,
+            })
+            previous = close
+        with (
+            patch.object(tw_market_data, "_STOCK_CACHE", {}),
+            patch.object(tw_market_data, "_month_starts", return_value=[dt.date(2026, 1, 1)]),
+            patch.object(tw_market_data, "_identify_exchange", return_value=("TWSE", tw_market_data._twse_month)),
+            patch.object(tw_market_data, "_fetch_months", return_value=rows),
+            patch.object(tw_market_data, "_official_cash_dividend_references", return_value={}),
+        ):
+            frame = tw_market_data.load_stock_history("1234", years=1)
+        self.assertEqual(len(frame), 22)
+        self.assertEqual(frame.attrs["source"], "TWSE")
+
+    def test_adjustment_failure_has_machine_readable_category(self):
+        rows = [
+            {"date": dt.date(2026, 1, 2), "raw_close": 100.0, "change": 0.0,
+             "volume": 1000, "open": 100, "high": 100, "low": 100},
+            {"date": dt.date(2026, 1, 5), "raw_close": 95.0, "change": None,
+             "volume": 2000, "open": 95, "high": 95, "low": 95},
+        ]
+        with self.assertRaises(tw_market_data.MarketDataError) as caught:
+            tw_market_data._to_adjusted_frame(rows, "TWSE")
+        self.assertEqual(caught.exception.diagnostic_code, "adjustment_reference_missing")
+
+
 if __name__ == "__main__":
     unittest.main()
