@@ -23,7 +23,7 @@ _JOBS = {}
 _JOB_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="stock-analysis")
 DIAGNOSTICS_UI_ENABLED = os.environ.get("STAGING_DIAGNOSTICS_UI", "").lower() == "true"
 _SAFE_DIAGNOSTIC = re.compile(
-    r"(?:no_recent_history|provider_invalid_json_shape|provider_error|"
+    r"(?:no_recent_history|provider_invalid_json_shape|provider_error|adjustment_reference_missing|adjustment_reference_invalid|raw_close_invalid|"
     r"(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_invalid_json_shape|provider_error)|"
     r"(?:exchange_probe_failed|history_fetch_failed):"
     r"(?:(?:twse|tpex)_(?:http_\d{3}|network_errno_-?\d{1,4}|timeout|invalid_json|request_error|provider_status|provider_invalid_json_shape|provider_error)|provider_invalid_json_shape|provider_error)"

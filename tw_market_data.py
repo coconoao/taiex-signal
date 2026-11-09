@@ -11,6 +11,8 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import json
+import math
+import random
 import threading
 import time
 import urllib.parse
@@ -43,6 +45,12 @@ _HEADERS = {
 _CACHE_LOCK = threading.Lock()
 _STOCK_CACHE = {}
 _INDEX_CACHE = {}
+_EXRIGHT_CACHE = {}
+_EXRIGHT_CACHE_TTL_SECONDS = 24 * 60 * 60
+_EXRIGHT_EMPTY_CACHE_TTL_SECONDS = 5 * 60
+_ACTION_ERROR_CACHE_TTL_SECONDS = 15
+_ACTION_FETCH_LOCKS = {}
+_ACTION_ERROR_CACHE = {}
 _CACHE_TTL_SECONDS = 4 * 60 * 60
 
 
@@ -50,10 +58,10 @@ def _request_json(url: str) -> dict:
     original_host = urllib.parse.urlparse(url).hostname
     request_url = url
     last_error = None
-    code = None
+    last_status = None
     redirect_count = 0
-    attempt = 0
-    while attempt < 2:
+
+    for attempt in range(3):
         try:
             response = curl_requests.get(
                 request_url,
@@ -62,10 +70,8 @@ def _request_json(url: str) -> dict:
                 impersonate="chrome",
                 allow_redirects=False,
             )
-            code = response.status_code
-            if code == 308:
-                # Follow only HTTPS redirects that stay on the original,
-                # allowlisted exchange host; never forward requests elsewhere.
+            status = response.status_code
+            if status == 308:
                 location = response.headers.get("Location")
                 target = urllib.parse.urljoin(request_url, location or "")
                 target_parts = urllib.parse.urlparse(target)
@@ -73,24 +79,48 @@ def _request_json(url: str) -> dict:
                     location
                     and redirect_count < 3
                     and target_parts.scheme == "https"
-                    and target_parts.hostname == original_host
+                    and (target_parts.hostname or "").lower() == (original_host or "").lower()
                 ):
                     request_url = target
                     redirect_count += 1
                     continue
+                last_status = status
                 break
-            if code in (401, 403):
+
+            if status in (401, 403):
+                last_status = status
                 break
-            if code == 429 or (code is not None and code >= 500):
-                if attempt == 0:
-                    attempt += 1
-                    time.sleep(1.0)
+            if status == 408 or status == 429 or status >= 500:
+                last_status = status
+                if attempt < 2:
+                    retry_after = response.headers.get("Retry-After")
+                    try:
+                        requested_delay = float(retry_after)
+                        # Do not hammer a rate-limited provider when it asks
+                        # for a long cooldown; surface the 429 for later retry.
+                        if requested_delay > 15:
+                            break
+                        delay = max(0.25, requested_delay)
+                    except (TypeError, ValueError):
+                        base_delay = 2.0 if status == 429 else 0.5
+                        delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.25)
+                    time.sleep(delay)
                     continue
                 break
-            if code is not None and code >= 400:
+            if status >= 400:
+                last_status = status
                 break
-            payload = response.content
-            parsed = json.loads(payload.decode("utf-8-sig"))
+
+            try:
+                parsed = json.loads(response.content.decode("utf-8-sig"))
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                last_status = None
+                if attempt < 2:
+                    time.sleep(0.5 * (2 ** attempt) + random.uniform(0.0, 0.25))
+                    continue
+                break
+
             if not isinstance(parsed, dict):
                 raise MarketDataError(
                     "交易所回傳格式不是 JSON 物件",
@@ -101,11 +131,18 @@ def _request_json(url: str) -> dict:
             raise
         except Exception as exc:
             last_error = exc
-            code = None
+            last_status = None
+            error_name = type(exc).__name__.lower()
+            retryable = (
+                isinstance(exc, (OSError, TimeoutError, ConnectionError))
+                or "timeout" in error_name
+                or "connection" in error_name
+            )
+            if retryable and attempt < 2:
+                time.sleep(0.5 * (2 ** attempt) + random.uniform(0.0, 0.25))
+                continue
             break
 
-    # Keep diagnostics useful without recording full URLs, query strings, or
-    # request payloads. The adapter only calls fixed public exchange hosts.
     host = urllib.parse.urlparse(url).hostname or "unknown-host"
     if host in ("www.twse.com.tw", "twse.com.tw"):
         source = "twse"
@@ -114,12 +151,12 @@ def _request_json(url: str) -> dict:
     else:
         source = "unknown"
 
-    # Keep the existing human-readable exception for internal handling, while
-    # attaching a bounded enum-like diagnostic that cannot contain URL/query
-    # data, symbols, response bodies, or exception messages.
-    if code is not None:
-        diagnostic = f"{source}_http_{int(code)}"
-        detail = f"HTTPError(http={int(code)})"
+    if last_status is not None:
+        diagnostic = f"{source}_http_{int(last_status)}"
+        detail = f"HTTPError(http={int(last_status)})"
+    elif isinstance(last_error, json.JSONDecodeError):
+        diagnostic = f"{source}_invalid_json"
+        detail = "JSONDecodeError"
     elif getattr(last_error, "errno", None) is not None:
         errno = int(last_error.errno)
         diagnostic = f"{source}_network_errno_{errno}"
@@ -127,16 +164,15 @@ def _request_json(url: str) -> dict:
     elif isinstance(last_error, TimeoutError) or "timeout" in type(last_error).__name__.lower():
         diagnostic = f"{source}_timeout"
         detail = f"{type(last_error).__name__}/timeout"
-    elif isinstance(last_error, json.JSONDecodeError):
-        diagnostic = f"{source}_invalid_json"
-        detail = "JSONDecodeError"
     else:
         diagnostic = f"{source}_request_error"
         detail = type(last_error).__name__ if last_error is not None else "HTTPError"
+
     raise MarketDataError(
         f"官方行情來源連線失敗：{host} {detail}",
         diagnostic_code=diagnostic,
     )
+
 
 def _month_starts(years: int = 10):
     today = dt.date.today()
@@ -152,9 +188,21 @@ def _month_starts(years: int = 10):
 
 
 def _roc_date(value: str) -> dt.date:
-    raw = str(value or "").strip().replace("*", "").replace("＊", "")
-    raw = raw.replace("年", "/").replace("月", "/").replace("日", "")
-    parts = raw.split("/")
+    text = str(value or "").strip().replace("*", "").replace("＊", "")
+    if not text:
+        raise ValueError("empty date")
+    if len(text) >= 10 and text[4] == "-" and text[:4].isdigit():
+        return dt.date.fromisoformat(text[:10])
+
+    compact = "".join(ch for ch in text if ch.isdigit())
+    if "/" not in text and "年" not in text and compact.isdigit():
+        if len(compact) == 7:
+            return dt.date(int(compact[:3]) + 1911, int(compact[3:5]), int(compact[5:7]))
+        if len(compact) == 8:
+            return dt.date(int(compact[:4]), int(compact[4:6]), int(compact[6:8]))
+
+    normalized = text.replace("年", "/").replace("月", "/").replace("日", "")
+    parts = [part.strip() for part in normalized.split("/") if part.strip()]
     if len(parts) != 3:
         raise ValueError("日期格式錯誤")
     year, month, day = (int(part) for part in parts)
@@ -173,9 +221,10 @@ def _number(value):
     if raw.startswith(("X", "x")):
         return None
     try:
-        return float(raw)
+        number = float(raw)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _twse_month(code: str, month: dt.date):
@@ -195,8 +244,14 @@ def _twse_month(code: str, month: dt.date):
             diagnostic_code="twse_provider_status",
         )
     rows = []
-    for item in payload.get("data") or []:
-        if len(item) < 8:
+    data = payload.get("data") or []
+    if not isinstance(data, list):
+        raise MarketDataError(
+            "TWSE 歷史行情資料格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+    for item in data:
+        if not isinstance(item, (list, tuple)) or len(item) < 8:
             continue
         try:
             day = _roc_date(item[0])
@@ -224,25 +279,37 @@ def _tpex_month(code: str, month: dt.date):
     url = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?" + params
     payload = _request_json(url)
     tables = payload.get("tables") or []
-    if not tables:
-        return []
+    if not isinstance(tables, list):
+        raise MarketDataError(
+            "TPEx 歷史行情回傳格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+
     rows = []
-    for item in tables[0].get("data") or []:
-        if len(item) < 8:
+    # The response may contain multiple tables; do not assume the first one
+    # is always the trading-data table.
+    for table in tables:
+        if not isinstance(table, dict):
             continue
-        try:
-            day = _roc_date(item[0])
-            lots = _number(item[1])
-            open_price, high, low, close = (_number(x) for x in item[3:7])
-            change = _number(item[7])
-            if close is None or lots is None:
+        table_rows = table.get("data") or []
+        if not isinstance(table_rows, list):
+            continue
+        for item in table_rows:
+            if not isinstance(item, (list, tuple)) or len(item) < 8:
                 continue
-            rows.append({
-                "date": day, "open": open_price, "high": high, "low": low,
-                "raw_close": close, "change": change, "volume": lots * 1000.0,
-            })
-        except (ValueError, TypeError):
-            continue
+            try:
+                day = _roc_date(item[0])
+                lots = _number(item[1])
+                open_price, high, low, close = (_number(x) for x in item[3:7])
+                change = _number(item[7])
+                if close is None or lots is None:
+                    continue
+                rows.append({
+                    "date": day, "open": open_price, "high": high, "low": low,
+                    "raw_close": close, "change": change, "volume": lots * 1000.0,
+                })
+            except (ValueError, TypeError):
+                continue
     return rows
 
 
@@ -261,7 +328,7 @@ def _twse_exright_month(month: dt.date):
     positions = {name: index for index, name in enumerate(fields)}
     required = ("資料日期", "股票代號", "除權息參考價", "權/息")
     if any(name not in positions for name in required):
-        raise MarketDataError("TWSE 除權息資料欄位格式不符")
+        raise MarketDataError("TWSE 除權息資料欄位格式不符", diagnostic_code="provider_invalid_json_shape")
     result = {}
     for item in rows:
         try:
@@ -270,10 +337,10 @@ def _twse_exright_month(month: dt.date):
             symbol = str(item[positions["股票代號"]]).strip()
             kind = str(item[positions["權/息"]]).strip()
             reference = _number(item[positions["除權息參考價"]])
-            # Only cash-dividend-only rows are used as a fallback. Rights,
-            # stock dividends and capital-increase cases require their own
-            # verified share/price adjustment factors.
-            if symbol and kind in ("息", "除息") and reference and reference > 0:
+            # The exchange's official reference price already incorporates
+            # cash dividends, stock dividends, and cash-capital-increase
+            # allocation factors. Use every explicitly classified event.
+            if symbol and kind and reference and reference > 0:
                 result[(symbol, day)] = reference
         except (ValueError, TypeError, IndexError):
             continue
@@ -303,37 +370,281 @@ def _tpex_exright_month(month: dt.date):
                 symbol = str(item[positions["代號"]]).strip()
                 kind = str(item[positions["權/息"]]).strip()
                 reference = _number(item[positions["除權息參考價"]])
-                if symbol and kind in ("息", "除息") and reference and reference > 0:
+                if symbol and kind and reference and reference > 0:
                     result[(symbol, day)] = reference
             except (ValueError, TypeError, IndexError):
                 continue
     return result
 
 
-def _official_cash_dividend_references(code: str, source: str, rows):
-    missing = sorted({
-        row["date"].replace(day=1)
-        for row in rows
-        if row.get("change") is None
+
+def _month_range(month: dt.date):
+    next_month = (month.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+    last_day = next_month - dt.timedelta(days=1)
+    return month.strftime("%Y%m%d"), last_day.strftime("%Y%m%d")
+
+
+def _twse_reference_month(report: str, month: dt.date, code_field: str, price_field: str):
+    start_date, end_date = _month_range(month)
+    params = urllib.parse.urlencode({
+        "startDate": start_date, "endDate": end_date, "response": "json"
     })
-    if not missing:
+    payload = _request_json(f"https://www.twse.com.tw/exchangeReport/{report}?{params}")
+    fields = payload.get("fields") or []
+    data = payload.get("data") or []
+    required = ("恢復買賣日期", code_field, price_field)
+    if not isinstance(fields, list) or not isinstance(data, list) or any(x not in fields for x in required):
+        raise MarketDataError(
+            f"TWSE {report} 公司行動資料欄位格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+    positions = {name: fields.index(name) for name in required}
+    result = {}
+    for item in data:
+        if not isinstance(item, (list, tuple)) or len(item) <= max(positions.values()):
+            continue
+        try:
+            day = _roc_date(item[positions["恢復買賣日期"]])
+            symbol = str(item[positions[code_field]]).strip().upper()
+            reference = _number(item[positions[price_field]])
+            if symbol and reference and reference > 0:
+                result[(symbol, day)] = reference
+        except (ValueError, TypeError):
+            continue
+    return result
+
+
+def _tpex_reference_month(report: str, month: dt.date, code_field: str, price_field: str):
+    start_date, end_date = _month_range(month)
+    start_text = f"{start_date[:4]}/{start_date[4:6]}/{start_date[6:8]}"
+    end_text = f"{end_date[:4]}/{end_date[4:6]}/{end_date[6:8]}"
+    params = urllib.parse.urlencode({
+        "startDate": start_text, "endDate": end_text, "response": "json"
+    })
+    url = f"https://www.tpex.org.tw/www/zh-tw/bulletin/{report}?" + params
+    payload = _request_json(url)
+    tables = payload.get("tables") or []
+    if not isinstance(tables, list):
+        raise MarketDataError(
+            f"TPEx {report} 公司行動資料格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+    result = {}
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        fields = table.get("fields") or []
+        data = table.get("data") or []
+        required = ("恢復買賣日期", code_field, price_field)
+        if not isinstance(fields, list) or not isinstance(data, list):
+            continue
+        if any(name not in fields for name in required):
+            continue
+        positions = {name: fields.index(name) for name in required}
+        for item in data:
+            if not isinstance(item, (list, tuple)) or len(item) <= max(positions.values()):
+                continue
+            try:
+                day = _roc_date(item[positions["恢復買賣日期"]])
+                symbol = str(item[positions[code_field]]).strip().upper()
+                reference = _number(item[positions[price_field]])
+                if symbol and reference and reference > 0:
+                    result[(symbol, day)] = reference
+            except (ValueError, TypeError):
+                continue
+    return result
+
+
+def _twse_reduction_month(month: dt.date):
+    return _twse_reference_month("TWTAUU", month, "股票代號", "恢復買賣參考價")
+
+
+def _tpex_reduction_month(month: dt.date):
+    return _tpex_reference_month(
+        "revivt", month, "股票代號", "減資恢復買賣開始日參考價格"
+    )
+
+
+def _twse_par_value_month(month: dt.date):
+    return _twse_reference_month("TWTB8U", month, "股票代號", "恢復買賣參考價")
+
+
+def _twse_etf_split_month(month: dt.date):
+    start_date, end_date = _month_range(month)
+    params = urllib.parse.urlencode({
+        "startDate": start_date, "endDate": end_date, "response": "json"
+    })
+    payload = _request_json("https://www.twse.com.tw/rwd/zh/split/TWTCAU?" + params)
+    fields = payload.get("fields") or []
+    data = payload.get("data") or []
+    required = ("恢復買賣日期", "ETF代號", "恢復買賣參考價")
+    if not isinstance(fields, list) or not isinstance(data, list) or any(x not in fields for x in required):
+        raise MarketDataError(
+            "TWSE ETF 分割資料欄位格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+    positions = {name: fields.index(name) for name in required}
+    result = {}
+    for item in data:
+        if not isinstance(item, (list, tuple)) or len(item) <= max(positions.values()):
+            continue
+        try:
+            day = _roc_date(item[positions["恢復買賣日期"]])
+            symbol = str(item[positions["ETF代號"]]).strip().upper()
+            reference = _number(item[positions["恢復買賣參考價"]])
+            if symbol and reference and reference > 0:
+                result[(symbol, day)] = reference
+        except (ValueError, TypeError):
+            continue
+    return result
+
+
+def _tpex_etf_split_month(month: dt.date):
+    result = {}
+    errors = []
+    for report in ("etfSplitRslt", "etfRvsRslt"):
+        try:
+            result.update(_tpex_reference_month(
+                report, month, "證券代號", "恢復買賣開始參考價"
+            ))
+        except Exception as exc:
+            errors.append(exc)
+    if errors and not result:
+        raise errors[0]
+    return result
+
+def _cached_action_month(source: str, action: str, month: dt.date):
+    key = (source, action, month)
+    now = time.time()
+    with _CACHE_LOCK:
+        cached = _EXRIGHT_CACHE.get(key)
+        if cached and now - cached[0] < cached[2]:
+            return dict(cached[1])
+        failed = _ACTION_ERROR_CACHE.get(key)
+        if failed and now - failed[0] < _ACTION_ERROR_CACHE_TTL_SECONDS:
+            error = failed[1]
+            if isinstance(error, MarketDataError):
+                raise MarketDataError(
+                    str(error), diagnostic_code=error.diagnostic_code
+                ) from error
+            raise MarketDataError(
+                "官方公司行動資料來源暫時失敗",
+                diagnostic_code="provider_error",
+            ) from error
+        fetch_lock = _ACTION_FETCH_LOCKS.setdefault(key, threading.Lock())
+
+    # Serialize the cache miss per source/action/month, then recheck after
+    # acquiring the lock so concurrent stock queries share one provider call.
+    with fetch_lock:
+        now = time.time()
+        with _CACHE_LOCK:
+            cached = _EXRIGHT_CACHE.get(key)
+            if cached and now - cached[0] < cached[2]:
+                return dict(cached[1])
+            failed = _ACTION_ERROR_CACHE.get(key)
+            if failed and now - failed[0] < _ACTION_ERROR_CACHE_TTL_SECONDS:
+                error = failed[1]
+                if isinstance(error, MarketDataError):
+                    raise MarketDataError(
+                        str(error), diagnostic_code=error.diagnostic_code
+                    ) from error
+                raise MarketDataError(
+                    "官方公司行動資料來源暫時失敗",
+                    diagnostic_code="provider_error",
+                ) from error
+
+        if action == "exright":
+            fetcher = _twse_exright_month if source == "TWSE" else _tpex_exright_month
+        elif action == "reduction":
+            fetcher = _twse_reduction_month if source == "TWSE" else _tpex_reduction_month
+        elif action == "par_value" and source == "TWSE":
+            fetcher = _twse_par_value_month
+        elif action == "etf_split":
+            fetcher = _twse_etf_split_month if source == "TWSE" else _tpex_etf_split_month
+        else:
+            return {}
+
+        try:
+            references = fetcher(month)
+        except Exception as exc:
+            with _CACHE_LOCK:
+                _ACTION_ERROR_CACHE[key] = (time.time(), exc)
+            raise
+
+        ttl = _EXRIGHT_CACHE_TTL_SECONDS if references else _EXRIGHT_EMPTY_CACHE_TTL_SECONDS
+        with _CACHE_LOCK:
+            _ACTION_ERROR_CACHE.pop(key, None)
+            _EXRIGHT_CACHE[key] = (time.time(), dict(references), ttl)
+        return dict(references)
+
+
+def _cached_exright_month(source: str, month: dt.date):
+    # Backwards-compatible wrapper for focused tests and callers.
+    return _cached_action_month(source, "exright", month)
+
+
+def _official_corporate_action_references(code: str, source: str, rows):
+    symbol = str(code).strip().upper()
+    missing_by_month = {}
+    for row in rows:
+        if row.get("change") is None:
+            day = row["date"]
+            missing_by_month.setdefault(day.replace(day=1), set()).add(day)
+    if not missing_by_month:
         return {}
-    fetcher = _twse_exright_month if source == "TWSE" else _tpex_exright_month
+
     references = {}
-    for month in missing:
-        references.update(fetcher(month))
+    actions = ["exright", "reduction", "par_value"]
+    if symbol.startswith(("00", "01", "02")):
+        actions.append("etf_split")
+
+    for month, event_days in sorted(missing_by_month.items()):
+        errors = []
+        for action in actions:
+            unresolved = {
+                day for day in event_days
+                if (symbol, day) not in references
+            }
+            if not unresolved:
+                break
+            try:
+                references.update(_cached_action_month(source, action, month))
+            except Exception as exc:
+                errors.append(exc)
+
+        unresolved = sorted(
+            day for day in event_days if (symbol, day) not in references
+        )
+        if unresolved:
+            if errors:
+                first_error = errors[0]
+                diagnostic = getattr(first_error, "diagnostic_code", None) or "provider_error"
+                raise MarketDataError(
+                    "官方公司行動參考價來源暫時無法完整核對，已停止使用未調整資料",
+                    diagnostic_code=diagnostic,
+                ) from first_error
+            raise MarketDataError(
+                "官方漲跌價差無法解析，且除權息、減資、面額或 ETF 分割來源均無對應參考價，停止使用這批資料",
+                diagnostic_code="adjustment_reference_missing",
+            )
+
     return {
-        day: price
-        for (symbol, day), price in references.items()
-        if symbol == str(code).strip().upper()
+        day: references[(symbol, day)]
+        for days in missing_by_month.values()
+        for day in days
+        if (symbol, day) in references
     }
 
 
-def _fetch_months(fetcher, code: str, months):
+# Retain the old private name while callers migrate to the broader action resolver.
+_official_cash_dividend_references = _official_corporate_action_references
+
+
+def _fetch_months(fetcher, code: str, months, max_workers: int = 2):
     collected = []
     errors = []
-    # Two concurrent requests balance throughput with public exchange rate limits.
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    # Keep bounded concurrency; callers can lower it for stricter providers.
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(fetcher, code, month): month for month in months}
         for future in as_completed(futures):
             try:
@@ -352,7 +663,7 @@ def _fetch_months(fetcher, code: str, months):
             )
         safe_codes = ",".join(dict.fromkeys(diagnostic_codes))[:160]
         raise MarketDataError(
-            "官方歷史行情有月份下載失敗，為避免不完整資料進入模型，已停止分析：" + str(errors[0]),
+            "官方歷史行情有月份下載失敗，為避免不完整資料進入模型，已停止分析",
             diagnostic_code="history_fetch_failed:" + safe_codes,
         )
     collected.sort(key=lambda row: row["date"])
@@ -366,10 +677,10 @@ def _identify_exchange(code: str, hint: str | None, months):
     candidates = [("TWSE", _twse_month), ("TPEX", _tpex_month)]
     if hint == "TPEX":
         candidates.reverse()
-    # Exchange identification is a quick liveness probe, not a history scan.
-    # One latest month per provider keeps an unavailable endpoint from
-    # multiplying socket timeouts before the full-history stage begins.
-    probe_months = months[-1:]
+
+    # Probe a small recent window so newly listed or temporarily inactive
+    # securities are not rejected solely because the latest month is empty.
+    probe_months = months[-6:]
     probe_failures = []
     for name, fetcher in candidates:
         for month in reversed(probe_months):
@@ -384,17 +695,17 @@ def _identify_exchange(code: str, hint: str | None, months):
                     category if category.startswith(name.lower() + "_")
                     else f"{name.lower()}_{category}"
                 )
-                # A transport/HTTP failure is unlikely to be month-specific.
-                # Stop probing this provider instead of spending another
-                # timeout window on adjacent months; still try the other
-                # official exchange as a fallback.
+                # A transport, HTTP, or invalid-JSON failure is provider-wide
+                # for this attempt; try the other official exchange instead.
                 if (
                     category.endswith("_timeout")
                     or "_network_errno_" in category
                     or "_http_" in category
+                    or category.endswith("_invalid_json")
+                    or category == "provider_invalid_json_shape"
                 ):
                     break
-                continue
+
     if probe_failures:
         diagnostic = "exchange_probe_failed:" + ",".join(dict.fromkeys(probe_failures))[:160]
     else:
@@ -407,13 +718,21 @@ def _identify_exchange(code: str, hint: str | None, months):
 
 def _to_adjusted_frame(rows, source: str, code: str | None = None, corporate_action_references=None):
     if not rows:
-        raise MarketDataError("官方交易所沒有回傳可用的日線資料")
+        raise MarketDataError(
+            "官方交易所沒有回傳可用的日線資料",
+            diagnostic_code="no_recent_history",
+        )
     rows = sorted(rows, key=lambda row: row["date"])
     adjusted = []
     previous_adjusted = None
     corporate_action_references = corporate_action_references or {}
     for row in rows:
         raw_close = float(row["raw_close"])
+        if not math.isfinite(raw_close) or raw_close <= 0:
+            raise MarketDataError(
+                f"{row['date']} 的原始收盤價不合理",
+                diagnostic_code="raw_close_invalid",
+            )
         change = row["change"]
         if previous_adjusted is None:
             adjusted_close = raw_close
@@ -422,13 +741,22 @@ def _to_adjusted_frame(rows, source: str, code: str | None = None, corporate_act
                 reference_close = corporate_action_references.get(row["date"])
                 if reference_close is None:
                     raise MarketDataError(
-                        f"{row['date']} 的官方漲跌價差無法解析，且沒有可核對的現金除息參考價，停止使用這批資料"
+                        f"{row['date']} 的官方漲跌價差無法解析，且沒有可核對的除權息參考價，停止使用這批資料",
+                        diagnostic_code="adjustment_reference_missing",
                     )
             else:
                 reference_close = raw_close - float(change)
-            if reference_close <= 0:
-                raise MarketDataError(f"{row['date']} 的調整參考價不合理")
+            if not math.isfinite(reference_close) or reference_close <= 0:
+                raise MarketDataError(
+                    f"{row['date']} 的調整參考價不合理",
+                    diagnostic_code="adjustment_reference_invalid",
+                )
             adjusted_close = previous_adjusted * raw_close / reference_close
+        if not math.isfinite(adjusted_close) or adjusted_close <= 0:
+            raise MarketDataError(
+                f"{row['date']} 的調整後收盤價不合理",
+                diagnostic_code="adjustment_reference_invalid",
+            )
         adjusted.append({
             "Date": pd.Timestamp(row["date"]),
             "Close": adjusted_close,
@@ -476,7 +804,9 @@ def load_stock_history(code: str, exchange_hint: str | None = None, years: int =
 
     stage_started = time.perf_counter()
     try:
-        rows = _fetch_months(fetcher, code, months)
+        rows = _fetch_months(
+            fetcher, code, months, max_workers=1 if source == "TWSE" else 2
+        )
     except Exception as exc:
         print(
             "[stock-analysis] stage=stock_history_download status=failed "
@@ -490,10 +820,45 @@ def load_stock_history(code: str, exchange_hint: str | None = None, years: int =
         f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)}",
         flush=True,
     )
-    references = _official_cash_dividend_references(code, source, rows)
-    frame = _to_adjusted_frame(rows, source, code, references)
-    if len(frame) < 60:
-        raise MarketDataError(f"{code} 的官方歷史資料不足 60 個交易日")
+
+    stage_started = time.perf_counter()
+    try:
+        references = _official_corporate_action_references(code, source, rows)
+    except Exception as exc:
+        diagnostic = getattr(exc, "diagnostic_code", None) or "provider_error"
+        print(
+            "[stock-analysis] stage=corporate_action_reference status=failed "
+            f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)} "
+            f"error_class={type(exc).__name__} diagnostic_code={diagnostic}",
+            flush=True,
+        )
+        raise
+    print(
+        "[stock-analysis] stage=corporate_action_reference status=ok "
+        f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)}",
+        flush=True,
+    )
+
+    stage_started = time.perf_counter()
+    try:
+        frame = _to_adjusted_frame(rows, source, code, references)
+    except Exception as exc:
+        diagnostic = getattr(exc, "diagnostic_code", None) or "provider_or_data_validation_error"
+        print(
+            "[stock-analysis] stage=price_adjustment status=failed "
+            f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)} "
+            f"error_class={type(exc).__name__} diagnostic_code={diagnostic}",
+            flush=True,
+        )
+        raise
+
+    # Return shorter histories as data; downstream model horizons and Beta
+    # are independently marked insufficient instead of rejecting the symbol.
+    if frame.empty:
+        raise MarketDataError(
+            f"{code} 的官方歷史資料為空",
+            diagnostic_code="no_recent_history",
+        )
     with _CACHE_LOCK:
         _STOCK_CACHE[cache_key] = (now, frame.copy())
     return frame
@@ -530,7 +895,9 @@ def load_taiex_history(years: int = 10):
 
     months = _month_starts(years)
     records = []
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    # The benchmark endpoint is also TWSE; serialize requests to reduce
+    # transient anti-bot and rate-limit responses during full backfills.
+    with ThreadPoolExecutor(max_workers=1) as pool:
         futures = [pool.submit(_taiex_month, month) for month in months]
         errors = []
         for future in as_completed(futures):
