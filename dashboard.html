@@ -71,6 +71,13 @@ svg{width:100%;height:auto;display:block}
 .tabs button{flex:1;font:inherit;font-size:.8125rem;padding:10px 4px 8px;border:0;background:none;color:var(--mute);cursor:pointer;min-height:48px}
 .tabs button.on{color:var(--accent);font-weight:600;box-shadow:inset 0 3px 0 var(--accent)}
 .mcs{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px}
+.forecast-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
+.forecast-card{border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+.forecast-card .forecast-value{font-size:clamp(1.25rem,5vw,2rem);font-weight:750;line-height:1.3;overflow-wrap:anywhere}
+.forecast-card .forecast-change{font-weight:650;margin-top:5px}
+.forecast-card .forecast-meta{font-size:.75rem;color:var(--mute);margin-top:8px}
+@media(max-width:520px){.forecast-grid{grid-template-columns:1fr;gap:8px}.forecast-card{display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:8px}.forecast-card .forecast-value{grid-column:1}.forecast-card .forecast-change{grid-column:2;grid-row:1/3;text-align:right}.forecast-card .forecast-meta{grid-column:1}}
+
 .mc{border:1px solid var(--line);border-radius:6px;padding:12px}
 .mc p{margin:6px 0 0;font-size:.875rem}
 .mc .big{font-size:1.75rem;font-weight:700;line-height:1.3}
@@ -102,10 +109,10 @@ details[open]>summary{margin-bottom:12px}
   <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><p id="usMarketSummary" class="note"></p><div class="usgrid" id="usMarketCards"></div><div class="charttools" aria-label="美股圖表操作"><button class="btn sm ghost" id="usZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="usZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="usPan" type="button">平移</button><button class="btn sm ghost" id="usZoom" type="button">框選縮放</button><button class="btn sm ghost" id="usReset" type="button">重設</button><button class="btn sm ghost" id="usRange1h" type="button">1 小時</button><button class="btn sm ghost" id="usRange3h" type="button">3 小時</button><button class="btn sm ghost" id="usRangeAll" type="button">全部</button></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
   <div class="banner" id="err" hidden>讀不到 signals.json。請用 python app.py 啟動，或用匯出的單一 HTML 檔、已部署的網站開啟（直接雙擊 dashboard.html 讀不到資料檔）。</div>
     <section id="hero">
-      <p class="sig" id="sig">正在連線…</p>
-      <div class="ruler" id="ruler"></div>
-      <div class="zones"><span>賣出／減碼</span><span>觀望</span><span>買進</span></div>
-      <p id="sumline" style="margin:14px 0 0;font-size:.9375rem">正在讀取最新可用交易日資料；閒置後首次開啟可能需要喚醒伺服器。</p>
+      <h2>未來三個交易日加權指數點位預測</h2>
+      <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
+      <div id="threeDayForecast" class="forecast-grid"></div>
+      <p class="note">顏色逐日與前一交易日比較：紅色代表上漲、綠色代表下跌。點位為模型估計，不是保證或交易指示。</p>
     </section>
     <section id="layers" hidden>
       <h2>各層訊號推向哪一邊</h2>
@@ -234,7 +241,7 @@ details[open]>summary{margin-bottom:12px}
 
   <p class="note">研究用途，不構成投資建議。回測績效不代表未來，樣本外表現通常較差。新聞與 AI 分數目前只供參考，沒有納入上面的機率與回測。</p>
 </main>
-<nav class="tabs"><button class="on" data-t="daily">📈<br>隔日</button><button data-t="weekly">📊<br>長線</button><button data-t="test">🧪<br>測試</button><button data-t="stock">🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
+<nav class="tabs"><button class="on" data-t="daily">📈<br>三日預測</button><button data-t="weekly">📊<br>長線</button><button data-t="test">🧪<br>測試</button><button data-t="stock">🔎<br>個股</button><button data-t="settings">⚙️<br>設定</button></nav>
 <script>
 /* 將完整測試研究區移入獨立「測試」分頁，避免長線頁面過度擁擠。 */
 (function mountTestResearch() {
@@ -364,22 +371,32 @@ function drawCurve(c) {
 }
 
 function renderDaily(d) {
-  $("meta").textContent = `台股最近可用交易日：${d.asof}。休市或尚未取得新收盤資料時，沿用這個交易日的資料，不會把舊資料標成今天。`;
+  $("meta").textContent = `台股最近可用交易日：${d.asof}。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。`;
   $("demo").hidden = !d.demo;
   $("miss").hidden = true;
-  const color = d.signal === "買進" ? "var(--up)" : d.signal === "觀望" ? "var(--hold)" : "var(--down)";
-  $("sig").innerHTML = `<span style="color:${color}">${esc(d.signal)}</span><small>上漲機率 ${pct(d.prob_up)}</small>`;
-  const s = d.thresholds.sell * 100, b = d.thresholds.buy * 100;
-  $("ruler").innerHTML = `<i style="width:${s}%;background:var(--down);border-radius:7px 0 0 7px"></i><i style="width:${b - s}%;background:var(--hold)"></i><i style="width:${100 - b}%;background:var(--up);border-radius:0 7px 7px 0"></i><em class="mark" style="left:${d.prob_up * 100}%"></em>`;
-  const max = Math.max(...d.features.map(f => Math.abs(f.contrib)), 0.1);
-  $("layerRows").innerHTML = Object.entries(d.layers).map(([k, v]) => divRow(esc(k) + "層", v, max * 1.5)).join("");
-  $("featRows").innerHTML = d.features.slice(0, 6).map(f => divRow(esc(f.name.split(":")[1]) + `<small class="note"> ${esc(f.name.split(":")[0])}</small>`, f.contrib, max)).join("");
-  const t = d.backtest, st = t.strategy, bh = t.buyhold;
-  $("stats").innerHTML = [["方向命中率", pct(t.direction_acc / 100), `擴張式基準 ${t.baseline_direction_acc ?? "—"}% · ${t.prediction_days ?? t.days} 個樣本外預測日 · 回測區間 ${t.period_start ?? "—"}～${t.period_end ?? "—"}（${t.period_sessions ?? "—"} 個交易日）`],
-    ["持有日勝率", t.hold_win_rate == null ? "—" : pct(t.hold_win_rate / 100), `按完整交易日計算 · 部位變動 ${t.trades} 次`],
-    ["年化報酬", st.annual + "%", `買進持有 ${bh.annual}%`], ["最大回撤", st.max_dd + "%", `買進持有 ${bh.max_dd}%`], ["Brier 分數（越低越好）", t.brier == null ? "—" : t.brier, `基準 ${t.baseline_brier ?? "—"}`], ["Brier 技能分數", t.brier_skill == null ? "—" : t.brier_skill, "大於 0 優於擴張式基準；小於 0 較差"], ["Log loss（越低越好）", t.log_loss == null ? "—" : t.log_loss, "樣本外機率品質"]]
-    .map(([k, v, n]) => `<div><dt>${k}</dt><dd>${v} <small>${n}</small></dd></div>`).join("");
-  drawCurve(t.curve);
+  const forecast = d.three_day_forecast || {};
+  const horizons = forecast.horizons || {};
+  const labels = [["1","第 1 個交易日（D+1）"],["2","第 2 個交易日（D+2）"],["3","第 3 個交易日（D+3）"]];
+  let previous = Number(forecast.base_close);
+  const cards = labels.map(([key,label]) => {
+    const item = horizons[key] || {};
+    if (item.status !== "research" || !Number.isFinite(Number(item.forecast_close))) {
+      return `<article class="forecast-card"><b>${label}</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ${Number(item.training_samples || 0).toLocaleString("zh-TW")}／至少 120</p></article>`;
+    }
+    const point = Number(item.forecast_close);
+    const delta = point - previous;
+    const change = previous > 0 ? delta / previous * 100 : 0;
+    const color = delta > 0 ? "var(--up)" : delta < 0 ? "var(--down)" : "var(--hold)";
+    const sign = delta > 0 ? "+" : "";
+    const changeText = delta > 0 ? "上漲" : delta < 0 ? "下跌" : "持平";
+    const mae = item.mae_points == null ? "樣本不足" : Number(item.mae_points).toLocaleString("zh-TW") + " 點";
+    const hit = item.within_0_2_pct_pct == null ? "樣本不足" : Number(item.within_0_2_pct_pct).toFixed(1) + "%";
+    const card = `<article class="forecast-card"><b>${label}</b><div class="forecast-value" style="color:${color}">${Math.round(point).toLocaleString("zh-TW")} 點</div><div class="forecast-change" style="color:${color}">${changeText} ${sign}${delta.toFixed(0)} 點（${sign}${change.toFixed(2)}%）</div><div class="forecast-meta">樣本外 MAE ${mae}｜±0.2% 命中率 ${hit}｜訓練樣本 ${Number(item.training_samples || 0).toLocaleString("zh-TW")}</div></article>`;
+    previous = point;
+    return card;
+  }).join("");
+  $("threeDayForecast").innerHTML = cards || '<p class="note">目前沒有可用的三日預測資料。</p>';
+  $("threeDayMeta").textContent = `基準收盤 ${Number(forecast.base_close || 0).toLocaleString("zh-TW")} 點｜資料日期 ${forecast.asof || d.asof}｜模型：三組直接預測候選（研究中）`;
 }
 function renderWeekly(w) {
   const hh = w.horizon_history || {};
@@ -732,7 +749,7 @@ const loadDaily = () => getJSON("signals.json").then(d => {
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   $("err").hidden = true;
   renderDaily(d);
-  ["hero", "layers", "bt"].forEach(i => $(i).hidden = false);
+  ["hero"].forEach(i => $(i).hidden = false);
 }).catch(e => {
   dailyLoadFailed = true;
   $("err").hidden = false;
