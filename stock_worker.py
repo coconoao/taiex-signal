@@ -85,13 +85,39 @@ document.getElementById("run").addEventListener("click",async()=>{
  const token=document.getElementById("token").value;
  const code=document.getElementById("code").value.trim();
  const out=document.getElementById("result");
+ const button=document.getElementById("run");
  if(!token){out.textContent="請輸入 staging token";return}
- out.textContent="測試中，請稍候…";
+ if(!code){out.textContent="請輸入股票代號";return}
+ button.disabled=true;
+ const started=performance.now();
+ const elapsed=()=>((performance.now()-started)/1000).toFixed(1)+" 秒";
+ const timeout=ms=>new Promise((_,reject)=>setTimeout(()=>reject(new Error("client_timeout")),ms));
+ const request=async(url,options={},limit=20000)=>{
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),limit);
+  try{return await Promise.race([fetch(url,{...options,signal:controller.signal,cache:"no-store"}),timeout(limit)])}
+  finally{clearTimeout(timer)}
+ };
  try{
-  const response=await fetch("/analyze",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({code})});
-  const body=await response.json();
-  out.textContent="HTTP "+response.status+"\\n"+JSON.stringify(body,null,2);
- }catch(e){out.textContent="連線失敗："+e.name}
+  out.textContent="步驟 1/2：檢查 Worker 連線…";
+  let health;
+  const healthStart=performance.now();
+  try{health=await request("/healthz",{},20000)}
+  catch(e){out.textContent="健康檢查失敗（"+e.name+"），等待 "+elapsed()+"。尚未送出分析請求。";return}
+  const healthTime=((performance.now()-healthStart)/1000).toFixed(1);
+  if(!health.ok){out.textContent="健康檢查 HTTP "+health.status+"（"+healthTime+" 秒）。尚未送出分析請求。";return}
+  out.textContent="健康檢查通過（HTTP "+health.status+"，"+healthTime+" 秒）。步驟 2/2：下載官方行情並分析…";
+  try{
+   const response=await request("/analyze",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({code})},240000);
+   const raw=await response.text();
+   let body;
+   try{body=JSON.parse(raw)}catch(_){body={error:"回應不是有效 JSON"}}
+   out.textContent="健康檢查：HTTP "+health.status+"（"+healthTime+" 秒）\\n分析請求：HTTP "+response.status+"\\n總等待："+elapsed()+"\\n"+JSON.stringify(body,null,2);
+  }catch(e){
+   const reason=e.name==="AbortError"?"瀏覽器中止請求":e.message==="client_timeout"?"等待超過 240 秒":e.name;
+   out.textContent="健康檢查：HTTP "+health.status+"（"+healthTime+" 秒）\\n分析請求連線失敗："+reason+"\\n總等待："+elapsed()+"。這不代表官方行情來源一定失敗；請查看 Worker 是否有安全的分析錯誤紀錄。";
+  }
+ }finally{button.disabled=false}
 });
 </script></html>"""
             raw = page.encode("utf-8")
