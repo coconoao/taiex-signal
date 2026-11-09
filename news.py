@@ -4,7 +4,7 @@
 機構觀點只計入「標題明確寫出該機構對台股方向」者；每日結果累積到 news_history.jsonl，日後可算各機構命中率。
 用法：python news.py   （時間同 pipeline.py：台股交易日 8:30 前後）
 """
-import os, json, re, html, hashlib, csv, datetime as dt, urllib.request, urllib.parse
+import os, json, re, html, hashlib, csv, datetime as dt, time, socket, urllib.error, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
@@ -356,7 +356,27 @@ def lexicon(hl):
 
 def post(url, headers, body):
     req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json", **headers})
-    return json.load(urllib.request.urlopen(req, timeout=90))
+    # Gemini can be temporarily overloaded. Use low thinking for this bounded
+    # classification task and retry only transient timeouts / HTTP overloads.
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {408, 429, 500, 502, 503, 504} or attempt == 2:
+                raise
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = min(30, max(1, int(retry_after))) if retry_after else 2 ** (attempt + 1)
+            except (TypeError, ValueError):
+                delay = 2 ** (attempt + 1)
+            exc.close()
+            time.sleep(delay)
+        except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
+            reason = getattr(exc, "reason", exc)
+            if not isinstance(reason, (TimeoutError, socket.timeout)) or attempt == 2:
+                raise
+            time.sleep(2 ** (attempt + 1))
 
 def ask_claude(p):
     r = post("https://api.anthropic.com/v1/messages", {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01"},
@@ -372,7 +392,11 @@ def ask_gemini(p):
     model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
     url = "https://generativelanguage.googleapis.com/v1beta/models/" + urllib.parse.quote(model, safe="") + ":generateContent"
     r = post(url, {"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
-             {"contents": [{"parts": [{"text": p}]}], "generationConfig": {"responseMimeType": "application/json"}})
+             {"contents": [{"parts": [{"text": p}]}],
+              "generationConfig": {
+                  "responseMimeType": "application/json",
+                  "thinkingConfig": {"thinkingLevel": "low"},
+              }})
     return "".join(x.get("text", "") for x in r["candidates"][0]["content"]["parts"])
 
 MODELS = {"Gemini": (ask_gemini, ["GEMINI_API_KEY"])}
