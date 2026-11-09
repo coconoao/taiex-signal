@@ -4,7 +4,7 @@ API 金鑰：使用者各自填在瀏覽器；分析時透過登入後的 /api/a
   伺服器排程若也要跑 AI 分析，可用環境變數提供營運者自己的金鑰（見 news.py）。
 對外部署（--host 0.0.0.0 或 READONLY=1）：自動唯讀，關閉手動更新與匯出到本機；排程照常執行。
 """
-import datetime as dt, json, os, random, subprocess, sys, threading, time, urllib.parse
+import datetime as dt, json, os, random, re, subprocess, sys, threading, time, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import base64, hmac, secrets, urllib.request, urllib.error
 from http.cookies import SimpleCookie
@@ -78,6 +78,123 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 STOCK_WORKER_URL = os.environ.get("STOCK_WORKER_URL", "").rstrip("/")
 STOCK_WORKER_TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
+
+_SITE_STOCK_JOB_LOCK = threading.Lock()
+_SITE_STOCK_JOBS = {}
+_SITE_STOCK_JOB_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="site-stock-job")
+_SITE_STOCK_JOB_TTL = 1800
+
+
+def _start_site_stock_job(site_job_id, code):
+    try:
+        warm_stock_worker()
+        payload = json.dumps({"code": code}).encode("utf-8")
+        req = urllib.request.Request(
+            STOCK_WORKER_URL + "/analysis-jobs",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + STOCK_WORKER_TOKEN,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=20) as response:
+            remote = json.loads(response.read().decode("utf-8"))
+        remote_id = remote.get("job_id") if isinstance(remote, dict) else None
+        if not isinstance(remote_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", remote_id):
+            raise StockWorkerGatewayError("個股分析服務未回傳有效工作編號")
+        with _SITE_STOCK_JOB_LOCK:
+            job = _SITE_STOCK_JOBS.get(site_job_id)
+            if job is not None:
+                job.update({"state": "running", "remote_id": remote_id})
+    except Exception as exc:
+        with _SITE_STOCK_JOB_LOCK:
+            job = _SITE_STOCK_JOBS.get(site_job_id)
+            if job is not None:
+                job.update({
+                    "state": "failed",
+                    "error": str(exc)[:500] if isinstance(exc, (StockWorkerGatewayError, StockServiceUnavailable)) else "無法啟動個股分析工作",
+                    "finished_at": time.time(),
+                })
+
+
+def create_site_stock_job(code):
+    if not STOCK_WORKER_URL or not STOCK_WORKER_TOKEN:
+        raise StockServiceUnavailable("個股分析服務尚未設定")
+    code = str(code or "").strip().upper()
+    if not code or not code[0].isdigit() or not code.isalnum() or len(code) > 12:
+        raise ValueError("請輸入有效的台股代號")
+    site_job_id = secrets.token_urlsafe(24)
+    with _SITE_STOCK_JOB_LOCK:
+        now = time.time()
+        expired = [
+            key for key, value in _SITE_STOCK_JOBS.items()
+            if now - value.get("finished_at", value.get("created_at", now)) > _SITE_STOCK_JOB_TTL
+        ]
+        for key in expired:
+            _SITE_STOCK_JOBS.pop(key, None)
+        if len(_SITE_STOCK_JOBS) >= 20:
+            return None
+        _SITE_STOCK_JOBS[site_job_id] = {"state": "starting", "created_at": now}
+    try:
+        _SITE_STOCK_JOB_POOL.submit(_start_site_stock_job, site_job_id, code)
+    except RuntimeError:
+        with _SITE_STOCK_JOB_LOCK:
+            _SITE_STOCK_JOBS.pop(site_job_id, None)
+        return None
+    return site_job_id
+
+
+def get_site_stock_job(site_job_id):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", site_job_id or ""):
+        return None, 404
+    with _SITE_STOCK_JOB_LOCK:
+        current = _SITE_STOCK_JOBS.get(site_job_id)
+        job = dict(current or {})
+        if job and time.time() - job.get("finished_at", job.get("created_at", time.time())) > _SITE_STOCK_JOB_TTL:
+            _SITE_STOCK_JOBS.pop(site_job_id, None)
+            job = {}
+    if not job:
+        return {"state": "failed", "error": "分析工作已逾時，請重新查詢"}, 410
+    if job["state"] == "starting":
+        return {"state": "starting"}, 202
+    if job["state"] == "failed":
+        return {"state": "failed", "error": job.get("error", "個股分析工作啟動失敗")}, 502
+    req = urllib.request.Request(
+        STOCK_WORKER_URL + "/analysis-jobs/" + job["remote_id"],
+        headers={"Authorization": "Bearer " + STOCK_WORKER_TOKEN, "Cache-Control": "no-cache"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise StockWorkerGatewayError("個股分析服務回傳格式錯誤")
+        if payload.get("state") == "completed":
+            result = payload.get("result")
+            status = int(payload.get("analysis_http_status", 500))
+            if status != 200:
+                with _SITE_STOCK_JOB_LOCK:
+                    current = _SITE_STOCK_JOBS.get(site_job_id)
+                    if current is not None:
+                        current["finished_at"] = time.time()
+                        current["state"] = "failed"
+                        current["error"] = (result or {}).get("error", "個股分析失敗")
+                return {"state": "failed", "error": (result or {}).get("error", "個股分析失敗")}, 200
+            with _SITE_STOCK_JOB_LOCK:
+                current = _SITE_STOCK_JOBS.get(site_job_id)
+                if current is not None:
+                    current["finished_at"] = time.time()
+            return {"state": "completed", "result": result}, 200
+        return {"state": payload.get("state", "running")}, 202
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {"state": "failed", "error": "分析工作不存在或已過期，請重新查詢"}, 404
+        raise StockWorkerGatewayError("讀取個股分析進度失敗（HTTP %s）" % exc.code)
+    except Exception as exc:
+        if isinstance(exc, StockWorkerGatewayError):
+            raise
+        raise StockWorkerGatewayError("無法讀取個股分析進度：%s" % type(exc).__name__)
 
 class StockServiceUnavailable(RuntimeError):
     """The production stock-analysis service is not configured or reachable."""
@@ -993,6 +1110,13 @@ class H(SimpleHTTPRequestHandler):
                     stale["note"] = "即時來源暫時無法更新，以下為伺服器最後一次成功取得的行情；請留意報價時間。"
                     return self.send_json(stale)
                 return self.send_json({"error": str(e)}, 503)
+        if u.path.startswith("/api/stock/jobs/"):
+            site_job_id = u.path.rsplit("/", 1)[-1]
+            try:
+                payload, status = get_site_stock_job(site_job_id)
+                return self.send_json(payload or {"error": "分析工作不存在"}, status)
+            except StockWorkerGatewayError as e:
+                return self.send_json({"error": str(e)}, 502)
         if u.path in ("/api/quote", "/api/stock"):
             if u.path == "/api/quote":
                 try:
@@ -1066,6 +1190,17 @@ class H(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
         except Exception:
             return self.send_json({"error": "請求格式錯誤"}, 400)
+        if self.path == "/api/stock/jobs":
+            try:
+                site_job_id = create_site_stock_job(body.get("code", ""))
+                if site_job_id is None:
+                    return self.send_json({"error": "目前分析工作數量已滿，請稍後再試"}, 429)
+                return self.send_json({"job_id": site_job_id, "state": "starting"}, 202)
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+            except StockServiceUnavailable as e:
+                return self.send_json({"error": str(e)}, 503)
+
         if self.path == "/api/admin/users":
             if not GOOGLE_ENABLED or not self.current_user or self.current_user.get("role") != "admin":
                 return self.send_json({"error": "管理員限定"}, 403)
