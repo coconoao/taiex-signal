@@ -47,7 +47,7 @@ def _request_json(url: str) -> dict:
     attempt = 0
     while attempt < 2:
         try:
-            with urllib.request.urlopen(request, timeout=18) as response:
+            with urllib.request.urlopen(request, timeout=8) as response:
                 payload = response.read()
             parsed = json.loads(payload.decode("utf-8-sig"))
             if not isinstance(parsed, dict):
@@ -349,7 +349,10 @@ def _identify_exchange(code: str, hint: str | None, months):
     candidates = [("TWSE", _twse_month), ("TPEX", _tpex_month)]
     if hint == "TPEX":
         candidates.reverse()
-    probe_months = months[-3:]
+    # Exchange identification is a quick liveness probe, not a history scan.
+    # One latest month per provider keeps an unavailable endpoint from
+    # multiplying socket timeouts before the full-history stage begins.
+    probe_months = months[-1:]
     probe_failures = []
     for name, fetcher in candidates:
         for month in reversed(probe_months):
