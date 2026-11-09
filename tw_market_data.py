@@ -47,6 +47,7 @@ _STOCK_CACHE = {}
 _INDEX_CACHE = {}
 _EXRIGHT_CACHE = {}
 _EXRIGHT_CACHE_TTL_SECONDS = 24 * 60 * 60
+_EXRIGHT_EMPTY_CACHE_TTL_SECONDS = 5 * 60
 _CACHE_TTL_SECONDS = 4 * 60 * 60
 
 
@@ -91,9 +92,15 @@ def _request_json(url: str) -> dict:
                 if attempt < 2:
                     retry_after = response.headers.get("Retry-After")
                     try:
-                        delay = min(4.0, max(0.25, float(retry_after)))
+                        requested_delay = float(retry_after)
+                        # Do not hammer a rate-limited provider when it asks
+                        # for a long cooldown; surface the 429 for later retry.
+                        if requested_delay > 15:
+                            break
+                        delay = max(0.25, requested_delay)
                     except (TypeError, ValueError):
-                        delay = 0.5 * (2 ** attempt) + random.uniform(0.0, 0.25)
+                        base_delay = 2.0 if status == 429 else 0.5
+                        delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.25)
                     time.sleep(delay)
                     continue
                 break
@@ -360,13 +367,14 @@ def _cached_exright_month(source: str, month: dt.date):
     now = time.time()
     with _CACHE_LOCK:
         cached = _EXRIGHT_CACHE.get(key)
-        if cached and now - cached[0] < _EXRIGHT_CACHE_TTL_SECONDS:
+        if cached and now - cached[0] < cached[2]:
             return dict(cached[1])
 
     fetcher = _twse_exright_month if source == "TWSE" else _tpex_exright_month
     references = fetcher(month)
+    ttl = _EXRIGHT_CACHE_TTL_SECONDS if references else _EXRIGHT_EMPTY_CACHE_TTL_SECONDS
     with _CACHE_LOCK:
-        _EXRIGHT_CACHE[key] = (now, dict(references))
+        _EXRIGHT_CACHE[key] = (now, dict(references), ttl)
     return dict(references)
 
 
