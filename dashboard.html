@@ -376,6 +376,11 @@ function renderDaily(d) {
   $("demo").hidden = !d.demo;
   $("miss").hidden = true;
   const forecast = d.three_day_forecast || {};
+  if (!forecast.horizons || !Number.isFinite(Number(forecast.base_close)) || Number(forecast.base_close) <= 0) {
+    $("threeDayMeta").textContent = `資料日期 ${d.asof}｜三日模型尚未完成首次計算，等待下一次完整行情更新。`;
+    $("threeDayForecast").innerHTML = '<p class="note">目前行情資料尚未包含三日點位預測；模型完成計算後會在這裡顯示。</p>';
+    return;
+  }
   const horizons = forecast.horizons || {};
   const labels = [["1","第 1 個交易日（D+1）"],["2","第 2 個交易日（D+2）"],["3","第 3 個交易日（D+3）"]];
   let previous = Number(forecast.base_close);
