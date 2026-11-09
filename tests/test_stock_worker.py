@@ -161,5 +161,61 @@ class SafeDiagnosticAllowlistTests(unittest.TestCase):
         self.assertNotIn("private detail", logged)
 
 
+class BackgroundAnalysisJobTests(unittest.TestCase):
+    def setUp(self):
+        with stock_worker._JOB_LOCK:
+            stock_worker._JOBS.clear()
+
+    def tearDown(self):
+        with stock_worker._JOB_LOCK:
+            stock_worker._JOBS.clear()
+
+    def test_create_job_returns_opaque_id_and_stores_result(self):
+        class ImmediatePool:
+            def submit(self, function, *args):
+                function(*args)
+
+        with patch.object(stock_worker, "_JOB_POOL", ImmediatePool()), patch.object(
+            stock_worker, "analyze_code", return_value=({"code": "2330"}, 200)
+        ):
+            job_id = stock_worker._create_analysis_job("2330")
+        self.assertRegex(job_id, r"^[A-Za-z0-9_-]{20,64}$")
+        job = stock_worker._get_analysis_job(job_id)
+        self.assertEqual(job["state"], "completed")
+        self.assertEqual(job["result"], {"code": "2330"})
+        self.assertEqual(job["http_status"], 200)
+        self.assertIsNotNone(job["finished_at"])
+
+    def test_job_records_safe_error_response(self):
+        class ImmediatePool:
+            def submit(self, function, *args):
+                function(*args)
+
+        with patch.object(stock_worker, "_JOB_POOL", ImmediatePool()), patch.object(
+            stock_worker, "analyze_code",
+            return_value=({"error": "官方行情來源暫時無法連線或資料不足，請稍後重試"}, 503),
+        ):
+            job_id = stock_worker._create_analysis_job("2330")
+        job = stock_worker._get_analysis_job(job_id)
+        self.assertEqual(job["state"], "completed")
+        self.assertEqual(job["http_status"], 503)
+        self.assertNotIn("code", job["result"])
+
+    def test_rejects_new_jobs_when_queue_is_full(self):
+        with stock_worker._JOB_LOCK:
+            stock_worker._JOBS["active-one"] = {"state": "queued", "created_at": 1, "finished_at": None}
+            stock_worker._JOBS["active-two"] = {"state": "running", "created_at": 2, "finished_at": None}
+        self.assertIsNone(stock_worker._create_analysis_job("2330"))
+
+    def test_expired_jobs_are_removed(self):
+        with stock_worker._JOB_LOCK:
+            stock_worker._JOBS["expired"] = {
+                "state": "completed", "created_at": 1,
+                "finished_at": 1, "result": {}, "http_status": 200,
+            }
+            stock_worker._prune_jobs_locked(now=stock_worker.JOB_TTL_SECONDS + 2)
+        self.assertIsNone(stock_worker._get_analysis_job("expired"))
+
+
 if __name__ == "__main__":
     unittest.main()
