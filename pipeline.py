@@ -9,7 +9,7 @@
 import os, sys, json, time, io, datetime as dt, urllib.request, urllib.parse, urllib.error
 import numpy as np, pandas as pd
 FAST_STARTUP = "--skip-backfill" in sys.argv
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
@@ -983,6 +983,88 @@ def walk_forward(X, y, start=500, step=20, h=1):
     contrib = m[-1].coef_[0] * m[0].transform(X.loc[[latest]])[0]
     return prob, latest, pd.Series(contrib, index=X.columns)
 
+
+def three_day_point_forecast(df, chips, margin, futures=None):
+    """Direct Ridge forecasts for D+1/D+2/D+3; report walk-forward point errors."""
+    close = pd.to_numeric(df["TAIEX"], errors="coerce").dropna().sort_index()
+    horizons = {}
+    for h in (1, 2, 3):
+        Xh, _, fwd = build(df, chips, margin, h=h, futures=futures)
+        valid_features = Xh.notna().all(axis=1)
+        latest_candidates = Xh.index[valid_features & close.reindex(Xh.index).notna()]
+        if not len(latest_candidates):
+            horizons[str(h)] = {"status": "insufficient", "reason": "沒有完整的最新特徵資料"}
+            continue
+        latest = latest_candidates[-1]
+        train_idx = Xh.index[valid_features & fwd.notna() & (Xh.index < latest)]
+        if len(train_idx) < 120:
+            horizons[str(h)] = {
+                "status": "insufficient", "asof": str(latest.date()),
+                "training_samples": int(len(train_idx)),
+                "minimum_samples": 120,
+                "reason": "有效訓練樣本不足"
+            }
+            continue
+
+        # Expanding-window, purged walk-forward evaluation. Every training
+        # target must have matured by the first test feature date.
+        oos_pred, oos_actual, oos_base = [], [], []
+        first_test = min(max(100, h + 30), max(h + 30, len(train_idx) // 2))
+        for i in range(first_test, len(train_idx), 20):
+            fit_idx = train_idx[:i - h + 1]
+            test_idx = train_idx[i:i + 20]
+            if len(fit_idx) < 80 or not len(test_idx):
+                continue
+            estimator = make_pipeline(StandardScaler(), Ridge(alpha=25.0))
+            estimator.fit(Xh.loc[fit_idx], fwd.loc[fit_idx].astype(float))
+            predicted_returns = estimator.predict(Xh.loc[test_idx])
+            base_points = close.reindex(test_idx).to_numpy(dtype=float)
+            actual_points = close.shift(-h).reindex(test_idx).to_numpy(dtype=float)
+            predicted_points = base_points * (1.0 + predicted_returns)
+            mask = np.isfinite(predicted_points) & np.isfinite(actual_points) & np.isfinite(base_points)
+            oos_pred.extend(predicted_points[mask].tolist())
+            oos_actual.extend(actual_points[mask].tolist())
+            oos_base.extend(base_points[mask].tolist())
+
+        final_model = make_pipeline(StandardScaler(), Ridge(alpha=25.0))
+        final_model.fit(Xh.loc[train_idx], fwd.loc[train_idx].astype(float))
+        predicted_return = float(final_model.predict(Xh.loc[[latest]])[0])
+        base_close = float(close.loc[latest])
+        forecast_close = base_close * (1.0 + predicted_return)
+
+        metrics = {
+            "oos_samples": int(len(oos_pred)),
+            "mae_points": None,
+            "flat_baseline_mae_points": None,
+            "within_0_2_pct_pct": None,
+        }
+        if oos_pred:
+            errors = np.abs(np.asarray(oos_pred) - np.asarray(oos_actual))
+            baseline_errors = np.abs(np.asarray(oos_base) - np.asarray(oos_actual))
+            relative_errors = errors / np.maximum(np.abs(np.asarray(oos_actual)), 1.0)
+            metrics.update({
+                "mae_points": round(float(errors.mean()), 2),
+                "flat_baseline_mae_points": round(float(baseline_errors.mean()), 2),
+                "within_0_2_pct_pct": round(float((relative_errors <= 0.002).mean() * 100), 2),
+            })
+        horizons[str(h)] = {
+            "status": "research",
+            "asof": str(latest.date()),
+            "base_close": round(base_close, 2),
+            "forecast_close": round(float(forecast_close), 2),
+            "predicted_return_pct": round(predicted_return * 100, 4),
+            "training_samples": int(len(train_idx)),
+            "model": "Ridge direct-horizon",
+            **metrics,
+        }
+    return {
+        "asof": str(close.index[-1].date()),
+        "base_close": round(float(close.iloc[-1]), 2),
+        "status": "research",
+        "horizons": horizons,
+        "note": "D+1/D+2/D+3 為直接點位估計；樣本外 MAE 與 ±0.2% 命中率只描述歷史測試，不代表未來保證。",
+    }
+
 def backtest(prob, fwd):
     # Classification metrics use only dates with an actual out-of-sample prediction.
     p = prob.dropna()
@@ -1381,11 +1463,13 @@ if __name__ == "__main__":
         # potentially stale cache while the scheduled backfill owns Supabase.
         write_taiwan_data_status(df, chips, margin, futures)
     X, y, fwd = build(df, chips, margin, futures=futures)
+    three_day_forecast = three_day_point_forecast(df, chips, margin, futures=futures)
     prob, latest, contrib = walk_forward(X, y)
     pu = float(prob.loc[latest])
     layers = contrib.groupby(lambda c: c.split(":")[0]).sum()
     out = {
         "asof": str(latest.date()), "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "three_day_forecast": three_day_forecast,
         "data_basis": "latest_available_taiwan_trading_day", "demo": demo, "prob_up": round(pu, 3),
         "signal": "買進" if pu > BUY else "賣出／減碼" if pu < SELL else "觀望",
         "thresholds": {"buy": BUY, "sell": SELL},
