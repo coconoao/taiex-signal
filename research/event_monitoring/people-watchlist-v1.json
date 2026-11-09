@@ -1,0 +1,131 @@
+{
+  "version": "people-watchlist-v1",
+  "purpose": "Discovery and entity resolution only; a match does not imply market relevance or forecast direction.",
+  "default_enabled": true,
+  "entities": [
+    {
+      "entity_id": "person:donald-trump",
+      "display_name": "Donald Trump",
+      "display_name_zh": "唐納·川普",
+      "entity_type": "person",
+      "aliases": [
+        "Donald Trump",
+        "President Trump",
+        "Trump",
+        "川普",
+        "特朗普"
+      ],
+      "monitor_topics": [
+        "tariffs",
+        "export_controls",
+        "Taiwan_policy",
+        "China_policy",
+        "sanctions",
+        "trade",
+        "semiconductors",
+        "geopolitics"
+      ],
+      "priority": "high",
+      "enabled": true,
+      "notes": "Classify remarks as proposals, executive actions, signed policy or attributed reports; do not collapse these states."
+    },
+    {
+      "entity_id": "person:jensen-huang",
+      "display_name": "Jensen Huang",
+      "display_name_zh": "黃仁勳",
+      "entity_type": "person",
+      "aliases": [
+        "Jensen Huang",
+        "Jen-Hsun Huang",
+        "黃仁勳"
+      ],
+      "monitor_topics": [
+        "AI_infrastructure",
+        "GPU",
+        "semiconductors",
+        "TSMC_supply_chain",
+        "capex",
+        "export_controls",
+        "NVIDIA"
+      ],
+      "priority": "high",
+      "enabled": true,
+      "notes": "Separate official company statements, public speeches, media reporting, investigations and unverified allegations."
+    },
+    {
+      "entity_id": "role:tsmc-executive-leadership",
+      "display_name": "TSMC executive leadership",
+      "display_name_zh": "台積電經營團隊",
+      "entity_type": "role",
+      "aliases": [
+        "TSMC CEO",
+        "TSMC chairman",
+        "台積電董事長",
+        "台積電總裁",
+        "台積電執行長"
+      ],
+      "monitor_topics": [
+        "capacity",
+        "capex",
+        "earnings",
+        "advanced_packaging",
+        "process_technology",
+        "overseas_fabs",
+        "demand"
+      ],
+      "priority": "high",
+      "enabled": true,
+      "notes": "Resolve the named office-holder using dated TSMC investor-relations or governance sources; role aliases are not proof of speaker identity."
+    },
+    {
+      "entity_id": "role:federal-reserve-chair",
+      "display_name": "Federal Reserve Chair",
+      "display_name_zh": "美國聯準會主席",
+      "entity_type": "role",
+      "aliases": [
+        "Federal Reserve Chair",
+        "Fed Chair",
+        "Chair of the Federal Reserve",
+        "聯準會主席"
+      ],
+      "monitor_topics": [
+        "interest_rates",
+        "monetary_policy",
+        "inflation",
+        "liquidity",
+        "US_dollar",
+        "Treasury_yields"
+      ],
+      "priority": "high",
+      "enabled": true,
+      "notes": "Resolve office-holder and tenure from dated Federal Reserve official sources; distinguish prepared remarks, Q&A, testimony and policy decisions."
+    },
+    {
+      "entity_id": "role:taiwan-central-bank-governor",
+      "display_name": "Central Bank of the Republic of China (Taiwan) Governor",
+      "display_name_zh": "中央銀行總裁",
+      "entity_type": "role",
+      "aliases": [
+        "Taiwan central bank governor",
+        "CBC governor",
+        "央行總裁"
+      ],
+      "monitor_topics": [
+        "interest_rates",
+        "FX",
+        "monetary_policy",
+        "financial_stability"
+      ],
+      "priority": "medium",
+      "enabled": true,
+      "notes": "Resolve office-holder from official Central Bank sources with effective dates."
+    }
+  ],
+  "matching_rules": {
+    "require_context_for_common_names": true,
+    "prefer_official_account_or_primary_source": true,
+    "never_infer_identity_from_name_only": true,
+    "ambiguous_matches": "unresolved",
+    "role_aliases_require_dated_official_resolution": true
+  }
+}
