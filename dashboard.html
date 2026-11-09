@@ -1174,18 +1174,47 @@ function renderStock(s, cached=false) {
     (s.fundamentals.length ? `<table><thead><tr><th>項目</th><th>數值</th><th>判讀</th></tr></thead><tbody>${s.fundamentals.map(f => `<tr><td>${esc(f.item)}</td><td>${esc(f.value)}</td><td>${fl[f.flag + 1]}</td></tr>`).join("")}</tbody></table>` : '<p class="note">抓不到這檔的財報資料。</p>') +
     '<p class="note">財報來自 Yahoo，台股欄位常不完整，請對照公開資訊觀測站。沒有「當時公布」的歷史財報可回測，因此只作參考，不調整模型。</p>';
 }
-$("go").onclick = () => {
-  const c = $("code").value.trim(); if (!c) return;
-  $("stockOut").innerHTML = '<p class="note">正在執行此股票的個股分析流程（不會重跑整套大盤 Pipeline）…</p>';
-  api("/api/stock?code=" + encodeURIComponent(c), undefined, 360000).then(s => {
-    if (s.error) { $("stockOut").innerHTML = `<p>${esc(s.error)}</p>`; return; }
-    renderStock(s, false); saveStockHistory(s);
-  }).catch(err => {
+$("go").onclick = async () => {
+  const code = $("code").value.trim();
+  if (!code) return;
+  const button = $("go");
+  button.disabled = true;
+  $("stockOut").innerHTML = '<p class="note">正在啟動個股分析工作…</p>';
+  try {
+    const created = await api("/api/stock/jobs", {code}, 20000);
+    const jobId = created.job_id;
+    if (!jobId) throw new Error("分析服務未建立工作編號");
+    const startedAt = Date.now();
+    let delay = 2000;
+    while (Date.now() - startedAt < 15 * 60 * 1000) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+      const response = await fetchTimed("/api/stock/jobs/" + encodeURIComponent(jobId), {cache: "no-store"}, 20000);
+      const state = await response.json();
+      if (!response.ok && response.status !== 202) {
+        throw new Error(state.error || "讀取分析進度失敗（HTTP " + response.status + "）");
+      }
+      if (state.state === "completed") {
+        if (!state.result || typeof state.result !== "object") throw new Error("分析結果格式錯誤");
+        renderStock(state.result, false);
+        saveStockHistory(state.result);
+        return;
+      }
+      if (state.state === "failed") throw new Error(state.error || "個股分析失敗");
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const label = state.state === "starting" ? "正在喚醒分析服務" :
+        state.state === "queued" ? "已排入分析佇列" : "模型正在研究個股資料";
+      $("stockOut").innerHTML = '<p class="note">' + label + "… 已等待 " + elapsed + " 秒，請勿關閉此頁面。</p>";
+      delay = Math.min(5000, delay + 500);
+    }
+    throw new Error("分析超過 15 分鐘仍未完成，請稍後重新查詢。");
+  } catch (err) {
     const message = err && err.name === "AbortError"
-      ? "個股分析超過 360 秒仍未完成，請稍後重試。"
+      ? "連線逾時，請稍後重試。"
       : (err && err.message ? err.message : "連線失敗，請重新整理後再試。");
     $("stockOut").innerHTML = '<p class="note">個股查詢失敗：' + esc(message) + '</p>';
-  });
+  } finally {
+    button.disabled = false;
+  }
 };
 $("code").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
 
