@@ -240,7 +240,7 @@ document.getElementById("run").addEventListener("click",async()=>{
       }
      }
      rows.push("",(data.long_term_model||{}).disclaimer||"研究用途；不構成投資建議或交易指示。");
-     document.getElementById("summary").textContent=rows.join("\n");
+     document.getElementById("summary").textContent=rows.join("\\n");
      document.getElementById("raw").textContent=JSON.stringify(data,null,2);
      return;
     }
