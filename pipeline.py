@@ -882,7 +882,8 @@ def build(df, chips=None, margin=None, h=1, futures=None):
     # Carry only the last known observation forward for up to three Taiwan
     # sessions so a delayed daily release does not freeze the whole forecast
     # at the previous session. The separate source-coverage report keeps the
-    # true publication date visible; this never backfills future observations.\n    margin_aligned = margin.reindex(X.index).ffill(limit=3) if margin is not None else None
+    # true publication date visible; this never backfills future observations.
+    margin_aligned = margin.reindex(X.index).ffill(limit=3) if margin is not None else None
     margin_valid = (margin_aligned["margin_bal"].notna()
                     if margin_aligned is not None and "margin_bal" in margin_aligned.columns
                     else pd.Series(False, index=X.index))
