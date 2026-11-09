@@ -54,7 +54,7 @@ class SiteStockJobTests(unittest.TestCase):
             web_app._SITE_STOCK_JOBS[site_id] = {
                 "state": "running",
                 "remote_id": "B" * 24,
-                "created_at": 100,
+                "created_at": web_app.time.time(),
             }
         response = io.BytesIO(json.dumps({
             "state": "completed",
