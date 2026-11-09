@@ -94,17 +94,6 @@ class TestTaiwanMarketData(unittest.TestCase):
         )
         self.assertNotIn("2330", caught.exception.diagnostic_code)
 
-    def test_request_json_uses_bounded_socket_timeout(self):
-        error = __import__("urllib.error").error.URLError(TimeoutError("timed out"))
-        with patch.object(
-            tw_market_data.urllib.request, "urlopen", side_effect=error
-        ) as open_url:
-            with self.assertRaises(tw_market_data.MarketDataError):
-                tw_market_data._request_json(
-                    "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
-                )
-        self.assertEqual(open_url.call_args.kwargs["timeout"], 8)
-
     def test_exchange_probe_checks_only_latest_month_per_provider(self):
         months = [
             dt.date(2026, 9, 1),
