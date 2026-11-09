@@ -615,10 +615,17 @@ class TestTaiwanMarketData(unittest.TestCase):
 
     def test_empty_action_cache_expires_quickly(self):
         month = dt.date(2025, 12, 1)
+        clock = iter([
+            1000.0, 1000.0, 1000.0,
+            1001.0, 1001.0,
+            1301.0, 1301.0, 1301.0,
+        ])
         with (
             patch.object(tw_market_data, "_EXRIGHT_CACHE", {}),
+            patch.object(tw_market_data, "_ACTION_FETCH_LOCKS", {}),
+            patch.object(tw_market_data, "_ACTION_ERROR_CACHE", {}),
             patch.object(tw_market_data, "_twse_exright_month", return_value={}) as fetch,
-            patch.object(tw_market_data.time, "time", side_effect=[1000.0, 1001.0, 1301.0]),
+            patch.object(tw_market_data.time, "time", side_effect=lambda: next(clock)),
         ):
             tw_market_data._cached_exright_month("TWSE", month)
             tw_market_data._cached_exright_month("TWSE", month)
