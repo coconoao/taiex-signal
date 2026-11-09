@@ -553,7 +553,9 @@ def load_stock_history(code: str, exchange_hint: str | None = None, years: int =
 
     stage_started = time.perf_counter()
     try:
-        rows = _fetch_months(fetcher, code, months, max_workers=2)
+        rows = _fetch_months(
+            fetcher, code, months, max_workers=1 if source == "TWSE" else 2
+        )
     except Exception as exc:
         print(
             "[stock-analysis] stage=stock_history_download status=failed "
@@ -642,7 +644,9 @@ def load_taiex_history(years: int = 10):
 
     months = _month_starts(years)
     records = []
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    # The benchmark endpoint is also TWSE; serialize requests to reduce
+    # transient anti-bot and rate-limit responses during full backfills.
+    with ThreadPoolExecutor(max_workers=1) as pool:
         futures = [pool.submit(_taiex_month, month) for month in months]
         errors = []
         for future in as_completed(futures):
