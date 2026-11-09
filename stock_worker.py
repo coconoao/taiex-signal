@@ -200,6 +200,13 @@ document.getElementById("run").addEventListener("click",async()=>{
      continue;
     }
     if(poll.ok&&body.state==="completed"){
+     if(Number(body.analysis_http_status)>=400){
+      const failure=body.result&&body.result.error?body.result.error:"分析服務回報失敗";
+      out.textContent="分析未成功（HTTP "+body.analysis_http_status+"）\\n"+failure+"\\n總等待："+elapsed();
+      document.getElementById("summary").textContent="本次沒有產生有效分析資料。請依上方錯誤排除後再測試。";
+      document.getElementById("raw").textContent=JSON.stringify(body.result||{},null,2);
+      return;
+     }
      out.textContent="健康檢查：HTTP "+health.status+"（"+healthTime+" 秒）\\n分析工作：完成\\n分析 HTTP 狀態："+body.analysis_http_status+"\\n總等待："+elapsed();
      const data=body.result||{};
      const pct=(v,d=1)=>typeof v==="number"?v.toFixed(d)+"%":"資料不足";
