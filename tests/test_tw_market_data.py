@@ -361,6 +361,76 @@ class TestTaiwanMarketData(unittest.TestCase):
             )
         self.assertEqual(get.call_count, 2)
 
+    def test_request_json_stops_when_retry_after_exceeds_safe_window(self):
+        from types import SimpleNamespace
+        response = SimpleNamespace(
+            status_code=429, headers={"Retry-After": "30"}, content=b""
+        )
+        with (
+            patch.object(tw_market_data.curl_requests, "get", return_value=response) as get,
+            patch.object(tw_market_data.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data._request_json("https://www.twse.com.tw/test")
+        self.assertEqual(caught.exception.diagnostic_code, "twse_http_429")
+        self.assertEqual(get.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_request_json_retries_429_using_retry_after(self):
+        from types import SimpleNamespace
+        limited = SimpleNamespace(
+            status_code=429, headers={"Retry-After": "2"}, content=b""
+        )
+        valid = SimpleNamespace(status_code=200, headers={}, content=b'{"ok":true}')
+        with (
+            patch.object(tw_market_data.curl_requests, "get", side_effect=[limited, valid]) as get,
+            patch.object(tw_market_data.time, "sleep") as sleep,
+        ):
+            self.assertEqual(
+                tw_market_data._request_json("https://www.twse.com.tw/test"),
+                {"ok": True},
+            )
+        self.assertEqual(get.call_count, 2)
+        sleep.assert_called_once_with(2.0)
+
+    def test_request_json_does_not_retry_client_errors(self):
+        from types import SimpleNamespace
+        for status in (400, 401, 403):
+            response = SimpleNamespace(status_code=status, headers={}, content=b"")
+            with (
+                patch.object(tw_market_data.curl_requests, "get", return_value=response) as get,
+                patch.object(tw_market_data.time, "sleep") as sleep,
+            ):
+                with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                    tw_market_data._request_json("https://www.twse.com.tw/test")
+            self.assertEqual(caught.exception.diagnostic_code, f"twse_http_{status}")
+            self.assertEqual(get.call_count, 1)
+            sleep.assert_not_called()
+
+    def test_request_json_reports_invalid_json_after_retry_budget(self):
+        from types import SimpleNamespace
+        invalid = SimpleNamespace(status_code=200, headers={}, content=b"<html>blocked</html>")
+        with (
+            patch.object(tw_market_data.curl_requests, "get", side_effect=[invalid, invalid, invalid]) as get,
+            patch.object(tw_market_data.time, "sleep"),
+        ):
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data._request_json("https://www.twse.com.tw/test")
+        self.assertEqual(caught.exception.diagnostic_code, "twse_invalid_json")
+        self.assertEqual(get.call_count, 3)
+
+    def test_request_json_reports_timeout_after_retry_budget(self):
+        with (
+            patch.object(
+                tw_market_data.curl_requests, "get", side_effect=TimeoutError("timed out")
+            ) as get,
+            patch.object(tw_market_data.time, "sleep"),
+        ):
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data._request_json("https://www.twse.com.tw/test")
+        self.assertEqual(caught.exception.diagnostic_code, "twse_timeout")
+        self.assertEqual(get.call_count, 3)
+
     def test_request_json_retries_transient_network_error(self):
         from types import SimpleNamespace
         error = OSError(101, "Network is unreachable")
