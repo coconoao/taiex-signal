@@ -989,6 +989,7 @@ def three_day_point_forecast(df, chips, margin, futures=None):
     close = pd.to_numeric(df["TAIEX"], errors="coerce").dropna().sort_index()
     horizons = {}
     history_records = []
+    forecast_asof = None
     for h in (1, 2, 3):
         Xh, _, fwd = build(df, chips, margin, h=h, futures=futures)
         valid_features = Xh.notna().all(axis=1)
@@ -997,6 +998,8 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             horizons[str(h)] = {"status": "insufficient", "reason": "沒有完整的最新特徵資料"}
             continue
         latest = latest_candidates[-1]
+        if forecast_asof is None:
+            forecast_asof = latest
         train_idx = Xh.index[valid_features & fwd.notna() & (Xh.index < latest)]
         if len(train_idx) < 120:
             horizons[str(h)] = {
@@ -1085,8 +1088,9 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             "validation": metrics,
         }
 
-    latest_asof = str(close.index[-1].date())
-    base_close = round(float(close.iloc[-1]), 2)
+    latest_asof_index = forecast_asof if forecast_asof is not None else close.index[-1]
+    latest_asof = str(latest_asof_index.date())
+    base_close = round(float(close.loc[latest_asof_index]), 2)
     sessions = []
     previous = base_close
     previous_available = base_close > 0
@@ -1104,22 +1108,25 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             "model": item.get("model", "Ridge direct-horizon"),
         }
         point = item.get("forecast_close")
-        if item.get("status") == "research" and point is not None and previous_available:
-            delta = float(point) - previous
-            pct = delta / previous * 100 if previous else 0.0
-            direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
-            session["change_vs_previous"] = {
-                "reference_close": round(previous, 2),
-                "points": round(delta, 2),
-                "pct": round(pct, 4),
-                "direction": direction,
-                "color": "red" if direction == "up" else "green" if direction == "down" else "neutral",
-            }
+        if item.get("status") == "research" and point is not None:
+            if previous_available:
+                delta = float(point) - previous
+                pct = delta / previous * 100 if previous else 0.0
+                direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
+                session["change_vs_previous"] = {
+                    "reference_close": round(previous, 2),
+                    "points": round(delta, 2),
+                    "pct": round(pct, 4),
+                    "direction": direction,
+                    "color": "red" if direction == "up" else "green" if direction == "down" else "neutral",
+                }
+            else:
+                session["change_vs_previous"] = None
             previous = float(point)
+            previous_available = True
         else:
             session["change_vs_previous"] = None
-            if item.get("status") != "research":
-                previous_available = False
+            previous_available = False
         sessions.append(session)
 
     forecast = {
@@ -1131,7 +1138,7 @@ def three_day_point_forecast(df, chips, margin, futures=None):
         "horizon_unit": "trading_sessions",
         "method": "direct_horizon_ridge",
         "model_version": "ridge-direct-3session-v2",
-        "status": "research",
+        "status": "research" if any(x.get("status") == "research" for x in sessions) else "insufficient",
         "sessions": sessions,
         "note": "D+1/D+2/D+3 為獨立直接點位估計；歷史誤差來自逐時點樣本外測試，不代表未來保證。",
     }
