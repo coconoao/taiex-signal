@@ -178,6 +178,8 @@ def get_site_stock_job(site_job_id):
                     current = _SITE_STOCK_JOBS.get(site_job_id)
                     if current is not None:
                         current["finished_at"] = time.time()
+                        current["state"] = "failed"
+                        current["error"] = (result or {}).get("error", "個股分析失敗")
                 return {"state": "failed", "error": (result or {}).get("error", "個股分析失敗")}, 200
             with _SITE_STOCK_JOB_LOCK:
                 current = _SITE_STOCK_JOBS.get(site_job_id)
