@@ -106,15 +106,15 @@ details[open]>summary{margin-bottom:12px}
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
   <div class="banner" id="miss" hidden></div>
-  <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><p id="usMarketSummary" class="note"></p><div class="usgrid" id="usMarketCards"></div><div class="charttools" aria-label="美股圖表操作"><button class="btn sm ghost" id="usZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="usZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="usPan" type="button">平移</button><button class="btn sm ghost" id="usZoom" type="button">框選縮放</button><button class="btn sm ghost" id="usReset" type="button">重設</button><button class="btn sm ghost" id="usRange1h" type="button">1 小時</button><button class="btn sm ghost" id="usRange3h" type="button">3 小時</button><button class="btn sm ghost" id="usRangeAll" type="button">全部</button></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
-  <div class="banner" id="err" hidden>讀不到 signals.json。請用 python app.py 啟動，或用匯出的單一 HTML 檔、已部署的網站開啟（直接雙擊 dashboard.html 讀不到資料檔）。</div>
-    <section id="hero">
+  <div class="banner" id="err" hidden>讀不到 signals.json。請重新整理頁面；若持續發生，請回報此訊息。</div>
+    <section id="hero" aria-live="polite">
       <h2>未來三個交易日加權指數點位預測</h2>
       <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
       <div id="threeDayForecast" class="forecast-grid"></div>
       <p id="sumline" class="note" hidden></p>
-      <p class="note">顏色逐日與前一交易日比較：紅色代表上漲、綠色代表下跌。點位為模型估計，不是保證或交易指示。</p>
+      <p class="note"><span style="color:var(--up);font-weight:700">紅色＝上漲</span>；<span style="color:var(--down);font-weight:700">綠色＝下跌</span>。每日變化與前一交易日（或前一預測日）比較。點位為模型估計，仍在研究驗證中。</p>
     </section>
+  <section id="usMarket"><h2>美股最新可取得行情</h2><p class="note" id="usMarketMeta">載入美股盤中資料中…</p><p id="usMarketSummary" class="note"></p><div class="usgrid" id="usMarketCards"></div><div class="charttools" aria-label="美股圖表操作"><button class="btn sm ghost" id="usZoomIn" type="button">＋ 放大</button><button class="btn sm ghost" id="usZoomOut" type="button">－ 縮小</button><button class="btn sm ghost" id="usPan" type="button">平移</button><button class="btn sm ghost" id="usZoom" type="button">框選縮放</button><button class="btn sm ghost" id="usReset" type="button">重設</button><button class="btn sm ghost" id="usRange1h" type="button">1 小時</button><button class="btn sm ghost" id="usRange3h" type="button">3 小時</button><button class="btn sm ghost" id="usRangeAll" type="button">全部</button></div><div id="usMarketChart" class="chartbox"></div><p class="note">資料來源 Yahoo Finance，5 分鐘區間；可能延遲或缺漏。休市時顯示最近可取得的交易時段，不代表即時成交價。</p></section>
     <section id="layers" hidden>
       <h2>各層訊號推向哪一邊</h2>
       <div id="layerRows"></div>
