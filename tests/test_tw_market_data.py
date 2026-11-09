@@ -293,18 +293,20 @@ class TestTaiwanMarketData(unittest.TestCase):
             tw_market_data._roc_date("114年12月11日"), dt.date(2025, 12, 11)
         )
 
-    def test_twse_exright_parser_uses_cash_dividend_reference_only(self):
+    def test_twse_exright_parser_includes_rights_and_dividend_reference_prices(self):
         payload = {
             "fields": ["資料日期", "股票代號", "除權息參考價", "權/息"],
             "data": [
                 ["114年12月11日", "2330", "1,499.99", "息"],
                 ["114年12月12日", "2330", "100.00", "權"],
+                ["114年12月15日", "2330", "98.50", "權息"],
             ],
         }
         with patch.object(tw_market_data, "_request_json", return_value=payload):
             refs = tw_market_data._twse_exright_month(dt.date(2025, 12, 1))
         self.assertEqual(refs[("2330", dt.date(2025, 12, 11))], 1499.99)
-        self.assertNotIn(("2330", dt.date(2025, 12, 12)), refs)
+        self.assertEqual(refs[("2330", dt.date(2025, 12, 12))], 100.0)
+        self.assertEqual(refs[("2330", dt.date(2025, 12, 15))], 98.5)
 
     def test_tpex_exright_parser_reads_table_schema(self):
         payload = {
@@ -319,7 +321,7 @@ class TestTaiwanMarketData(unittest.TestCase):
         with patch.object(tw_market_data, "_request_json", return_value=payload):
             refs = tw_market_data._tpex_exright_month(dt.date(2025, 12, 1))
         self.assertEqual(refs[("6488", dt.date(2025, 12, 31))], 411.0)
-        self.assertNotIn(("6488", dt.date(2025, 12, 30)), refs)
+        self.assertEqual(refs[("6488", dt.date(2025, 12, 30))], 400.0)
 
     def test_adjusted_close_uses_official_cash_dividend_reference(self):
         rows = [
