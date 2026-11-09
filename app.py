@@ -129,7 +129,7 @@ def create_site_stock_job(code):
         now = time.time()
         expired = [
             key for key, value in _SITE_STOCK_JOBS.items()
-            if value.get("finished_at") and now - value["finished_at"] > _SITE_STOCK_JOB_TTL
+            if now - value.get("finished_at", value.get("created_at", now)) > _SITE_STOCK_JOB_TTL
         ]
         for key in expired:
             _SITE_STOCK_JOBS.pop(key, None)
@@ -149,9 +149,13 @@ def get_site_stock_job(site_job_id):
     if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", site_job_id or ""):
         return None, 404
     with _SITE_STOCK_JOB_LOCK:
-        job = dict(_SITE_STOCK_JOBS.get(site_job_id) or {})
+        current = _SITE_STOCK_JOBS.get(site_job_id)
+        job = dict(current or {})
+        if job and time.time() - job.get("finished_at", job.get("created_at", time.time())) > _SITE_STOCK_JOB_TTL:
+            _SITE_STOCK_JOBS.pop(site_job_id, None)
+            job = {}
     if not job:
-        return None, 404
+        return {"state": "failed", "error": "分析工作已逾時，請重新查詢"}, 410
     if job["state"] == "starting":
         return {"state": "starting"}, 202
     if job["state"] == "failed":
