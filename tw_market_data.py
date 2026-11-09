@@ -185,9 +185,21 @@ def _month_starts(years: int = 10):
 
 
 def _roc_date(value: str) -> dt.date:
-    raw = str(value or "").strip().replace("*", "").replace("＊", "")
-    raw = raw.replace("年", "/").replace("月", "/").replace("日", "")
-    parts = raw.split("/")
+    text = str(value or "").strip().replace("*", "").replace("＊", "")
+    if not text:
+        raise ValueError("empty date")
+    if len(text) >= 10 and text[4] == "-" and text[:4].isdigit():
+        return dt.date.fromisoformat(text[:10])
+
+    compact = "".join(ch for ch in text if ch.isdigit())
+    if "/" not in text and "年" not in text and compact.isdigit():
+        if len(compact) == 7:
+            return dt.date(int(compact[:3]) + 1911, int(compact[3:5]), int(compact[5:7]))
+        if len(compact) == 8:
+            return dt.date(int(compact[:4]), int(compact[4:6]), int(compact[6:8]))
+
+    normalized = text.replace("年", "/").replace("月", "/").replace("日", "")
+    parts = [part.strip() for part in normalized.split("/") if part.strip()]
     if len(parts) != 3:
         raise ValueError("日期格式錯誤")
     year, month, day = (int(part) for part in parts)
@@ -361,6 +373,142 @@ def _tpex_exright_month(month: dt.date):
                 continue
     return result
 
+
+
+def _month_range(month: dt.date):
+    next_month = (month.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+    last_day = next_month - dt.timedelta(days=1)
+    return month.strftime("%Y%m%d"), last_day.strftime("%Y%m%d")
+
+
+def _twse_reference_month(report: str, month: dt.date, code_field: str, price_field: str):
+    start_date, end_date = _month_range(month)
+    params = urllib.parse.urlencode({
+        "startDate": start_date, "endDate": end_date, "response": "json"
+    })
+    payload = _request_json(f"https://www.twse.com.tw/exchangeReport/{report}?{params}")
+    fields = payload.get("fields") or []
+    data = payload.get("data") or []
+    required = ("恢復買賣日期", code_field, price_field)
+    if not isinstance(fields, list) or not isinstance(data, list) or any(x not in fields for x in required):
+        raise MarketDataError(
+            f"TWSE {report} 公司行動資料欄位格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+    positions = {name: fields.index(name) for name in required}
+    result = {}
+    for item in data:
+        if not isinstance(item, (list, tuple)) or len(item) <= max(positions.values()):
+            continue
+        try:
+            day = _roc_date(item[positions["恢復買賣日期"]])
+            symbol = str(item[positions[code_field]]).strip().upper()
+            reference = _number(item[positions[price_field]])
+            if symbol and reference and reference > 0:
+                result[(symbol, day)] = reference
+        except (ValueError, TypeError):
+            continue
+    return result
+
+
+def _tpex_reference_month(report: str, month: dt.date, code_field: str, price_field: str):
+    start_date, end_date = _month_range(month)
+    start_text = f"{start_date[:4]}/{start_date[4:6]}/{start_date[6:8]}"
+    end_text = f"{end_date[:4]}/{end_date[4:6]}/{end_date[6:8]}"
+    params = urllib.parse.urlencode({
+        "startDate": start_text, "endDate": end_text, "response": "json"
+    })
+    url = f"https://www.tpex.org.tw/www/zh-tw/bulletin/{report}?" + params
+    payload = _request_json(url)
+    tables = payload.get("tables") or []
+    if not isinstance(tables, list):
+        raise MarketDataError(
+            f"TPEx {report} 公司行動資料格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+    result = {}
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        fields = table.get("fields") or []
+        data = table.get("data") or []
+        required = ("恢復買賣日期", code_field, price_field)
+        if not isinstance(fields, list) or not isinstance(data, list):
+            continue
+        if any(name not in fields for name in required):
+            continue
+        positions = {name: fields.index(name) for name in required}
+        for item in data:
+            if not isinstance(item, (list, tuple)) or len(item) <= max(positions.values()):
+                continue
+            try:
+                day = _roc_date(item[positions["恢復買賣日期"]])
+                symbol = str(item[positions[code_field]]).strip().upper()
+                reference = _number(item[positions[price_field]])
+                if symbol and reference and reference > 0:
+                    result[(symbol, day)] = reference
+            except (ValueError, TypeError):
+                continue
+    return result
+
+
+def _twse_reduction_month(month: dt.date):
+    return _twse_reference_month("TWTAUU", month, "股票代號", "恢復買賣參考價")
+
+
+def _tpex_reduction_month(month: dt.date):
+    return _tpex_reference_month(
+        "revivt", month, "股票代號", "減資恢復買賣開始日參考價格"
+    )
+
+
+def _twse_par_value_month(month: dt.date):
+    return _twse_reference_month("TWTB8U", month, "股票代號", "恢復買賣參考價")
+
+
+def _twse_etf_split_month(month: dt.date):
+    start_date, end_date = _month_range(month)
+    params = urllib.parse.urlencode({
+        "startDate": start_date, "endDate": end_date, "response": "json"
+    })
+    payload = _request_json("https://www.twse.com.tw/rwd/zh/split/TWTCAU?" + params)
+    fields = payload.get("fields") or []
+    data = payload.get("data") or []
+    required = ("恢復買賣日期", "ETF代號", "恢復買賣參考價")
+    if not isinstance(fields, list) or not isinstance(data, list) or any(x not in fields for x in required):
+        raise MarketDataError(
+            "TWSE ETF 分割資料欄位格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+    positions = {name: fields.index(name) for name in required}
+    result = {}
+    for item in data:
+        if not isinstance(item, (list, tuple)) or len(item) <= max(positions.values()):
+            continue
+        try:
+            day = _roc_date(item[positions["恢復買賣日期"]])
+            symbol = str(item[positions["ETF代號"]]).strip().upper()
+            reference = _number(item[positions["恢復買賣參考價"]])
+            if symbol and reference and reference > 0:
+                result[(symbol, day)] = reference
+        except (ValueError, TypeError):
+            continue
+    return result
+
+
+def _tpex_etf_split_month(month: dt.date):
+    result = {}
+    errors = []
+    for report in ("etfSplitRslt", "etfRvsRslt"):
+        try:
+            result.update(_tpex_reference_month(
+                report, month, "證券代號", "恢復買賣開始參考價"
+            ))
+        except Exception as exc:
+            errors.append(exc)
+    if errors and not result:
+        raise errors[0]
+    return result
 
 def _cached_exright_month(source: str, month: dt.date):
     key = (source, month)
