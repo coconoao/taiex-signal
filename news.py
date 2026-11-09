@@ -391,6 +391,18 @@ def run(name, fn, p, analyst_headlines=None):
     except Exception as e:
         return name, {"error": f"{type(e).__name__}: {e}"}
 
+def model_statuses(todo, results):
+    """Expose provider readiness without ever exposing API credentials."""
+    status = {}
+    for name in MODELS:
+        if name not in todo:
+            status[name] = {"status": "not_configured", "message": "未設定伺服器 API 金鑰"}
+        elif results.get(name, {}).get("error"):
+            status[name] = {"status": "error", "message": str(results[name]["error"])}
+        else:
+            status[name] = {"status": "ok"}
+    return status
+
 def research_features(hl):
     """Versioned, Taiwan-market-relevant news features; not a trading signal."""
     kinds = ("market", "taiwan", "policy", "analyst")
@@ -580,6 +592,7 @@ def main():
         res = {"內建規則": lexicon(hl)} | dict(
             ex.map(lambda kv: run(kv[0], kv[1], p, analyst_headlines), todo.items())
         )
+    model_status = model_statuses(todo, res)
     ok = {n: r for n, r in res.items() if "error" not in r}
     agg = {}
     for k in ("next_day", "next_week"):
@@ -597,13 +610,16 @@ def main():
     event_history = save_policy_event_history(events)
     out = {"asof": dt.date.today().isoformat(), "demo": False, "headlines": hl, "policy_events": events,
            "policy_event_history_count": len(event_history), "prompt": p, "models": res, "agg": agg,
-           "missing": [n for n in MODELS if n not in todo],
+           "model_status": model_status, "missing": [n for n in MODELS if n not in todo],
            "analyst": {"rows": list(rows.values()), "score": round(sum(vals) / len(vals), 2) if vals else None}}
     json.dump(out, open("news.json", "w", encoding="utf-8"), ensure_ascii=False)
     with open("news_history.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"asof": out["asof"], "agg": agg, "analyst": [{"name": r["name"], "stances": r["stances"]} for r in rows.values()],
                             "models": {n: {k: r[k] for k in ("next_day", "next_week")} for n, r in ok.items()}}, ensure_ascii=False) + "\n")
     for n, r in res.items(): print(n, r.get("error") or f"隔日 {r['next_day']:+.2f}  一週 {r['next_week']:+.2f}")
+    for n, status in model_status.items():
+        if status["status"] == "not_configured":
+            print(f"{n}: 未啟用（伺服器尚未設定 API 金鑰）")
 
 if __name__ == "__main__":
     main()
