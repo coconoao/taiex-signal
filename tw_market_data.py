@@ -14,10 +14,10 @@ import json
 import threading
 import time
 import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
+from curl_cffi import requests as curl_requests
 
 
 class MarketDataError(RuntimeError):
@@ -47,15 +47,49 @@ _CACHE_TTL_SECONDS = 4 * 60 * 60
 
 
 def _request_json(url: str) -> dict:
-    request = urllib.request.Request(url, headers=_HEADERS)
     original_host = urllib.parse.urlparse(url).hostname
+    request_url = url
     last_error = None
+    code = None
     redirect_count = 0
     attempt = 0
     while attempt < 2:
         try:
-            with urllib.request.urlopen(request, timeout=8) as response:
-                payload = response.read()
+            response = curl_requests.get(
+                request_url,
+                headers=_HEADERS,
+                timeout=8,
+                impersonate="chrome",
+                allow_redirects=False,
+            )
+            code = response.status_code
+            if code == 308:
+                # Follow only HTTPS redirects that stay on the original,
+                # allowlisted exchange host; never forward requests elsewhere.
+                location = response.headers.get("Location")
+                target = urllib.parse.urljoin(request_url, location or "")
+                target_parts = urllib.parse.urlparse(target)
+                if (
+                    location
+                    and redirect_count < 3
+                    and target_parts.scheme == "https"
+                    and target_parts.hostname == original_host
+                ):
+                    request_url = target
+                    redirect_count += 1
+                    continue
+                break
+            if code in (401, 403):
+                break
+            if code == 429 or (code is not None and code >= 500):
+                if attempt == 0:
+                    attempt += 1
+                    time.sleep(1.0)
+                    continue
+                break
+            if code is not None and code >= 400:
+                break
+            payload = response.content
             parsed = json.loads(payload.decode("utf-8-sig"))
             if not isinstance(parsed, dict):
                 raise MarketDataError(
@@ -67,35 +101,12 @@ def _request_json(url: str) -> dict:
             raise
         except Exception as exc:
             last_error = exc
-            code = getattr(exc, "code", None)
-            if code == 308:
-                # urllib's default redirect handler does not follow HTTP 308.
-                # Follow only HTTPS redirects that stay on the original,
-                # allowlisted exchange host; never forward requests elsewhere.
-                location = getattr(exc, "headers", {}).get("Location")
-                target = urllib.parse.urljoin(request.full_url, location or "")
-                target_parts = urllib.parse.urlparse(target)
-                if (
-                    location
-                    and redirect_count < 3
-                    and target_parts.scheme == "https"
-                    and target_parts.hostname == original_host
-                ):
-                    request = urllib.request.Request(target, headers=_HEADERS)
-                    redirect_count += 1
-                    continue
-            if code in (401, 403):
-                break
-            if attempt == 0 and (code == 429 or (code and code >= 500)):
-                attempt += 1
-                time.sleep(1.0)
-                continue
+            code = None
             break
 
     # Keep diagnostics useful without recording full URLs, query strings, or
     # request payloads. The adapter only calls fixed public exchange hosts.
     host = urllib.parse.urlparse(url).hostname or "unknown-host"
-    reason = getattr(last_error, "reason", None)
     if host in ("www.twse.com.tw", "twse.com.tw"):
         source = "twse"
     elif host in ("www.tpex.org.tw", "tpex.org.tw"):
@@ -108,12 +119,12 @@ def _request_json(url: str) -> dict:
     # data, symbols, response bodies, or exception messages.
     if code is not None:
         diagnostic = f"{source}_http_{int(code)}"
-        detail = f"{type(last_error).__name__}(http={int(code)})"
-    elif getattr(reason, "errno", None) is not None:
-        errno = int(reason.errno)
+        detail = f"HTTPError(http={int(code)})"
+    elif getattr(last_error, "errno", None) is not None:
+        errno = int(last_error.errno)
         diagnostic = f"{source}_network_errno_{errno}"
-        detail = f"{type(last_error).__name__}/{type(reason).__name__}(errno={errno})"
-    elif isinstance(last_error, (TimeoutError,)) or isinstance(reason, TimeoutError):
+        detail = f"{type(last_error).__name__}(errno={errno})"
+    elif isinstance(last_error, TimeoutError) or "timeout" in type(last_error).__name__.lower():
         diagnostic = f"{source}_timeout"
         detail = f"{type(last_error).__name__}/timeout"
     elif isinstance(last_error, json.JSONDecodeError):
@@ -121,12 +132,11 @@ def _request_json(url: str) -> dict:
         detail = "JSONDecodeError"
     else:
         diagnostic = f"{source}_request_error"
-        detail = type(last_error).__name__
+        detail = type(last_error).__name__ if last_error is not None else "HTTPError"
     raise MarketDataError(
         f"官方行情來源連線失敗：{host} {detail}",
         diagnostic_code=diagnostic,
     )
-
 
 def _month_starts(years: int = 10):
     today = dt.date.today()
