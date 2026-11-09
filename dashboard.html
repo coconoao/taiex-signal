@@ -1165,7 +1165,19 @@ function renderStock(s, cached=false) {
     const accuracy = hold.direction_accuracy_pct == null
       ? "樣本不足" : "樣本外方向準確率 " + Number(hold.direction_accuracy_pct).toFixed(1) + "%";
     const count = hold.sample_count == null ? "樣本數尚不足" : "保留測試 " + Number(hold.sample_count).toLocaleString("zh-TW") + " 筆";
-    return `<div class="mc"><b>${label}</b><p class="note">個股中長期方向研究</p><div class="big">${esc(category)}</div><p>${estimate}</p><p class="note">${accuracy}｜${count}</p></div>`;
+    return `<div class="mc"><b>${label}</b><p class="note">正式模型 · 樣本外研究</p><div class="big">${esc(category)}</div><p>${estimate}</p><p class="note">${accuracy}｜${count}</p></div>`;
+  }).join("");
+  const recentSignals = model.recent_signals || {};
+  const recentDirectionCards = keys.map(([key,label]) => {
+    const item = recentSignals[key] || {};
+    if (item.status !== "available" || !item.signal) {
+      return `<div class="mc"><b>${label}</b><div class="big">資料不足</div><p class="note">需要至少 ${Number(item.minimum_sessions || 0)} 個有效交易日；目前 ${Number(item.sessions_used || 0)} 日。</p></div>`;
+    }
+    const factors = (item.components || []).map(part =>
+      esc(part.name) + "：" + esc(part.direction) +
+      (part.value == null ? "" : "（" + esc(part.value) + esc(part.unit || "") + "）")
+    ).join("｜");
+    return `<div class="mc"><b>${label} · 暫行訊號</b><div class="big">${esc(item.signal)}</div><p class="note">資料日期 ${esc(item.asof || "—")} · 使用 ${Number(item.sessions_used || 0)} 個交易日</p><p class="note">${factors || "目前可用技術特徵有限"}</p></div>`;
   }).join("");
   const annualRows = keys.flatMap(([key,label]) => {
     const item = horizons[key] || {};
@@ -1187,6 +1199,9 @@ function renderStock(s, cached=false) {
       <h2 style="margin-top:16px">個股中長期漲跌評估</h2>
       <p class="note">與大盤中長期儀表板採相同的 1／3／6 個月研究期間。評估指定期間後的累積報酬方向；正報酬機率僅在歷史樣本外資料完成校準後顯示。</p>
       <div class="mcs">${directionCards}</div>
+      <h3 style="margin-top:14px">近期資料暫行方向訊號</h3>
+      <p class="note">正式模型尚未完成訓練或校準時，改以最近價格動能、均線趨勢、相對大盤表現及 RSI 提供方向參考。這是規則式技術快照，未經樣本外驗證；不顯示預測機率，也不取代正式模型。</p>
+      <div class="mcs">${recentDirectionCards}</div>
       <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>正報酬機率（校準後）</th><th>樣本外方向準確率</th><th>保留測試期間</th></tr></thead><tbody>${rows}</tbody></table></div>
       <h3 style="margin-top:12px">逐年樣本外穩健性</h3>
       <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>年份</th><th>樣本數</th><th>方向準確率</th><th>Brier</th><th>Brier Skill</th></tr></thead><tbody>${annualRows || '<tr><td colspan="6">尚無足夠的逐年樣本外資料</td></tr>'}</tbody></table></div>

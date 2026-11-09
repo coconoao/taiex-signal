@@ -288,6 +288,79 @@ def _one_horizon(features, close, horizon):
     }
 
 
+def _recent_direction_signal(stock_close, market_close, horizon):
+    """Rule-based recent trend snapshot; deliberately not a probability forecast."""
+    px = pd.to_numeric(stock_close, errors="coerce").dropna().sort_index()
+    px.index = pd.to_datetime(px.index).tz_localize(None).normalize()
+    px = px[~px.index.duplicated(keep="last")]
+    minimum_sessions = int(horizon) + 1
+    asof = str(px.index[-1].date()) if len(px) else None
+    if len(px) < minimum_sessions:
+        return {
+            "status": "insufficient", "asof": asof,
+            "sessions_used": int(len(px)), "minimum_sessions": minimum_sessions,
+            "signal": None, "components": [],
+            "note": "近期有效交易日不足，暫不產生此期間訊號。",
+        }
+
+    current = float(px.iloc[-1])
+    momentum = float(px.iloc[-1] / px.iloc[-1 - horizon] - 1)
+    average = float(px.iloc[-horizon:].mean())
+    trend_gap = current / average - 1
+    delta = px.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    rsi_value = float((100 - 100 / (1 + rs)).iloc[-1]) if pd.notna(rs.iloc[-1]) else None
+
+    thresholds = {21: (0.015, 0.005, 0.01), 63: (0.04, 0.005, 0.02),
+                  126: (0.08, 0.005, 0.04)}
+    momentum_threshold, trend_threshold, relative_threshold = thresholds.get(
+        int(horizon), (0.02, 0.005, 0.02)
+    )
+    components = []
+
+    def add_component(name, value, positive, negative, unit=None):
+        direction = 1 if value > positive else -1 if value < negative else 0
+        components.append({
+            "name": name,
+            "value": round(float(value) * 100, 2) if unit == "pct" else round(float(value), 1),
+            "unit": "%" if unit == "pct" else "",
+            "direction": "偏多" if direction > 0 else "偏空" if direction < 0 else "中性",
+            "score": direction,
+        })
+
+    add_component("期間動能", momentum, momentum_threshold, -momentum_threshold, "pct")
+    add_component("價格相對均線", trend_gap, trend_threshold, -trend_threshold, "pct")
+
+    market = pd.to_numeric(market_close, errors="coerce").dropna().sort_index()
+    market.index = pd.to_datetime(market.index).tz_localize(None).normalize()
+    market = market[~market.index.duplicated(keep="last")]
+    aligned_market = market.reindex(px.index)
+    if aligned_market.notna().sum() >= minimum_sessions and pd.notna(aligned_market.iloc[-1]):
+        market_base = aligned_market.iloc[-1 - horizon]
+        if pd.notna(market_base) and float(market_base) != 0:
+            relative = momentum - (float(aligned_market.iloc[-1]) / float(market_base) - 1)
+            add_component("相對大盤動能", relative, relative_threshold, -relative_threshold, "pct")
+
+    if rsi_value is not None:
+        rsi_direction = 1 if rsi_value >= 55 else -1 if rsi_value <= 45 else 0
+        components.append({
+            "name": "RSI(14)", "value": round(rsi_value, 1), "unit": "",
+            "direction": "偏多" if rsi_direction > 0 else "偏空" if rsi_direction < 0 else "中性",
+            "score": rsi_direction,
+        })
+
+    score = float(np.mean([item["score"] for item in components])) if components else 0.0
+    signal = "偏多" if score >= 0.34 else "偏空" if score <= -0.34 else "中性"
+    return {
+        "status": "available", "asof": asof, "horizon_sessions": int(horizon),
+        "sessions_used": int(len(px)), "minimum_sessions": minimum_sessions,
+        "signal": signal, "score": round(score, 3), "components": components,
+        "note": "依近期價格趨勢、動能、相對大盤表現與 RSI 規則整理；未經樣本外驗證，不是模型機率或買賣指示。",
+    }
+
+
 def analyze(stock_close, market_close, volume=None):
     """Return 1m/3m/6m stock research estimates and chronological holdout metrics."""
     px = pd.to_numeric(stock_close, errors="coerce").dropna().sort_index()
@@ -306,5 +379,9 @@ def analyze(stock_close, market_close, volume=None):
         "history_sessions": int(len(px)),
         "history_years_requested": 10,
         "horizons": output,
+        "recent_signals": {
+            name: _recent_direction_signal(px, market, horizon)
+            for name, horizon in HORIZONS.items()
+        },
         "disclaimer": "研究用途；歷史樣本外結果不代表未來表現，不構成投資建議或交易指示。",
     }
