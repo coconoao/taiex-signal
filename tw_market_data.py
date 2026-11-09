@@ -510,15 +510,25 @@ def _tpex_etf_split_month(month: dt.date):
         raise errors[0]
     return result
 
-def _cached_exright_month(source: str, month: dt.date):
-    key = (source, month)
+def _cached_action_month(source: str, action: str, month: dt.date):
+    key = (source, action, month)
     now = time.time()
     with _CACHE_LOCK:
         cached = _EXRIGHT_CACHE.get(key)
         if cached and now - cached[0] < cached[2]:
             return dict(cached[1])
 
-    fetcher = _twse_exright_month if source == "TWSE" else _tpex_exright_month
+    if action == "exright":
+        fetcher = _twse_exright_month if source == "TWSE" else _tpex_exright_month
+    elif action == "reduction":
+        fetcher = _twse_reduction_month if source == "TWSE" else _tpex_reduction_month
+    elif action == "par_value" and source == "TWSE":
+        fetcher = _twse_par_value_month
+    elif action == "etf_split":
+        fetcher = _twse_etf_split_month if source == "TWSE" else _tpex_etf_split_month
+    else:
+        return {}
+
     references = fetcher(month)
     ttl = _EXRIGHT_CACHE_TTL_SECONDS if references else _EXRIGHT_EMPTY_CACHE_TTL_SECONDS
     with _CACHE_LOCK:
@@ -526,23 +536,66 @@ def _cached_exright_month(source: str, month: dt.date):
     return dict(references)
 
 
-def _official_cash_dividend_references(code: str, source: str, rows):
-    missing = sorted({
-        row["date"].replace(day=1)
-        for row in rows
-        if row.get("change") is None
-    })
-    if not missing:
+def _cached_exright_month(source: str, month: dt.date):
+    # Backwards-compatible wrapper for focused tests and callers.
+    return _cached_action_month(source, "exright", month)
+
+
+def _official_corporate_action_references(code: str, source: str, rows):
+    symbol = str(code).strip().upper()
+    missing_by_month = {}
+    for row in rows:
+        if row.get("change") is None:
+            day = row["date"]
+            missing_by_month.setdefault(day.replace(day=1), set()).add(day)
+    if not missing_by_month:
         return {}
 
     references = {}
-    for month in missing:
-        references.update(_cached_exright_month(source, month))
+    actions = ["exright", "reduction", "par_value"]
+    if symbol.startswith(("00", "01", "02")):
+        actions.append("etf_split")
+
+    for month, event_days in sorted(missing_by_month.items()):
+        errors = []
+        for action in actions:
+            unresolved = {
+                day for day in event_days
+                if (symbol, day) not in references
+            }
+            if not unresolved:
+                break
+            try:
+                references.update(_cached_action_month(source, action, month))
+            except Exception as exc:
+                errors.append(exc)
+
+        unresolved = sorted(
+            day for day in event_days if (symbol, day) not in references
+        )
+        if unresolved:
+            if errors:
+                first_error = errors[0]
+                diagnostic = getattr(first_error, "diagnostic_code", None) or "provider_error"
+                raise MarketDataError(
+                    "官方公司行動參考價來源暫時無法完整核對，已停止使用未調整資料",
+                    diagnostic_code=diagnostic,
+                ) from first_error
+            raise MarketDataError(
+                "官方漲跌價差無法解析，且除權息、減資、面額或 ETF 分割來源均無對應參考價，停止使用這批資料",
+                diagnostic_code="adjustment_reference_missing",
+            )
+
     return {
-        day: price
-        for (symbol, day), price in references.items()
-        if symbol == str(code).strip().upper()
+        day: references[(symbol, day)]
+        for days in missing_by_month.values()
+        for day in days
+        if (symbol, day) in references
     }
+
+
+# Retain the old private name while callers migrate to the broader action resolver.
+_official_cash_dividend_references = _official_corporate_action_references
 
 
 def _fetch_months(fetcher, code: str, months, max_workers: int = 2):
@@ -728,7 +781,7 @@ def load_stock_history(code: str, exchange_hint: str | None = None, years: int =
 
     stage_started = time.perf_counter()
     try:
-        references = _official_cash_dividend_references(code, source, rows)
+        references = _official_corporate_action_references(code, source, rows)
     except Exception as exc:
         diagnostic = getattr(exc, "diagnostic_code", None) or "provider_error"
         print(
