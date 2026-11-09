@@ -406,8 +406,40 @@ def load_stock_history(code: str, exchange_hint: str | None = None, years: int =
             return cached[1].copy()
 
     months = _month_starts(years)
-    source, fetcher = _identify_exchange(code, exchange_hint, months)
-    rows = _fetch_months(fetcher, code, months)
+
+    stage_started = time.perf_counter()
+    try:
+        source, fetcher = _identify_exchange(code, exchange_hint, months)
+    except Exception as exc:
+        print(
+            "[stock-analysis] stage=exchange_probe status=failed "
+            f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)} "
+            f"error_class={type(exc).__name__}",
+            flush=True,
+        )
+        raise
+    print(
+        "[stock-analysis] stage=exchange_probe status=ok "
+        f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)}",
+        flush=True,
+    )
+
+    stage_started = time.perf_counter()
+    try:
+        rows = _fetch_months(fetcher, code, months)
+    except Exception as exc:
+        print(
+            "[stock-analysis] stage=stock_history_download status=failed "
+            f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)} "
+            f"error_class={type(exc).__name__}",
+            flush=True,
+        )
+        raise
+    print(
+        "[stock-analysis] stage=stock_history_download status=ok "
+        f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)}",
+        flush=True,
+    )
     references = _official_cash_dividend_references(code, source, rows)
     frame = _to_adjusted_frame(rows, source, code, references)
     if len(frame) < 60:
