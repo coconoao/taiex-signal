@@ -58,7 +58,7 @@ def _request_json(url: str) -> dict:
             response = curl_requests.get(
                 request_url,
                 headers=_HEADERS,
-                timeout=8,
+                timeout=15,
                 impersonate="chrome",
                 allow_redirects=False,
             )
