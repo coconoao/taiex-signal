@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 import stock
+import stock_model_research
 
 
 class PartialListingHistoryTests(unittest.TestCase):
@@ -34,6 +35,16 @@ class PartialListingHistoryTests(unittest.TestCase):
         self.assertIsNone(result["beta"])
         self.assertIsNotNone(result["mom20"])
         self.assertIsNotNone(result["vol60"])
+
+    def test_recent_signal_horizons_respect_short_history_requirements(self):
+        index = pd.bdate_range("2026-10-01", periods=25)
+        close = pd.Series(np.linspace(50.0, 60.0, len(index)), index=index)
+        market = pd.Series(np.linspace(20000.0, 20500.0, len(index)), index=index)
+        volume = pd.Series(np.full(len(index), 1000.0), index=index)
+        result = stock_model_research.analyze(close, market, volume)
+        self.assertEqual(result["recent_signals"]["1m"]["status"], "available")
+        self.assertEqual(result["recent_signals"]["3m"]["status"], "insufficient")
+        self.assertEqual(result["recent_signals"]["6m"]["status"], "insufficient")
 
     def test_very_short_history_marks_longer_metrics_unavailable(self):
         result = self._run_analysis(10)
