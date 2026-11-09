@@ -141,6 +141,19 @@ def _metrics(probability, actual, baseline, horizon=21):
     }
 
 
+def _holdout_passes(metrics):
+    """Require a meaningful untouched holdout that beats the baseline Brier score."""
+    if not isinstance(metrics, dict):
+        return False
+    count = metrics.get("sample_count", 0)
+    skill = metrics.get("brier_skill")
+    return (
+        isinstance(count, int) and count >= 20
+        and isinstance(skill, (int, float))
+        and np.isfinite(skill) and skill > 0
+    )
+
+
 def _fit_calibrator(raw, labels):
     if len(raw) < MIN_CALIBRATION or len(np.unique(labels)) < 2:
         return None
@@ -265,25 +278,38 @@ def _one_horizon(features, close, horizon):
         )
     calibrated = float(_calibrate(calibrator, [raw_current])[0]) if calibrator else None
 
+    # A fitted calibrator is not evidence of predictive value. Only expose a
+    # probability when the untouched chronological holdout beats the baseline
+    # on the proper scoring rule (Brier score).
+    estimate_available = calibrated is not None and _holdout_passes(holdout_metrics)
+
     return {
-        "status": "available" if calibrated is not None else "uncalibrated",
+        "status": "available" if estimate_available else (
+            "uncalibrated" if calibrated is None else "not_validated"
+        ),
         "asof": str(latest_date.date()),
         "horizon_sessions": int(horizon),
         "training_samples": int(len(train_index)),
         "selected_research_model": selected_name,
-        "estimated_positive_return_probability_pct": round(calibrated * 100, 2) if calibrated is not None else None,
+        "estimated_positive_return_probability_pct": round(calibrated * 100, 2) if estimate_available else None,
         "research_category": (
             "偏正向研究分類" if calibrated >= 0.60 else
             "偏負向研究分類" if calibrated <= 0.40 else "中性研究分類"
-        ) if calibrated is not None else "尚未校準",
+        ) if estimate_available else (
+            "尚未校準" if calibrated is None else "尚未通過樣本外驗證"
+        ),
         "untouched_holdout": holdout_metrics,
         "annual_holdout_metrics": results[selected_name]["annual_holdout_metrics"],
         "candidate_comparison": results,
         "note": (
             "目標為該標的在指定交易日數後的累積報酬是否為正；這是歷史樣本外研究模型估計，"
             "不是價格目標、不是買賣指示，也不保證未來結果。"
-            if calibrated is not None else
-            "目前沒有足夠成熟的樣本外預測可校準；暫不顯示機率，只累積資料。"
+            if estimate_available else (
+                "目前沒有足夠成熟的樣本外預測可校準；暫不顯示機率，只累積資料。"
+                if calibrated is None else
+                "未觸發預測機率顯示：樣本外測試樣本數不足或 Brier Skill 未優於基準；"
+                "暫不顯示機率，保留研究資料供後續驗證。"
+            )
         ),
     }
 
@@ -304,7 +330,7 @@ def analyze(stock_close, market_close, volume=None):
         "history_start": str(px.index.min().date()) if len(px) else None,
         "history_end": str(px.index.max().date()) if len(px) else None,
         "history_sessions": int(len(px)),
-        "history_years_requested": 10,
+        "history_years_requested": 4,
         "horizons": output,
         "disclaimer": "研究用途；歷史樣本外結果不代表未來表現，不構成投資建議或交易指示。",
     }

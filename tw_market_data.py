@@ -21,7 +21,11 @@ import pandas as pd
 
 
 class MarketDataError(RuntimeError):
-    pass
+    """Market-data failure with a non-sensitive, machine-readable category."""
+
+    def __init__(self, message, diagnostic_code=None):
+        super().__init__(message)
+        self.diagnostic_code = diagnostic_code
 
 
 _HEADERS = {
@@ -44,8 +48,13 @@ def _request_json(url: str) -> dict:
                 payload = response.read()
             parsed = json.loads(payload.decode("utf-8-sig"))
             if not isinstance(parsed, dict):
-                raise MarketDataError("交易所回傳格式不是 JSON 物件")
+                raise MarketDataError(
+                    "交易所回傳格式不是 JSON 物件",
+                    diagnostic_code="provider_invalid_json_shape",
+                )
             return parsed
+        except MarketDataError:
+            raise
         except Exception as exc:
             last_error = exc
             code = getattr(exc, "code", None)
@@ -60,19 +69,36 @@ def _request_json(url: str) -> dict:
     # request payloads. The adapter only calls fixed public exchange hosts.
     host = urllib.parse.urlparse(url).hostname or "unknown-host"
     reason = getattr(last_error, "reason", None)
-    # HTTPError is also a URLError and exposes its human-readable message as
-    # .reason. Prefer its numeric status code so logs distinguish 403/429/5xx.
-    if code is not None:
-        detail = f"{type(last_error).__name__}(http={code})"
-    elif reason is not None:
-        reason_type = type(reason).__name__
-        reason_errno = getattr(reason, "errno", None)
-        detail = f"{type(last_error).__name__}/{reason_type}"
-        if reason_errno is not None:
-            detail += f"(errno={reason_errno})"
+    if host in ("www.twse.com.tw", "twse.com.tw"):
+        source = "twse"
+    elif host in ("www.tpex.org.tw", "tpex.org.tw"):
+        source = "tpex"
     else:
+        source = "unknown"
+
+    # Keep the existing human-readable exception for internal handling, while
+    # attaching a bounded enum-like diagnostic that cannot contain URL/query
+    # data, symbols, response bodies, or exception messages.
+    if code is not None:
+        diagnostic = f"{source}_http_{int(code)}"
+        detail = f"{type(last_error).__name__}(http={int(code)})"
+    elif getattr(reason, "errno", None) is not None:
+        errno = int(reason.errno)
+        diagnostic = f"{source}_network_errno_{errno}"
+        detail = f"{type(last_error).__name__}/{type(reason).__name__}(errno={errno})"
+    elif isinstance(last_error, (TimeoutError,)) or isinstance(reason, TimeoutError):
+        diagnostic = f"{source}_timeout"
+        detail = f"{type(last_error).__name__}/timeout"
+    elif isinstance(last_error, json.JSONDecodeError):
+        diagnostic = f"{source}_invalid_json"
+        detail = "JSONDecodeError"
+    else:
+        diagnostic = f"{source}_request_error"
         detail = type(last_error).__name__
-    raise MarketDataError(f"官方行情來源連線失敗：{host} {detail}")
+    raise MarketDataError(
+        f"官方行情來源連線失敗：{host} {detail}",
+        diagnostic_code=diagnostic,
+    )
 
 
 def _month_starts(years: int = 10):
@@ -127,7 +153,10 @@ def _twse_month(code: str, month: dt.date):
     if status == "很抱歉，沒有符合條件的資料!":
         return []
     if status != "OK":
-        raise MarketDataError(f"TWSE STOCK_DAY 回傳非成功狀態：{status or 'missing stat'}")
+        raise MarketDataError(
+            f"TWSE STOCK_DAY 回傳非成功狀態：{status or 'missing stat'}",
+            diagnostic_code="twse_provider_status",
+        )
     rows = []
     for item in payload.get("data") or []:
         if len(item) < 8:
@@ -273,10 +302,21 @@ def _fetch_months(fetcher, code: str, months):
             try:
                 collected.extend(future.result())
             except Exception as exc:
-                errors.append(str(exc))
+                errors.append(exc)
     if errors:
+        diagnostic_codes = []
+        for exc in errors:
+            diagnostic_code = getattr(exc, "diagnostic_code", None)
+            diagnostic_codes.append(
+                diagnostic_code
+                if isinstance(diagnostic_code, str)
+                and diagnostic_code.replace("_", "").isalnum()
+                else "provider_error"
+            )
+        safe_codes = ",".join(dict.fromkeys(diagnostic_codes))[:160]
         raise MarketDataError(
-            "官方歷史行情有月份下載失敗，為避免不完整資料進入模型，已停止分析：" + errors[0]
+            "官方歷史行情有月份下載失敗，為避免不完整資料進入模型，已停止分析：" + str(errors[0]),
+            diagnostic_code="history_fetch_failed:" + safe_codes,
         )
     collected.sort(key=lambda row: row["date"])
     deduped = {}
@@ -290,14 +330,29 @@ def _identify_exchange(code: str, hint: str | None, months):
     if hint == "TPEX":
         candidates.reverse()
     probe_months = months[-3:]
+    probe_failures = []
     for name, fetcher in candidates:
         for month in reversed(probe_months):
             try:
                 if fetcher(code, month):
                     return name, fetcher
-            except Exception:
+            except Exception as exc:
+                category = getattr(exc, "diagnostic_code", None)
+                if not isinstance(category, str) or not category.replace("_", "").isalnum():
+                    category = "provider_error"
+                probe_failures.append(
+                    category if category.startswith(name.lower() + "_")
+                    else f"{name.lower()}_{category}"
+                )
                 continue
-    raise MarketDataError(f"官方交易所查無 {code} 的近期歷史行情")
+    if probe_failures:
+        diagnostic = "exchange_probe_failed:" + ",".join(dict.fromkeys(probe_failures))[:160]
+    else:
+        diagnostic = "no_recent_history"
+    raise MarketDataError(
+        f"官方交易所查無 {code} 的近期歷史行情",
+        diagnostic_code=diagnostic,
+    )
 
 
 def _to_adjusted_frame(rows, source: str, code: str | None = None, corporate_action_references=None):
@@ -351,8 +406,40 @@ def load_stock_history(code: str, exchange_hint: str | None = None, years: int =
             return cached[1].copy()
 
     months = _month_starts(years)
-    source, fetcher = _identify_exchange(code, exchange_hint, months)
-    rows = _fetch_months(fetcher, code, months)
+
+    stage_started = time.perf_counter()
+    try:
+        source, fetcher = _identify_exchange(code, exchange_hint, months)
+    except Exception as exc:
+        print(
+            "[stock-analysis] stage=exchange_probe status=failed "
+            f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)} "
+            f"error_class={type(exc).__name__}",
+            flush=True,
+        )
+        raise
+    print(
+        "[stock-analysis] stage=exchange_probe status=ok "
+        f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)}",
+        flush=True,
+    )
+
+    stage_started = time.perf_counter()
+    try:
+        rows = _fetch_months(fetcher, code, months)
+    except Exception as exc:
+        print(
+            "[stock-analysis] stage=stock_history_download status=failed "
+            f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)} "
+            f"error_class={type(exc).__name__}",
+            flush=True,
+        )
+        raise
+    print(
+        "[stock-analysis] stage=stock_history_download status=ok "
+        f"elapsed_ms={round((time.perf_counter() - stage_started) * 1000)}",
+        flush=True,
+    )
     references = _official_cash_dividend_references(code, source, rows)
     frame = _to_adjusted_frame(rows, source, code, references)
     if len(frame) < 60:
@@ -400,13 +487,27 @@ def load_taiex_history(years: int = 10):
             try:
                 records.extend(future.result())
             except Exception as exc:
-                errors.append(str(exc))
+                errors.append(exc)
     if errors:
+        diagnostic_codes = []
+        for exc in errors:
+            diagnostic_code = getattr(exc, "diagnostic_code", None)
+            diagnostic_codes.append(
+                diagnostic_code
+                if isinstance(diagnostic_code, str)
+                and diagnostic_code.replace("_", "").isalnum()
+                else "provider_error"
+            )
+        safe_codes = ",".join(dict.fromkeys(diagnostic_codes))[:160]
         raise MarketDataError(
-            "官方加權指數歷史資料有月份下載失敗，為避免基準資料不完整，已停止分析：" + errors[0]
+            "官方加權指數歷史資料有月份下載失敗，為避免基準資料不完整，已停止分析：" + str(errors[0]),
+            diagnostic_code="history_fetch_failed:" + safe_codes,
         )
     if not records:
-        raise MarketDataError("無法取得官方加權指數歷史資料")
+        raise MarketDataError(
+            "無法取得官方加權指數歷史資料",
+            diagnostic_code="twse_provider_error",
+        )
     by_date = {}
     for day, close in records:
         by_date[day] = close
@@ -417,7 +518,10 @@ def load_taiex_history(years: int = 10):
         dtype=float,
     )
     if len(series) < 252:
-        raise MarketDataError("官方加權指數歷史資料不足 252 個交易日")
+        raise MarketDataError(
+            "官方加權指數歷史資料不足 252 個交易日",
+            diagnostic_code="twse_provider_error",
+        )
     with _CACHE_LOCK:
         _INDEX_CACHE[years] = (now, series.copy())
     return series

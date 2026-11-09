@@ -6,11 +6,35 @@
 """
 import sys
 import json
+import time
 
 import numpy as np
 import pandas as pd
 
 import tw_market_data
+
+HISTORY_YEARS = 4
+
+
+def _timed_stage(stage, function, *args, **kwargs):
+    """Log safe stage timing without symbols, request data, or exception messages."""
+    started = time.perf_counter()
+    try:
+        result = function(*args, **kwargs)
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(
+            f"[stock-analysis] stage={stage} status=failed "
+            f"elapsed_ms={elapsed_ms} error_class={type(exc).__name__}",
+            flush=True,
+        )
+        raise
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    print(
+        f"[stock-analysis] stage={stage} status=ok elapsed_ms={elapsed_ms}",
+        flush=True,
+    )
+    return result
 
 
 def _historical_horizon_summary(close, horizon):
@@ -39,7 +63,10 @@ def analyze(code):
     if not code or not code[0].isdigit() or not code.isalnum() or len(code) > 12:
         raise ValueError("請輸入台股代號，例如 2330、0050 或 00679B")
 
-    stock_data = tw_market_data.load_stock_history(code, exchange_hint, years=10)
+    stock_data = _timed_stage(
+        "stock_history", tw_market_data.load_stock_history,
+        code, exchange_hint, years=HISTORY_YEARS,
+    )
 
     import os
     if os.path.exists("signals.json"):
@@ -55,7 +82,10 @@ def analyze(code):
     px = stock_data["Close"].dropna()
     raw_px = stock_data["RawClose"].dropna()
     volume = stock_data["Volume"].reindex(px.index)
-    mk = tw_market_data.load_taiex_history().dropna()
+    mk = _timed_stage(
+        "taiex_history", tw_market_data.load_taiex_history,
+        years=HISTORY_YEARS,
+    ).dropna()
 
     f5 = px.shift(-5) / px - 1
 
@@ -85,7 +115,9 @@ def analyze(code):
     asset_type = "ETF" if code.startswith(("00", "01", "02")) else "股票"
 
     import stock_model_research
-    long_term = stock_model_research.analyze(px, mk, volume)
+    long_term = _timed_stage(
+        "research_model", stock_model_research.analyze, px, mk, volume
+    )
     historical_horizons = {
         "1m": _historical_horizon_summary(px, 21),
         "3m": _historical_horizon_summary(px, 63),
@@ -105,7 +137,7 @@ def analyze(code):
         "market_state": "CLOSED",
         "history_start": str(px.index[0].date()),
         "history_sessions": int(len(px)),
-        "history_years_requested": 10,
+        "history_years_requested": HISTORY_YEARS,
         "market_data_source": stock_data.attrs.get("source", "TWSE/TPEx official"),
         "price_basis": "official_reference_price_chained_adjusted",
         "quote_realtime": False,
