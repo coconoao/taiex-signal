@@ -1101,7 +1101,11 @@ function renderStock(s, cached=false) {
     const probability = item.estimated_positive_return_probability_pct;
     const estimate = item.status === "available" && probability != null
       ? Number(probability).toFixed(1) + "%"
-      : "樣本不足／尚未校準";
+      : item.status === "not_validated"
+        ? "樣本外未優於基準／不顯示機率"
+        : item.status === "uncalibrated"
+          ? "尚未校準／不顯示機率"
+          : "樣本不足／不顯示機率";
     const accuracy = hold.direction_accuracy_pct == null
       ? "尚無足夠樣本" : Number(hold.direction_accuracy_pct).toFixed(1) + "%";
     const ci = hold.accuracy_95pct_ci;
