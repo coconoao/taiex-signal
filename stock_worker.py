@@ -152,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
 <p>Token 僅在本頁記憶體中使用，不會儲存或顯示在網址。</p>
 <label>Staging Bearer Token<input id="token" type="password" autocomplete="off" autocapitalize="off"></label>
 <label>股票代號<input id="code" value="2330" inputmode="numeric"></label>
-<button id="run">開始測試</button><pre id="result">尚未測試</pre>
+<button id="run">開始測試</button><pre id="result">尚未測試</pre><h3>分析摘要</h3><pre id="summary">分析完成後會顯示易讀摘要</pre><details><summary>查看原始 JSON（除錯用）</summary><pre id="raw">尚無資料</pre></details>
 <script>
 document.getElementById("run").addEventListener("click",async()=>{
  const token=document.getElementById("token").value;
@@ -200,7 +200,48 @@ document.getElementById("run").addEventListener("click",async()=>{
      continue;
     }
     if(poll.ok&&body.state==="completed"){
-     out.textContent="健康檢查：HTTP "+health.status+"（"+healthTime+" 秒）\\n分析工作：完成\\n分析 HTTP 狀態："+body.analysis_http_status+"\\n總等待："+elapsed()+"\\n"+JSON.stringify(body.result,null,2);
+     out.textContent="健康檢查：HTTP "+health.status+"（"+healthTime+" 秒）\\n分析工作：完成\\n分析 HTTP 狀態："+body.analysis_http_status+"\\n總等待："+elapsed();
+     const data=body.result||{};
+     const pct=(v,d=1)=>typeof v==="number"?v.toFixed(d)+"%":"資料不足";
+     const line=(label,value)=>label+"："+(value===undefined||value===null||value===""?"—":value);
+     const rows=[
+      "【標的基本資料】",
+      line("股票代號",data.code),
+      line("類型",data.asset_type),
+      line("資料日期",data.asof),
+      line("最近收盤價",typeof data.last==="number"?data.last.toFixed(2):"—"),
+      line("資料來源",data.market_data_source||data.quote_source),
+      line("歷史資料區間",data.history_start+" 至 "+data.history_asof),
+      line("歷史交易日數",data.history_sessions),
+      line("歷史資料年限",data.history_years_requested+" 年"),
+      "",
+      "【風險與歷史指標】",
+      line("Beta",data.beta),
+      line("20 日動能",pct(data.mom20)),
+      line("60 日年化波動度",pct(data.vol60)),
+      "",
+      "【歷史報酬統計（非預測）】"
+     ];
+     const hist=data.historical_horizons||{};
+     for(const key of ["1m","3m","6m"]){
+      const h=hist[key];
+      rows.push(key+"："+(h?("歷史正報酬比例 "+pct(h.positive_pct)+
+       "；平均報酬 "+pct(h.average_return_pct,2)+"；樣本 "+h.n):"資料不足"));
+     }
+     rows.push("","【研究模型估計（非買賣訊號）】");
+     const horizons=(data.long_term_model||{}).horizons||{};
+     for(const key of ["1m","3m","6m"]){
+      const h=horizons[key]||{};
+      if(h.status==="available"&&typeof h.estimated_positive_return_probability_pct==="number"){
+       rows.push(key+"：正報酬機率估計 "+pct(h.estimated_positive_return_probability_pct,2));
+       rows.push("  分類："+(h.research_category||"—")+"；訓練樣本："+(h.training_samples??"—"));
+      }else{
+       rows.push(key+"：尚未達到校準條件（"+(h.note||"暫不顯示機率")+")");
+      }
+     }
+     rows.push("",(data.long_term_model||{}).disclaimer||"研究用途；不構成投資建議或交易指示。");
+     document.getElementById("summary").textContent=rows.join("\\n");
+     document.getElementById("raw").textContent=JSON.stringify(data,null,2);
      return;
     }
     out.textContent="查詢分析工作失敗：HTTP "+poll.status+"\\n"+JSON.stringify(body,null,2);
