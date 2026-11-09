@@ -199,9 +199,10 @@ def _number(value):
     if raw.startswith(("X", "x")):
         return None
     try:
-        return float(raw)
+        number = float(raw)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _twse_month(code: str, month: dt.date):
@@ -221,8 +222,14 @@ def _twse_month(code: str, month: dt.date):
             diagnostic_code="twse_provider_status",
         )
     rows = []
-    for item in payload.get("data") or []:
-        if len(item) < 8:
+    data = payload.get("data") or []
+    if not isinstance(data, list):
+        raise MarketDataError(
+            "TWSE 歷史行情資料格式不符",
+            diagnostic_code="provider_invalid_json_shape",
+        )
+    for item in data:
+        if not isinstance(item, (list, tuple)) or len(item) < 8:
             continue
         try:
             day = _roc_date(item[0])
@@ -422,7 +429,7 @@ def _identify_exchange(code: str, hint: str | None, months):
 
     # Probe a small recent window so newly listed or temporarily inactive
     # securities are not rejected solely because the latest month is empty.
-    probe_months = months[-3:]
+    probe_months = months[-6:]
     probe_failures = []
     for name, fetcher in candidates:
         for month in reversed(probe_months):
