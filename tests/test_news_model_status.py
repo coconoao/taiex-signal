@@ -5,6 +5,9 @@ import news
 
 
 class NewsModelStatusTests(unittest.TestCase):
+    def test_gemini_is_the_only_configured_news_ai_provider(self):
+        self.assertEqual(set(news.MODELS), {"Gemini"})
+
     def test_gemini_is_reported_as_not_configured_without_server_key(self):
         with patch.dict(news.MODELS, {"Gemini": (news.ask_gemini, ["GEMINI_API_KEY"])}, clear=True):
             status = news.model_statuses({}, {})
