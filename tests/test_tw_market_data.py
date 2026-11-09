@@ -1,5 +1,6 @@
 import datetime as dt
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import tw_market_data
@@ -586,6 +587,31 @@ class TestTaiwanMarketData(unittest.TestCase):
             refs = tw_market_data._official_corporate_action_references("4207", "TWSE", rows)
         self.assertEqual(refs, {day: 19.74})
         self.assertEqual([call.args[1] for call in cached.call_args_list], ["exright", "reduction"])
+
+    def test_action_cache_deduplicates_concurrent_provider_fetches(self):
+        month = dt.date(2025, 12, 1)
+        refs = {("2330", dt.date(2025, 12, 11)): 1499.99}
+        calls = []
+
+        def slow_fetch(requested_month):
+            calls.append(requested_month)
+            import time
+            time.sleep(0.05)
+            return refs
+
+        with (
+            patch.object(tw_market_data, "_EXRIGHT_CACHE", {}),
+            patch.object(tw_market_data, "_ACTION_FETCH_LOCKS", {}),
+            patch.object(tw_market_data, "_ACTION_ERROR_CACHE", {}),
+            patch.object(tw_market_data, "_twse_exright_month", side_effect=slow_fetch),
+        ):
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                results = list(pool.map(
+                    lambda _: tw_market_data._cached_exright_month("TWSE", month),
+                    range(6),
+                ))
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(all(result == refs for result in results))
 
     def test_empty_action_cache_expires_quickly(self):
         month = dt.date(2025, 12, 1)
