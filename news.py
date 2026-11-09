@@ -399,6 +399,19 @@ def model_statuses(todo, results):
             status[name] = {"status": "ok"}
     return status
 
+def aggregate_model_results(results):
+    """Aggregate successful Gemini output; return neutral empty metadata when unavailable."""
+    aggregate = {}
+    for key in ("next_day", "next_week"):
+        values = [result[key] for result in results.values()
+                  if "error" not in result and key in result]
+        aggregate[key] = (
+            {"mean": round(sum(values) / len(values), 2),
+             "spread": round(max(values) - min(values), 2), "n": len(values)}
+            if values else {"mean": 0, "spread": 0, "n": 0}
+        )
+    return aggregate
+
 def research_features(hl):
     """Versioned, Taiwan-market-relevant news features; not a trading signal."""
     kinds = ("market", "taiwan", "policy", "analyst")
@@ -588,11 +601,7 @@ def main():
         res = dict(ex.map(lambda kv: run(kv[0], kv[1], p, analyst_headlines), todo.items()))
     model_status = model_statuses(todo, res)
     ok = {n: r for n, r in res.items() if "error" not in r}
-    agg = {}
-    for k in ("next_day", "next_week"):
-        v = [r[k] for r in ok.values()]
-        agg[k] = ({"mean": round(sum(v) / len(v), 2), "spread": round(max(v) - min(v), 2), "n": len(v)}
-                  if v else {"mean": 0, "spread": 0, "n": 0})
+    agg = aggregate_model_results(ok)
     rows = {}
     for n, r in ok.items():
         for a in r["analysts"]:
