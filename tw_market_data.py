@@ -364,6 +364,16 @@ def _identify_exchange(code: str, hint: str | None, months):
                     category if category.startswith(name.lower() + "_")
                     else f"{name.lower()}_{category}"
                 )
+                # A transport/HTTP failure is unlikely to be month-specific.
+                # Stop probing this provider instead of spending another
+                # timeout window on adjacent months; still try the other
+                # official exchange as a fallback.
+                if (
+                    category.endswith("_timeout")
+                    or "_network_errno_" in category
+                    or "_http_" in category
+                ):
+                    break
                 continue
     if probe_failures:
         diagnostic = "exchange_probe_failed:" + ",".join(dict.fromkeys(probe_failures))[:160]
