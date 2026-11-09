@@ -170,7 +170,15 @@ def get_site_stock_job(site_job_id):
             result = payload.get("result")
             status = int(payload.get("analysis_http_status", 500))
             if status != 200:
+                with _SITE_STOCK_JOB_LOCK:
+                    current = _SITE_STOCK_JOBS.get(site_job_id)
+                    if current is not None:
+                        current["finished_at"] = time.time()
                 return {"state": "failed", "error": (result or {}).get("error", "個股分析失敗")}, 200
+            with _SITE_STOCK_JOB_LOCK:
+                current = _SITE_STOCK_JOBS.get(site_job_id)
+                if current is not None:
+                    current["finished_at"] = time.time()
             return {"state": "completed", "result": result}, 200
         return {"state": payload.get("state", "running")}, 202
     except urllib.error.HTTPError as exc:
