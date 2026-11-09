@@ -1151,6 +1151,22 @@ function renderStock(s, cached=false) {
       ? esc(item.holdout_start) + "～" + esc(item.holdout_end) : "尚未形成";
     return `<tr><td>${label}</td><td>${estimate}</td><td>${accuracy} ${interval}</td><td>${period}</td></tr>`;
   }).join("");
+  const directionCards = keys.map(([key,label]) => {
+    const item = horizons[key] || {};
+    const hold = item.untouched_holdout || {};
+    const probability = item.estimated_positive_return_probability_pct;
+    const calibrated = item.status === "available" && probability != null
+      && Number.isFinite(Number(probability));
+    const category = calibrated
+      ? (item.research_category || (Number(probability) >= 60 ? "偏正向研究分類"
+        : Number(probability) <= 40 ? "偏負向研究分類" : "中性研究分類"))
+      : (item.status === "insufficient" ? "資料累積中" : "尚未完成校準");
+    const estimate = calibrated ? Number(probability).toFixed(1) + "%" : "暫不顯示機率";
+    const accuracy = hold.direction_accuracy_pct == null
+      ? "樣本不足" : "樣本外方向準確率 " + Number(hold.direction_accuracy_pct).toFixed(1) + "%";
+    const count = hold.sample_count == null ? "樣本數尚不足" : "保留測試 " + Number(hold.sample_count).toLocaleString("zh-TW") + " 筆";
+    return `<div class="mc"><b>${label}</b><p class="note">個股中長期方向研究</p><div class="big">${esc(category)}</div><p>${estimate}</p><p class="note">${accuracy}｜${count}</p></div>`;
+  }).join("");
   const annualRows = keys.flatMap(([key,label]) => {
     const item = horizons[key] || {};
     return Object.entries(item.annual_holdout_metrics || {}).map(([year, metric]) =>
@@ -1168,9 +1184,10 @@ function renderStock(s, cached=false) {
       <p>此股 Beta ${s.beta}（與加權指數歷史報酬的共變程度，並非未來方向預測）。</p>
       <p>${e ? `此股自身歷史樣本（${e.n} 筆）中，之後 5 日平均報酬 <b>${e.avg}%</b>，正報酬比例 ${e.win}%，歷史 10%～90% 區間為 <b>${e.p10}% 到 ${e.p90}%</b>。` : "此股目前沒有足夠的歷史樣本。"}</p>
       <p class="note">20 日動能 ${s.mom20}%，年化波動 ${s.vol60}%。以下新增中長期研究，資料預設盡可能取得 10 年日線；實際長度依標的上市時間與來源可用性而定。資料期間：${esc(model.history_start || s.history_start || "—")}～${esc(model.history_end || s.asof)}（${Number(model.history_sessions || s.history_sessions || 0).toLocaleString("zh-TW")} 個交易日）。</p>
-      <h2 style="margin-top:16px">個股中長期模型研究</h2>
-      <p class="note">目標是指定期間後的累積報酬是否為正，不是價格目標。機率僅在歷史樣本外預測足以校準時顯示；方向準確率來自未參與候選選擇的時間序列保留樣本。</p>
-      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>研究估計</th><th>樣本外方向準確率</th><th>保留測試期間</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <h2 style="margin-top:16px">個股中長期漲跌評估</h2>
+      <p class="note">與大盤中長期儀表板採相同的 1／3／6 個月研究期間。評估指定期間後的累積報酬方向；正報酬機率僅在歷史樣本外資料完成校準後顯示。</p>
+      <div class="mcs">${directionCards}</div>
+      <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>正報酬機率（校準後）</th><th>樣本外方向準確率</th><th>保留測試期間</th></tr></thead><tbody>${rows}</tbody></table></div>
       <h3 style="margin-top:12px">逐年樣本外穩健性</h3>
       <div style="overflow-x:auto"><table><thead><tr><th>期間</th><th>年份</th><th>樣本數</th><th>方向準確率</th><th>Brier</th><th>Brier Skill</th></tr></thead><tbody>${annualRows || '<tr><td colspan="6">尚無足夠的逐年樣本外資料</td></tr>'}</tbody></table></div>
       <p class="note">95% 信賴區間採移動區塊自助法，考慮相鄰交易日標籤重疊造成的部分相關性；樣本不足時不顯示區間。逐年結果用來檢查模型是否只在少數年份有效。</p>
