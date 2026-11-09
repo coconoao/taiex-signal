@@ -265,25 +265,46 @@ def _one_horizon(features, close, horizon):
         )
     calibrated = float(_calibrate(calibrator, [raw_current])[0]) if calibrator else None
 
+    # A fitted calibrator is not evidence of predictive value. Only expose a
+    # probability when the untouched chronological holdout beats the baseline
+    # on the proper scoring rule (Brier score).
+    holdout_skill = holdout_metrics.get("brier_skill")
+    holdout_count = int(holdout_metrics.get("sample_count", 0))
+    holdout_passed = (
+        holdout_count >= 20
+        and isinstance(holdout_skill, (int, float))
+        and np.isfinite(holdout_skill)
+        and holdout_skill > 0
+    )
+    estimate_available = calibrated is not None and holdout_passed
+
     return {
-        "status": "available" if calibrated is not None else "uncalibrated",
+        "status": "available" if estimate_available else (
+            "uncalibrated" if calibrated is None else "not_validated"
+        ),
         "asof": str(latest_date.date()),
         "horizon_sessions": int(horizon),
         "training_samples": int(len(train_index)),
         "selected_research_model": selected_name,
-        "estimated_positive_return_probability_pct": round(calibrated * 100, 2) if calibrated is not None else None,
+        "estimated_positive_return_probability_pct": round(calibrated * 100, 2) if estimate_available else None,
         "research_category": (
             "偏正向研究分類" if calibrated >= 0.60 else
             "偏負向研究分類" if calibrated <= 0.40 else "中性研究分類"
-        ) if calibrated is not None else "尚未校準",
+        ) if estimate_available else (
+            "尚未校準" if calibrated is None else "尚未通過樣本外驗證"
+        ),
         "untouched_holdout": holdout_metrics,
         "annual_holdout_metrics": results[selected_name]["annual_holdout_metrics"],
         "candidate_comparison": results,
         "note": (
             "目標為該標的在指定交易日數後的累積報酬是否為正；這是歷史樣本外研究模型估計，"
             "不是價格目標、不是買賣指示，也不保證未來結果。"
-            if calibrated is not None else
-            "目前沒有足夠成熟的樣本外預測可校準；暫不顯示機率，只累積資料。"
+            if estimate_available else (
+                "目前沒有足夠成熟的樣本外預測可校準；暫不顯示機率，只累積資料。"
+                if calibrated is None else
+                "未觸發預測機率顯示：樣本外測試樣本數不足或 Brier Skill 未優於基準；"
+                "暫不顯示機率，保留研究資料供後續驗證。"
+            )
         ),
     }
 
