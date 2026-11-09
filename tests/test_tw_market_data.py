@@ -34,6 +34,49 @@ class TestTaiwanMarketData(unittest.TestCase):
                     "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=2330"
                 )
 
+    def test_request_json_follows_same_host_https_308_redirect(self):
+        from io import BytesIO
+        from urllib.error import HTTPError
+
+        redirect = HTTPError(
+            "https://www.twse.com.tw/old-path",
+            308, "Permanent Redirect", {"Location": "/new-path"}, None,
+        )
+        response = BytesIO(b'{"stat":"OK","data":[]}')
+        response.__enter__ = lambda: response
+        response.__exit__ = lambda *args: None
+        with patch.object(
+            tw_market_data.urllib.request, "urlopen",
+            side_effect=[redirect, response],
+        ) as open_url:
+            payload = tw_market_data._request_json(
+                "https://www.twse.com.tw/old-path"
+            )
+        self.assertEqual(payload, {"stat": "OK", "data": []})
+        self.assertEqual(open_url.call_count, 2)
+        self.assertEqual(
+            open_url.call_args_list[1].args[0].full_url,
+            "https://www.twse.com.tw/new-path",
+        )
+
+    def test_request_json_rejects_cross_host_308_redirect(self):
+        from urllib.error import HTTPError
+
+        redirect = HTTPError(
+            "https://www.twse.com.tw/old-path",
+            308, "Permanent Redirect",
+            {"Location": "https://attacker.example/new-path"}, None,
+        )
+        with patch.object(
+            tw_market_data.urllib.request, "urlopen", side_effect=redirect
+        ) as open_url:
+            with self.assertRaises(tw_market_data.MarketDataError) as caught:
+                tw_market_data._request_json(
+                    "https://www.twse.com.tw/old-path"
+                )
+        self.assertEqual(caught.exception.diagnostic_code, "twse_http_308")
+        self.assertEqual(open_url.call_count, 1)
+
     def test_request_json_attaches_safe_http_diagnostic_code(self):
         from urllib.error import HTTPError
         error = HTTPError(
