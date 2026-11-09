@@ -16,6 +16,14 @@ def synthetic_data(n=900):
 
 
 class StockModelResearchTests(unittest.TestCase):
+    def test_holdout_gate_requires_positive_brier_skill_and_minimum_sample(self):
+        self.assertTrue(research._holdout_passes({"sample_count": 61, "brier_skill": 0.01}))
+        self.assertFalse(research._holdout_passes({"sample_count": 61, "brier_skill": 0.0}))
+        self.assertFalse(research._holdout_passes({"sample_count": 61, "brier_skill": -0.19}))
+        self.assertFalse(research._holdout_passes({"sample_count": 19, "brier_skill": 0.2}))
+        self.assertFalse(research._holdout_passes({"sample_count": 61, "brier_skill": None}))
+        self.assertFalse(research._holdout_passes({}))
+
     def test_medium_long_horizons_are_defined_in_trading_sessions(self):
         self.assertEqual(research.HORIZONS, {"1m": 21, "3m": 63, "6m": 126})
 
