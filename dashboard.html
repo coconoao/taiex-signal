@@ -112,6 +112,7 @@ details[open]>summary{margin-bottom:12px}
       <h2>未來三個交易日加權指數點位預測</h2>
       <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
       <div id="threeDayForecast" class="forecast-grid"></div>
+      <p id="sumline" class="note" hidden></p>
       <p class="note">顏色逐日與前一交易日比較：紅色代表上漲、綠色代表下跌。點位為模型估計，不是保證或交易指示。</p>
     </section>
     <section id="layers" hidden>
@@ -391,7 +392,8 @@ function renderDaily(d) {
     const changeText = delta > 0 ? "上漲" : delta < 0 ? "下跌" : "持平";
     const mae = item.mae_points == null ? "樣本不足" : Number(item.mae_points).toLocaleString("zh-TW") + " 點";
     const hit = item.within_0_2_pct_pct == null ? "樣本不足" : Number(item.within_0_2_pct_pct).toFixed(1) + "%";
-    const card = `<article class="forecast-card"><b>${label}</b><div class="forecast-value" style="color:${color}">${Math.round(point).toLocaleString("zh-TW")} 點</div><div class="forecast-change" style="color:${color}">${changeText} ${sign}${delta.toFixed(0)} 點（${sign}${change.toFixed(2)}%）</div><div class="forecast-meta">樣本外 MAE ${mae}｜±0.2% 命中率 ${hit}｜訓練樣本 ${Number(item.training_samples || 0).toLocaleString("zh-TW")}</div></article>`;
+    const baselineMae = item.flat_baseline_mae_points == null ? "—" : Number(item.flat_baseline_mae_points).toLocaleString("zh-TW") + " 點";
+    const card = `<article class="forecast-card"><b>${label}</b><div class="forecast-value" style="color:${color}">${Math.round(point).toLocaleString("zh-TW")} 點</div><div class="forecast-change" style="color:${color}">${changeText} ${sign}${delta.toFixed(0)} 點（${sign}${change.toFixed(2)}%）</div><div class="forecast-meta">樣本外 MAE ${mae}（持平基準 ${baselineMae}）｜±0.2% 命中率 ${hit}｜訓練樣本 ${Number(item.training_samples || 0).toLocaleString("zh-TW")}</div></article>`;
     previous = point;
     return card;
   }).join("");
@@ -757,8 +759,8 @@ const loadDaily = () => getJSON("signals.json").then(d => {
   $("err").textContent = "主要市場資料暫時無法載入（" + reason + "）。其他分頁仍可使用；系統會自動重試，也可以按上方「更新」。";
   $("meta").textContent = "等待重新連線；不會以示範資料代替正式資料。";
   $("hero").hidden = false;
-  $("sig").textContent = "資料暫時無法載入";
-  $("sumline").textContent = "連線恢復後會自動重新載入。";
+  $("threeDayMeta").textContent = "資料暫時無法載入；連線恢復後會自動重新載入。";
+  $("threeDayForecast").textContent = "目前無法取得三日點位預測。";
 });
 const loadWeekly = () => getJSON("weekly.json").then(w => { WK = w; renderWeekly(w); }).catch(() => { $("horizonNote").textContent = "目前無法載入長線歷史統計。"; $("horizonRows").innerHTML = "<tr><td colspan=\"7\">資料暫時無法取得</td></tr>"; $("longChart").textContent = "資料暫時無法取得。"; });
 const loadMultiMarketResearch = () => getJSON("multi_market_research.json").then(r => {
