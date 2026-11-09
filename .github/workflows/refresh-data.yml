@@ -8,7 +8,9 @@ on:
       - ".github/workflows/refresh-data.yml"
       - "pipeline.py"
   schedule:
-    - cron: "30 8 * * 1-5"
+    # 00:30 UTC Sunday-Thursday = 08:30 Taiwan Monday-Friday, before the TAIEX open.
+    # At this cutoff, the prior Taiwan session and completed U.S. session are available.
+    - cron: "30 0 * * 0-4"
   workflow_dispatch:
 
 permissions:
