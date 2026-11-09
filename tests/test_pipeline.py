@@ -20,6 +20,7 @@ from pipeline import (
     fetch_chips,
     fetch_futures,
     _fetch_taifex_openapi_latest,
+    _fetch_twse_taiex_recent,
     load_live,
     TICKERS,
     write_taiwan_data_status,
@@ -79,6 +80,28 @@ class LoadLiveTests(unittest.TestCase):
             self.assertEqual(len(fake_yfinance.download.call_args_list), 3)
             self.assertEqual(result["TAIEX"].dropna().iloc[-1],
                              cached["TAIEX"].iloc[-1])
+
+
+class TwseRecentCloseTests(unittest.TestCase):
+    def test_checks_newest_trading_day_before_older_fallback_dates(self):
+        now = pd.Timestamp("2026-11-09 16:30", tz="Asia/Taipei")
+        calls = []
+
+        def fetch(day):
+            day = pd.Timestamp(day).normalize()
+            calls.append(day)
+            if day == pd.Timestamp("2026-11-09"):
+                return None  # Today's official close has not been published yet.
+            if day == pd.Timestamp("2026-11-06"):
+                return 27000.0
+            return None
+
+        with patch("pipeline._fetch_twse_taiex_day", side_effect=fetch):
+            result = _fetch_twse_taiex_recent(now, calendar_days=7)
+
+        self.assertEqual(calls[0], pd.Timestamp("2026-11-09"))
+        self.assertEqual(calls[1], pd.Timestamp("2026-11-06"))
+        self.assertEqual(result, {pd.Timestamp("2026-11-06"): 27000.0})
 
 
 class TaiwanDataStatusTests(unittest.TestCase):
