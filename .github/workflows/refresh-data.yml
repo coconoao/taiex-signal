@@ -2,6 +2,8 @@ name: Refresh market data
 
 on:
   push:
+    branches:
+      - main
     paths:
       - ".github/workflows/refresh-data.yml"
       - "pipeline.py"
@@ -18,6 +20,7 @@ concurrency:
 
 jobs:
   refresh:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
