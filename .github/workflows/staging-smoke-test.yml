@@ -36,7 +36,7 @@ jobs:
       - name: Run 2330 staging analysis
         if: steps.credential.outputs.configured == 'true'
         env:
-          STAGING_WORKER_URL: https://taiex-stock-worker-staging.onrender.com
+          STAGING_WORKER_URL: https://taiex-stock-worker-oregon-test.onrender.com
           STAGING_WORKER_TOKEN: ${{ secrets.STAGING_WORKER_TOKEN }}
           STOCK_CODE: "2330"
         shell: bash
