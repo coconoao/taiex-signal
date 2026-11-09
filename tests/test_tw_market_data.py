@@ -445,11 +445,89 @@ class TestTaiwanMarketData(unittest.TestCase):
             patch.object(tw_market_data, "_month_starts", return_value=[dt.date(2026, 1, 1)]),
             patch.object(tw_market_data, "_identify_exchange", return_value=("TWSE", tw_market_data._twse_month)),
             patch.object(tw_market_data, "_fetch_months", return_value=rows),
-            patch.object(tw_market_data, "_official_cash_dividend_references", return_value={}),
+            patch.object(tw_market_data, "_official_corporate_action_references", return_value={}),
         ):
             frame = tw_market_data.load_stock_history("1234", years=1)
         self.assertEqual(len(frame), 22)
         self.assertEqual(frame.attrs["source"], "TWSE")
+
+    def test_roc_date_accepts_compact_tpex_and_gregorian_dates(self):
+        self.assertEqual(tw_market_data._roc_date("1151109"), dt.date(2026, 11, 9))
+        self.assertEqual(tw_market_data._roc_date("20261109"), dt.date(2026, 11, 9))
+
+    def test_twse_capital_reduction_reference_parser(self):
+        payload = {
+            "fields": ["恢復買賣日期", "股票代號", "恢復買賣參考價"],
+            "data": [["115/11/09", "4207", "19.74"]],
+        }
+        with patch.object(tw_market_data, "_request_json", return_value=payload):
+            refs = tw_market_data._twse_reduction_month(dt.date(2026, 11, 1))
+        self.assertEqual(refs[("4207", dt.date(2026, 11, 9))], 19.74)
+
+    def test_tpex_capital_reduction_reference_parser(self):
+        payload = {
+            "tables": [{
+                "fields": ["恢復買賣日期", "股票代號", "減資恢復買賣開始日參考價格"],
+                "data": [["1151109", "4207", "19.74"]],
+            }]
+        }
+        with patch.object(tw_market_data, "_request_json", return_value=payload):
+            refs = tw_market_data._tpex_reduction_month(dt.date(2026, 11, 1))
+        self.assertEqual(refs[("4207", dt.date(2026, 11, 9))], 19.74)
+
+    def test_twse_par_value_reference_parser(self):
+        payload = {
+            "fields": ["恢復買賣日期", "股票代號", "恢復買賣參考價"],
+            "data": [["115/09/07", "6949", "74.50"]],
+        }
+        with patch.object(tw_market_data, "_request_json", return_value=payload):
+            refs = tw_market_data._twse_par_value_month(dt.date(2026, 9, 1))
+        self.assertEqual(refs[("6949", dt.date(2026, 9, 7))], 74.5)
+
+    def test_twse_etf_split_reference_parser(self):
+        payload = {
+            "fields": ["恢復買賣日期", "ETF代號", "恢復買賣參考價"],
+            "data": [["114/06/18", "0050", "47.16"]],
+        }
+        with patch.object(tw_market_data, "_request_json", return_value=payload):
+            refs = tw_market_data._twse_etf_split_month(dt.date(2025, 6, 1))
+        self.assertEqual(refs[("0050", dt.date(2025, 6, 18))], 47.16)
+
+    def test_tpex_etf_split_parser_merges_split_and_reverse_split(self):
+        split = {("0050", dt.date(2025, 6, 18)): 47.16}
+        reverse = {("00632R", dt.date(2024, 12, 11)): 22.96}
+        with patch.object(
+            tw_market_data, "_tpex_reference_month", side_effect=[split, reverse]
+        ):
+            refs = tw_market_data._tpex_etf_split_month(dt.date(2025, 6, 1))
+        self.assertEqual(refs, {**split, **reverse})
+
+    def test_corporate_action_resolver_falls_back_to_capital_reduction(self):
+        day = dt.date(2026, 11, 9)
+        rows = [{
+            "date": day, "raw_close": 19.80, "change": None,
+            "volume": 1000, "open": 19.8, "high": 19.8, "low": 19.8,
+        }]
+        def fetch(source, action, month):
+            if action == "reduction":
+                return {("4207", day): 19.74}
+            return {}
+        with patch.object(tw_market_data, "_cached_action_month", side_effect=fetch) as cached:
+            refs = tw_market_data._official_corporate_action_references("4207", "TWSE", rows)
+        self.assertEqual(refs, {day: 19.74})
+        self.assertEqual([call.args[1] for call in cached.call_args_list], ["exright", "reduction"])
+
+    def test_empty_action_cache_expires_quickly(self):
+        month = dt.date(2025, 12, 1)
+        with (
+            patch.object(tw_market_data, "_EXRIGHT_CACHE", {}),
+            patch.object(tw_market_data, "_twse_exright_month", return_value={}) as fetch,
+            patch.object(tw_market_data.time, "time", side_effect=[1000.0, 1001.0, 1301.0]),
+        ):
+            tw_market_data._cached_exright_month("TWSE", month)
+            tw_market_data._cached_exright_month("TWSE", month)
+            tw_market_data._cached_exright_month("TWSE", month)
+        self.assertEqual(fetch.call_count, 2)
 
     def test_adjustment_failure_has_machine_readable_category(self):
         rows = [
