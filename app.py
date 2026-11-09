@@ -4,7 +4,7 @@ API 金鑰：使用者各自填在瀏覽器；分析時透過登入後的 /api/a
   伺服器排程若也要跑 AI 分析，可用環境變數提供營運者自己的金鑰（見 news.py）。
 對外部署（--host 0.0.0.0 或 READONLY=1）：自動唯讀，關閉手動更新與匯出到本機；排程照常執行。
 """
-import datetime as dt, json, os, random, subprocess, sys, threading, time, urllib.parse
+import datetime as dt, json, os, random, re, subprocess, sys, threading, time, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import base64, hmac, secrets, urllib.request, urllib.error
 from http.cookies import SimpleCookie
