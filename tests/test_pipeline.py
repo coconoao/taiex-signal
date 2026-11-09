@@ -11,6 +11,7 @@ import pandas as pd
 from pipeline import (
     BACKFILL_DATES_PER_RUN,
     backtest,
+    build,
     RECENT_DATES_PER_RUN,
     _checkpoint_if_needed,
     _merge_and_save,
@@ -371,6 +372,31 @@ class BacktestCalendarTests(unittest.TestCase):
         self.assertEqual(len(result["curve"]["dates"]), 4)
         self.assertEqual(result["curve"]["dates"][0], str(dates[0].date()))
         self.assertEqual(result["curve"]["dates"][-1], str(dates[15].date()))
+
+
+class DelayedMarginPublicationTests(unittest.TestCase):
+    def test_latest_session_remains_predictable_when_margin_release_is_delayed(self):
+        import numpy as np
+
+        index = pd.bdate_range("2025-01-01", periods=260)
+        market = pd.DataFrame(index=index)
+        for offset, name in enumerate(["SOX", "TSM", "VIX", "US10Y", "N225", "KOSPI", "USDTWD", "TAIEX"]):
+            market[name] = 100 + np.arange(len(index)) * (0.08 + offset * 0.003)
+        chips = pd.DataFrame({
+            "foreign_net": np.linspace(-100, 150, len(index)),
+            "trust_net": np.linspace(80, -40, len(index)),
+        }, index=index)
+        margin = pd.DataFrame({
+            "margin_bal": np.linspace(1000, 1200, len(index) - 1),
+            "margin_units": np.linspace(500, 550, len(index) - 1),
+            "short_units": np.linspace(100, 130, len(index) - 1),
+        }, index=index[:-1])
+
+        X, y, _ = build(market, chips=chips, margin=margin)
+
+        self.assertEqual(X.index[-1], index[-1])
+        self.assertTrue(X.loc[index[-1]].notna().all())
+        self.assertTrue(pd.isna(y.loc[index[-1]]))
 
 
 if __name__ == "__main__":
