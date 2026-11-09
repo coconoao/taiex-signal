@@ -26,7 +26,7 @@ DEFAULT_WATCHLIST = Path(__file__).parent / "research/event_monitoring/people-wa
 DEFAULT_OUTPUT = Path("research_data/event_monitor_history.jsonl")
 
 EVENT_TERMS = {
-    "policy_trade": ("tariff", "關稅", "trade", "貿易", "export control", "出口管制", "sanction", "制裁"),
+    "policy_trade": ("tariff", "關稅", "trade", "貿易", "export control", "export", "出口", "出口管制", "sanction", "制裁"),
     "monetary_macro": ("fed", "federal reserve", "利率", "聯準會", "央行", "inflation", "通膨", "匯率", "gdp"),
     "geopolitics": ("taiwan strait", "台海", "geopolit", "外交", "國安", "military", "戰爭", "conflict"),
     "semiconductor_ai": ("semiconductor", "半導體", "chip", "晶片", "tsmc", "台積電", "nvidia", "黃仁勳", "gpu", "ai"),
@@ -187,6 +187,7 @@ def build_event(item: dict[str, Any], watchlist: dict[str, Any], now: dt.datetim
         "version": 1,
         "headline": title[:1000],
         "summary_factual": None,
+        "raw_content_hash": _hash(title + " " + str(item.get("description") or "")),
         "source": {
             "name": source_name[:160],
             "domain": domain[:253],
@@ -243,22 +244,53 @@ def build_event(item: dict[str, Any], watchlist: dict[str, Any], now: dt.datetim
 
 
 def merge_history(existing: list[dict[str, Any]], incoming: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    by_id = {row["event_id"]: row for row in existing if isinstance(row, dict) and row.get("event_id")}
+    """Preserve prior versions when the same source URL materially changes."""
+    by_version = {
+        (row["event_id"], int(row.get("version", 1))): row
+        for row in existing if isinstance(row, dict) and row.get("event_id")
+    }
+    latest_by_id: dict[str, dict[str, Any]] = {}
+    for row in by_version.values():
+        event_id = row["event_id"]
+        if event_id not in latest_by_id or int(row.get("version", 1)) > int(latest_by_id[event_id].get("version", 1)):
+            latest_by_id[event_id] = row
+
     for event in incoming:
-        previous = by_id.get(event["event_id"])
+        previous = latest_by_id.get(event["event_id"])
         if previous:
-            event["version"] = int(previous.get("version", 1))
+            old_version = int(previous.get("version", 1))
+            old_hash = previous.get("raw_content_hash")
+            new_hash = event.get("raw_content_hash")
             old_times = previous.get("timestamps", {})
             event["timestamps"]["first_seen_at_utc"] = old_times.get(
                 "first_seen_at_utc", event["timestamps"]["first_seen_at_utc"]
             )
-            # Never let a later run move the first-seen/eligibility timestamp forward.
             event["timestamps"]["forecast_eligible_at_utc"] = old_times.get(
                 "forecast_eligible_at_utc", event["timestamps"]["first_seen_at_utc"]
             )
-        by_id[event["event_id"]] = event
-    return sorted(by_id.values(), key=lambda row: row.get("timestamps", {}).get("last_seen_at_utc", ""), reverse=True)
+            if old_hash and new_hash and old_hash != new_hash:
+                event["version"] = old_version + 1
+                event["classification"]["is_material_update"] = True
+                event["classification"]["supersedes_event_version"] = old_version
+                by_version[(event["event_id"], event["version"])] = event
+            else:
+                event["version"] = old_version
+                event["timestamps"]["last_seen_at_utc"] = event["timestamps"]["last_seen_at_utc"]
+                by_version[(event["event_id"], old_version)] = event
+        else:
+            event["version"] = 1
+            by_version[(event["event_id"], 1)] = event
+        latest_by_id[event["event_id"]] = event
 
+    return sorted(
+        by_version.values(),
+        key=lambda row: (
+            row.get("timestamps", {}).get("last_seen_at_utc", ""),
+            row.get("event_id", ""),
+            int(row.get("version", 1)),
+        ),
+        reverse=True,
+    )
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
