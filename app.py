@@ -478,7 +478,10 @@ def stale():
             return True
         with open("signals.json", encoding="utf-8") as stream:
             signals = json.load(stream)
-        if signals.get("demo"):
+        if signals.get("demo") or int(signals.get("schema_version", 0) or 0) < 2:
+            return True
+        forecast = signals.get("forecast") or {}
+        if forecast.get("schema_version") != 2 or not isinstance(forecast.get("sessions"), list):
             return True
         # 新版月級距統計與台灣／政策新聞尚未產生時，啟動後自動補跑一次。
         with open("weekly.json", encoding="utf-8") as stream:
