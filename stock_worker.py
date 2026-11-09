@@ -180,16 +180,36 @@ document.getElementById("run").addEventListener("click",async()=>{
   catch(e){out.textContent="健康檢查失敗（"+e.name+"），等待 "+elapsed()+"。尚未送出分析請求。";return}
   const healthTime=((performance.now()-healthStart)/1000).toFixed(1);
   if(!health.ok){out.textContent="健康檢查 HTTP "+health.status+"（"+healthTime+" 秒）。尚未送出分析請求。";return}
-  out.textContent="健康檢查通過（HTTP "+health.status+"，"+healthTime+" 秒）。步驟 2/2：下載官方行情並分析…";
+  out.textContent="健康檢查通過（HTTP "+health.status+"，"+healthTime+" 秒）。正在建立背景分析工作…";
   try{
-   const response=await request("/analyze",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({code})},240000);
-   const raw=await response.text();
-   let body;
-   try{body=JSON.parse(raw)}catch(_){body={error:"回應不是有效 JSON"}}
-   out.textContent="健康檢查：HTTP "+health.status+"（"+healthTime+" 秒）\\n分析請求：HTTP "+response.status+"\\n總等待："+elapsed()+"\\n"+JSON.stringify(body,null,2);
+   const created=await request("/analysis-jobs",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({code})},20000);
+   const createdRaw=await created.text();
+   let createdBody;
+   try{createdBody=JSON.parse(createdRaw)}catch(_){createdBody={error:"Worker 回應不是有效 JSON"}}
+   if(!created.ok||!createdBody.job_id){out.textContent="建立分析工作失敗：HTTP "+created.status+"\\n"+JSON.stringify(createdBody,null,2);return}
+   const jobId=createdBody.job_id;
+   out.textContent="背景分析已建立（HTTP "+created.status+"）。Worker 正在處理；此頁每 3 秒查詢一次狀態。";
+   for(let attempt=0;attempt<180;attempt++){
+    await new Promise(resolve=>setTimeout(resolve,3000));
+    const poll=await request("/analysis-jobs/"+encodeURIComponent(jobId),{headers:{"Authorization":"Bearer "+token}},20000);
+    const pollRaw=await poll.text();
+    let body;
+    try{body=JSON.parse(pollRaw)}catch(_){body={error:"狀態回應不是有效 JSON"}}
+    if(poll.status===202){
+     out.textContent="背景分析進行中（"+elapsed()+"）。狀態："+(body.state||"處理中")+"；已查詢 "+(attempt+1)+" 次。";
+     continue;
+    }
+    if(poll.ok&&body.state==="completed"){
+     out.textContent="健康檢查：HTTP "+health.status+"（"+healthTime+" 秒）\\n分析工作：完成\\n分析 HTTP 狀態："+body.analysis_http_status+"\\n總等待："+elapsed()+"\\n"+JSON.stringify(body.result,null,2);
+     return;
+    }
+    out.textContent="查詢分析工作失敗：HTTP "+poll.status+"\\n"+JSON.stringify(body,null,2);
+    return;
+   }
+   out.textContent="背景分析仍未完成，已等待 "+elapsed()+"。工作可能仍在 Worker 執行；請稍後重新開啟頁面並檢查紀錄。";
   }catch(e){
-   const reason=e.name==="AbortError"?"瀏覽器中止請求":e.message==="client_timeout"?"等待超過 240 秒":e.name;
-   out.textContent="健康檢查：HTTP "+health.status+"（"+healthTime+" 秒）\\n分析請求連線失敗："+reason+"\\n總等待："+elapsed()+"。這不代表官方行情來源一定失敗；請查看 Worker 是否有安全的分析錯誤紀錄。";
+   const reason=e.name==="AbortError"?"瀏覽器中止狀態查詢":e.message==="client_timeout"?"單次狀態查詢超過 20 秒":e.name;
+   out.textContent="背景分析連線失敗："+reason+"\\n總等待："+elapsed()+"。請查看 Worker 是否有安全的分析錯誤紀錄。";
   }
  }finally{button.disabled=false}
 });
