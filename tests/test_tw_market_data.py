@@ -76,7 +76,7 @@ class TestTaiwanMarketData(unittest.TestCase):
                 tw_market_data._request_json("https://www.twse.com.tw/test"),
                 {"ok": True},
             )
-        self.assertEqual(get.call_args.kwargs["timeout"], 8)
+        self.assertEqual(get.call_args.kwargs["timeout"], 15)
         self.assertEqual(get.call_args.kwargs["impersonate"], "chrome")
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
 
