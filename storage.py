@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 
 FILES = (
-    "signals.json", "weekly.json", "weekly_prob.csv", "market_history.csv",
+    "signals.json", "signals_legacy_v1.json", "index_forecasts_history.jsonl", "market_sessions_v2.jsonl", "weekly.json", "weekly_prob.csv", "market_history.csv",
     "chips.csv", "margin.csv", "futures.csv", "taiwan_data_status.json",
     "news.json", "news_history.jsonl", "policy_events.jsonl",
     "news_research.json", "news_research_history.jsonl",
@@ -97,13 +97,124 @@ def restore_data(directory="."):
     return restored
 
 
+
+def _atomic_text(path, content):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as stream:
+        stream.write(content)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(tmp, path)
+
+
+def write_market_sessions_v2(directory="."):
+    """Merge legacy daily CSVs into canonical, versioned one-row-per-TWSE-session JSONL."""
+    import math
+    import pandas as pd
+
+    def read(name):
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            return pd.DataFrame()
+        frame = pd.read_csv(path)
+        if "date" not in frame.columns:
+            frame = frame.rename(columns={frame.columns[0]: "date"})
+        frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        return frame.dropna(subset=["date"]).drop_duplicates("date", keep="last").set_index("date")
+
+    market = read("market_history.csv")
+    if market.empty or "TAIEX" not in market.columns:
+        return 0
+    merged = market.copy()
+    for name in ("chips.csv", "margin.csv", "futures.csv"):
+        extra = read(name)
+        if not extra.empty:
+            merged = merged.join(extra, how="left", rsuffix="_" + name.split(".")[0])
+    merged = merged[pd.to_numeric(merged["TAIEX"], errors="coerce").notna()].sort_index()
+
+    def number(row, key):
+        value = pd.to_numeric(row.get(key), errors="coerce")
+        return round(float(value), 8) if pd.notna(value) and math.isfinite(float(value)) else None
+
+    lines = []
+    for date, row in merged.iterrows():
+        payload = {
+            "schema_version": 2,
+            "record_type": "market_session",
+            "trade_date": date,
+            "instrument": {"symbol": "TAIEX", "name": "臺灣加權股價指數", "close": number(row, "TAIEX"), "unit": "index_points"},
+            "cross_market": {key: number(row, key) for key in ("TSM", "USDTWD", "KOSPI", "N225", "SOX", "US10Y", "VIX")},
+            "institutional": {"foreign_net": number(row, "foreign_net"), "trust_net": number(row, "trust_net")},
+            "margin": {"balance": number(row, "margin_bal"), "margin_units": number(row, "margin_units"), "short_units": number(row, "short_units")},
+            "futures": {"foreign_open_interest_net": number(row, "foreign_oi_net")},
+            "availability": {
+                "cross_market": any(number(row, key) is not None for key in ("TSM", "USDTWD", "KOSPI", "N225", "SOX", "US10Y", "VIX")),
+                "institutional": any(number(row, key) is not None for key in ("foreign_net", "trust_net")),
+                "margin": any(number(row, key) is not None for key in ("margin_bal", "margin_units", "short_units")),
+                "futures": number(row, "foreign_oi_net") is not None,
+            },
+        }
+        lines.append(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    _atomic_text(os.path.join(directory, "market_sessions_v2.jsonl"), "\n".join(lines) + ("\n" if lines else ""))
+    return len(lines)
+
+
+def migrate_legacy_signals_v2(directory="."):
+    """Archive the old classifier snapshot and replace it with an explicit v2 pending envelope."""
+    path = os.path.join(directory, "signals.json")
+    legacy_path = os.path.join(directory, "signals_legacy_v1.json")
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding="utf-8") as stream:
+            old = json.load(stream)
+    except Exception:
+        return False
+    if isinstance(old, dict) and int(old.get("schema_version", 0) or 0) >= 2:
+        return False
+    if not os.path.exists(legacy_path):
+        with open(path, encoding="utf-8") as source:
+            _atomic_text(legacy_path, source.read())
+    migrated = {
+        "schema_version": 2,
+        "record_type": "index_forecast_snapshot",
+        "asof": old.get("asof") if isinstance(old, dict) else None,
+        "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "demo": bool(old.get("demo", False)) if isinstance(old, dict) else False,
+        "instrument": {"symbol": "TAIEX", "name": "臺灣加權股價指數", "unit": "index_points"},
+        "forecast": {
+            "status": "pending_backfill",
+            "method": "direct_horizon_ridge",
+            "horizon_unit": "trading_sessions",
+            "base_close": None,
+            "sessions": [],
+        },
+        "legacy_archive": {
+            "key": "signals_legacy_v1.json",
+            "source_schema_version": 1,
+            "note": "舊版方向分類器資料已封存；不將看漲機率偽裝成歷史指數點位預測。",
+        },
+    }
+    _atomic_text(path, json.dumps(migrated, ensure_ascii=False, separators=(",", ":")))
+    return True
+
+
+def migrate_legacy_data_v2(directory="."):
+    """Idempotent migration entrypoint; preserves all original source files."""
+    market_rows = write_market_sessions_v2(directory)
+    signal_migrated = migrate_legacy_signals_v2(directory)
+    return {"market_session_rows": market_rows, "legacy_signal_archived": signal_migrated}
+
 def save_data(directory=".", names=None):
     """Upsert selected data files; routine saves omit dedicated research artifacts."""
     if not enabled():
         return 0
+    selected = AUTO_SAVE_FILES if names is None else tuple(names)
+    if names is None or any(name in selected for name in ("market_history.csv", "chips.csv", "margin.csv", "futures.csv")):
+        write_market_sessions_v2(directory)
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     rows = []
-    for name in (AUTO_SAVE_FILES if names is None else tuple(names)):
+    for name in selected:
         if name not in FILES:
             raise ValueError("Unknown data file: " + str(name))
         path = os.path.join(directory, name)
@@ -129,6 +240,10 @@ if __name__ == "__main__":
         print("Restored data files:", restore_data())
     elif action == "save":
         print("Saved data files:", save_data())
+    elif action == "migrate-v2":
+        result = migrate_legacy_data_v2()
+        print("V2 migration:", json.dumps(result, ensure_ascii=False))
+        print("Saved migrated artifacts:", save_data(names=("signals.json", "signals_legacy_v1.json", "market_sessions_v2.jsonl")))
     elif action == "save-policy-archive":
         print("Saved policy archive files:", save_data(names=(POLICY_ARCHIVE_FILE,)))
     elif action == "save-policy-research":
@@ -149,5 +264,5 @@ if __name__ == "__main__":
         print("Saved multi-horizon model research:", save_data(names=(MULTI_HORIZON_MODEL_RESEARCH_FILE,)))
     else:
         raise SystemExit(
-            "Usage: python storage.py restore|save|save-policy-archive|save-policy-research|save-gdelt-research|save-mediacloud-research|save-news-enhanced-model|save-multi-market-research|save-model-improvement-research|save-strategy-research|save-multi-horizon-model-research"
+            "Usage: python storage.py restore|save|migrate-v2|save-policy-archive|save-policy-research|save-gdelt-research|save-mediacloud-research|save-news-enhanced-model|save-multi-market-research|save-model-improvement-research|save-strategy-research|save-multi-horizon-model-research"
         )
