@@ -396,7 +396,7 @@ def run_jobs(*whats):
             JOB["running"] = w
             if w == "news" and not os.environ.get("GEMINI_API_KEY"):
                 code = 1
-                log = (log + "[news] skipped: Gemini news analysis is owned by GitHub Actions; no local Gemini key is configured.\\n")[-3000:]
+                log = (log + "[news] skipped: Gemini news analysis is owned by GitHub Actions; no local Gemini key is configured.\n")[-3000:]
                 JOB["log"] = log
                 exit_code = code
                 break
