@@ -22,8 +22,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: taiex-daily-news-research
-  cancel-in-progress: true
+  # Share the same writer lock as refresh-data.yml; both workflows persist news.json.
+  group: taiex-data-refresh
+  cancel-in-progress: false
 
 jobs:
   refresh-news:
