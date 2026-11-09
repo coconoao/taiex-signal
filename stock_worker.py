@@ -3,15 +3,24 @@
 Public health endpoint; analysis endpoint requires a shared bearer token.
 The worker runs stock research independently from the main dashboard service.
 """
+import concurrent.futures
 import json
 import os
 import re
+import secrets
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from tw_market_data import MarketDataError
 
 TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
 MAX_BODY = 4096
+JOB_TTL_SECONDS = 1800
+MAX_STORED_JOBS = 20
+_JOB_LOCK = threading.Lock()
+_JOBS = {}
+_JOB_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="stock-analysis")
 DIAGNOSTICS_UI_ENABLED = os.environ.get("STAGING_DIAGNOSTICS_UI", "").lower() == "true"
 _SAFE_DIAGNOSTIC = re.compile(
     r"(?:no_recent_history|provider_invalid_json_shape|provider_error|"
@@ -54,6 +63,66 @@ def analyze_code(code):
             flush=True,
         )
         return {"error": "個股分析暫時無法完成，請稍後重試"}, 500
+
+
+def _prune_jobs_locked(now=None):
+    now = time.time() if now is None else now
+    expired = [
+        job_id for job_id, job in _JOBS.items()
+        if job.get("finished_at") and now - job["finished_at"] > JOB_TTL_SECONDS
+    ]
+    for job_id in expired:
+        _JOBS.pop(job_id, None)
+    if len(_JOBS) > MAX_STORED_JOBS:
+        completed = sorted(
+            ((job.get("finished_at") or now, job_id) for job_id, job in _JOBS.items()
+             if job.get("finished_at")),
+        )
+        for _, job_id in completed[:max(0, len(_JOBS) - MAX_STORED_JOBS)]:
+            _JOBS.pop(job_id, None)
+
+
+def _run_analysis_job(job_id, code):
+    result, status = analyze_code(code)
+    with _JOB_LOCK:
+        job = _JOBS.get(job_id)
+        if job is not None:
+            job.update({
+                "state": "completed",
+                "result": result,
+                "http_status": status,
+                "finished_at": time.time(),
+            })
+
+
+def _create_analysis_job(code):
+    job_id = secrets.token_urlsafe(24)
+    with _JOB_LOCK:
+        _prune_jobs_locked()
+        active = sum(1 for job in _JOBS.values() if job["state"] in ("queued", "running"))
+        if active >= 2:
+            return None
+        _JOBS[job_id] = {
+            "state": "queued",
+            "created_at": time.time(),
+            "finished_at": None,
+        }
+    try:
+        _JOB_POOL.submit(_run_analysis_job, job_id, code)
+    except RuntimeError:
+        with _JOB_LOCK:
+            _JOBS.pop(job_id, None)
+        return None
+    return job_id
+
+
+def _get_analysis_job(job_id):
+    with _JOB_LOCK:
+        _prune_jobs_locked()
+        job = _JOBS.get(job_id)
+        if job is None:
+            return None
+        return dict(job)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -134,10 +203,25 @@ document.getElementById("run").addEventListener("click",async()=>{
             return
         if self.path == "/healthz":
             return self._json({"ok": True, "service": "stock-worker"})
+        if self.path.startswith("/analysis-jobs/"):
+            supplied = self.headers.get("Authorization", "")
+            if not TOKEN or supplied != "Bearer " + TOKEN:
+                return self._json({"error": "unauthorized"}, 401)
+            job_id = self.path[len("/analysis-jobs/"):]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", job_id):
+                return self._json({"error": "not found"}, 404)
+            job = _get_analysis_job(job_id)
+            if job is None:
+                return self._json({"error": "工作不存在或已過期"}, 404)
+            payload = {"job_id": job_id, "state": job["state"]}
+            if job["state"] == "completed":
+                payload["result"] = job["result"]
+                payload["analysis_http_status"] = job["http_status"]
+            return self._json(payload, 200 if job["state"] == "completed" else 202)
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
-        if self.path != "/analyze":
+        if self.path not in ("/analyze", "/analysis-jobs"):
             return self._json({"error": "not found"}, 404)
         supplied = self.headers.get("Authorization", "")
         if not TOKEN or supplied != "Bearer " + TOKEN:
@@ -152,6 +236,13 @@ document.getElementById("run").addEventListener("click",async()=>{
                 return self._json({"error": "請輸入有效的台股代號"}, 400)
         except Exception:
             return self._json({"error": "請求格式錯誤"}, 400)
+
+        if self.path == "/analysis-jobs":
+            os.chdir("/tmp")
+            job_id = _create_analysis_job(code)
+            if job_id is None:
+                return self._json({"error": "目前已有分析工作執行或排隊，請稍後再試"}, 429)
+            return self._json({"job_id": job_id, "state": "queued"}, 202)
 
         os.chdir("/tmp")
         result, status = analyze_code(code)
