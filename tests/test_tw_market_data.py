@@ -118,11 +118,13 @@ class TestTaiwanMarketData(unittest.TestCase):
 
         months = [dt.date(2026, 9, 1), dt.date(2026, 10, 1), dt.date(2026, 11, 1)]
         with (
-            patch.object(tw_market_data, "_twse_month", side_effect=twse_failure),
-            patch.object(tw_market_data, "_tpex_month", side_effect=tpex_failure),
+            patch.object(tw_market_data, "_twse_month", side_effect=twse_failure) as twse_mock,
+            patch.object(tw_market_data, "_tpex_month", side_effect=tpex_failure) as tpex_mock,
         ):
             with self.assertRaises(tw_market_data.MarketDataError) as caught:
                 tw_market_data._identify_exchange("2330", None, months)
+        self.assertEqual(twse_mock.call_count, 1)
+        self.assertEqual(tpex_mock.call_count, 1)
         self.assertIn("twse_http_403", caught.exception.diagnostic_code)
         self.assertIn("tpex_network_errno_101", caught.exception.diagnostic_code)
         self.assertNotIn("2330", caught.exception.diagnostic_code)
