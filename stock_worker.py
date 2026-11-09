@@ -91,11 +91,12 @@ document.getElementById("run").addEventListener("click",async()=>{
  button.disabled=true;
  const started=performance.now();
  const elapsed=()=>((performance.now()-started)/1000).toFixed(1)+" 秒";
- const timeout=ms=>new Promise((_,reject)=>setTimeout(()=>reject(new Error("client_timeout")),ms));
  const request=async(url,options={},limit=20000)=>{
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),limit);
-  try{return await Promise.race([fetch(url,{...options,signal:controller.signal,cache:"no-store"}),timeout(limit)])}
+  let timedOut=false;
+  const timer=setTimeout(()=>{timedOut=true;controller.abort()},limit);
+  try{return await fetch(url,{...options,signal:controller.signal,cache:"no-store"})}
+  catch(e){if(timedOut)e.message="client_timeout";throw e}
   finally{clearTimeout(timer)}
  };
  try{
