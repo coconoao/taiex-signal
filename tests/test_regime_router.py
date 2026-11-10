@@ -16,6 +16,7 @@ from regime_router import (
     _lag_post_close_features,
     _forecast_metrics,
     _expert_performance_blend_weight,
+    _gate_policy_sensitivity,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
