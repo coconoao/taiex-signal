@@ -169,19 +169,23 @@ def _eligible_calibration_records(records, current_position, horizon):
     return [record for record in records if record[0] + int(horizon) <= int(current_position)]
 
 
-def _best_f2_threshold(scores, actual_positive, default, min_positives, precision_floor):
+def _best_f2_threshold(
+    scores, actual_positive, default, min_positives, precision_floor, max_rate_multiplier
+):
     scores = np.asarray(scores, dtype=float)
     actual_positive = np.asarray(actual_positive, dtype=bool)
     positives = int(actual_positive.sum())
     if positives < min_positives:
         return float(default)
+    prevalence = float(actual_positive.mean())
+    max_predicted_rate = min(0.95, prevalence * float(max_rate_multiplier))
     best_threshold, best_score = float(default), -1.0
-    for threshold in np.arange(0.05, 0.951, 0.025):
+    for threshold in np.arange(0.025, 0.976, 0.025):
         predicted = scores >= threshold
-        true_positive = int(np.sum(predicted & actual_positive))
         predicted_count = int(predicted.sum())
-        if predicted_count == 0:
+        if predicted_count == 0 or predicted_count / len(scores) > max_predicted_rate:
             continue
+        true_positive = int(np.sum(predicted & actual_positive))
         precision = true_positive / predicted_count
         recall = true_positive / positives
         if precision < precision_floor:
@@ -189,7 +193,12 @@ def _best_f2_threshold(scores, actual_positive, default, min_positives, precisio
         f2 = 5.0 * precision * recall / max(1e-12, 4.0 * precision + recall)
         if f2 > best_score or (np.isclose(f2, best_score) and threshold > best_threshold):
             best_threshold, best_score = float(threshold), float(f2)
-    return best_threshold if best_score >= 0 else float(default)
+    if best_score >= 0:
+        return best_threshold
+    # If precision and prevalence constraints cannot both be met, rank by score
+    # and predict approximately the historical base rate instead of routing
+    # nearly every session to high volatility or suppressing all risk upgrades.
+    return float(np.quantile(scores, 1.0 - prevalence, method="higher"))
 
 
 def _select_risk_thresholds(probability_history, actual_history):
@@ -204,16 +213,16 @@ def _select_risk_thresholds(probability_history, actual_history):
     actual = np.asarray(actual_history, dtype=int)
     high_extreme = _best_f2_threshold(
         probs[:, 2] + probs[:, 3], actual >= 2,
-        default=0.40, min_positives=20, precision_floor=0.30,
+        default=0.40, min_positives=20, precision_floor=0.30, max_rate_multiplier=1.5,
     )
     extreme = _best_f2_threshold(
         probs[:, 3], actual == 3,
-        default=0.20, min_positives=12, precision_floor=0.20,
+        default=0.20, min_positives=12, precision_floor=0.20, max_rate_multiplier=2.0,
     )
     return {
         "high_extreme": round(float(high_extreme), 4),
         "extreme": round(float(extreme), 4),
-        "source": "prior_calibrated_oos_f2",
+        "source": "prior_calibrated_oos_f2_with_prevalence_guard",
         "training_oos_samples": int(len(actual)),
     }
 
