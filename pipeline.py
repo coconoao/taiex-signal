@@ -1681,6 +1681,7 @@ if __name__ == "__main__":
         write_taiwan_data_status(df, chips, margin, futures)
     X, y, fwd = build(df, chips, margin, futures=futures)
     three_day_forecast, forecast_history = three_day_point_forecast(df, chips, margin, futures=futures)
+    three_day_forecast["research_candidates"] = build_ridge_trial_forecasts(df, chips, margin, futures=futures)
     history_tmp = "index_forecasts_history.jsonl.tmp"
     with open(history_tmp, "w", encoding="utf-8") as stream:
         for record in forecast_history:
