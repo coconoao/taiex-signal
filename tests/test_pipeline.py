@@ -1,4 +1,5 @@
 import sys
+import datetime as dt
 import tempfile
 import types
 import unittest
@@ -397,6 +398,30 @@ class DelayedMarginPublicationTests(unittest.TestCase):
         self.assertEqual(X.index[-1], index[-1])
         self.assertTrue(X.loc[index[-1]].notna().all())
         self.assertTrue(pd.isna(y.loc[index[-1]]))
+
+
+
+class ForecastTradingCalendarTests(unittest.TestCase):
+    def test_parses_iso_and_roc_dates(self):
+        from pipeline import _parse_twse_calendar_date
+        self.assertEqual(_parse_twse_calendar_date("2026-11-11"), dt.date(2026, 11, 11))
+        self.assertEqual(_parse_twse_calendar_date("1151109"), dt.date(2026, 11, 9))
+
+    def test_uses_official_closures_when_assigning_forecast_dates(self):
+        from pipeline import _future_taiwan_trading_dates
+        with patch("pipeline._fetch_twse_closed_dates", side_effect=[
+            frozenset({dt.date(2026, 11, 11)}),
+        ]):
+            dates, source = _future_taiwan_trading_dates("2026-11-10", 3)
+        self.assertEqual(dates, ["2026-11-12", "2026-11-13", "2026-11-16"])
+        self.assertEqual(source, "twse_official")
+
+    def test_marks_weekday_only_fallback_when_official_calendar_fails(self):
+        from pipeline import _future_taiwan_trading_dates
+        with patch("pipeline._fetch_twse_closed_dates", return_value=None):
+            dates, source = _future_taiwan_trading_dates("2026-11-10", 3)
+        self.assertEqual(dates, ["2026-11-11", "2026-11-12", "2026-11-13"])
+        self.assertEqual(source, "weekdays_only_fallback")
 
 
 if __name__ == "__main__":
