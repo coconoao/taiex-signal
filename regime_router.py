@@ -120,11 +120,17 @@ def _apply_probability_calibrator(calibrator, raw_probabilities):
     if calibrator is None:
         return raw
     features = np.log(np.clip(raw, 1e-7, 1.0))
+    raw_calibrated = calibrator.predict_proba(features)
     calibrated = np.zeros((len(raw), 4), dtype=float)
     for column, class_id in enumerate(calibrator.classes_):
-        calibrated[:, int(class_id)] = calibrator.predict_proba(features)[:, column]
+        calibrated[:, int(class_id)] = raw_calibrated[:, column]
     totals = calibrated.sum(axis=1, keepdims=True)
     return np.divide(calibrated, totals, out=np.zeros_like(calibrated), where=totals > 0)
+
+
+def _eligible_calibration_records(records, current_position, horizon):
+    """Only use prior OOS outcomes whose target close is already observable."""
+    return [record for record in records if record[0] + int(horizon) <= int(current_position)]
 
 
 def _fit_experts(X, returns, regimes):
@@ -289,7 +295,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
 
         train_regimes = classify_regimes(forward_returns.loc[train_idx]).astype(int)
         oos_actual, oos_predicted, oos_probabilities, oos_forecasts = [], [], [], []
-        calibration_prob_history, calibration_actual_history = [], []
+        calibration_records = []
         calibrated_oos_samples = 0
         first_test = min(max(300, horizon + 30), max(horizon + 30, len(train_idx) // 2))
         for start in range(first_test, len(train_idx), 30):
@@ -301,14 +307,18 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             router = _fit_router(X.loc[fit_idx], fit_regimes)
             fallback_class = int(pd.Series(fit_regimes).mode().iloc[0])
             raw_probs = _router_probabilities(router, X.loc[test_idx], fallback_class=fallback_class)
+            eligible_records = _eligible_calibration_records(
+                calibration_records, start, horizon
+            )
             calibrator = _fit_probability_calibrator(
-                calibration_prob_history, calibration_actual_history
+                [record[1] for record in eligible_records],
+                [record[2] for record in eligible_records],
             )
             probs = _apply_probability_calibrator(calibrator, raw_probs)
             if calibrator is not None:
                 calibrated_oos_samples += len(test_idx)
             predicted_classes = probs.argmax(axis=1)
-            batch_raw_probs, batch_actual_classes = [], []
+            batch_calibration_records = []
             global_model, experts, expert_counts = _fit_experts(
                 X.loc[fit_idx], forward_returns.loc[fit_idx].to_numpy(dtype=float), fit_regimes
             )
@@ -331,8 +341,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 oos_actual.append(actual_class)
                 oos_predicted.append(requested)
                 oos_probabilities.append(probs[offset].tolist())
-                batch_raw_probs.append(raw_probs[offset].tolist())
-                batch_actual_classes.append(actual_class)
+                batch_calibration_records.append((start + offset, raw_probs[offset].tolist(), actual_class))
                 oos_forecasts.append({
                     "predicted_close": base_point * (1.0 + predicted_return),
                     "actual_close": actual_point,
@@ -343,16 +352,21 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                     "actual_regime": int(classify_regimes([actual_return])[0]),
                     "expert_used": expert_used,
                 })
-            # Outcomes from this block become calibration data only for later blocks.
-            calibration_prob_history.extend(batch_raw_probs)
-            calibration_actual_history.extend(batch_actual_classes)
+            # Outcomes from this block are retained with target timing; later
+            # folds may calibrate only after each outcome's target close is known.
+            calibration_records.extend(batch_calibration_records)
 
         final_regimes = classify_regimes(forward_returns.loc[train_idx]).astype(int)
         router = _fit_router(X.loc[train_idx], final_regimes)
         fallback_class = int(pd.Series(final_regimes).mode().iloc[0])
         latest_raw_probs = _router_probabilities(router, X.loc[[latest]], fallback_class=fallback_class)
+        latest_position = X.index.get_loc(latest)
+        eligible_records = _eligible_calibration_records(
+            calibration_records, latest_position, horizon
+        )
         final_calibrator = _fit_probability_calibrator(
-            calibration_prob_history, calibration_actual_history
+            [record[1] for record in eligible_records],
+            [record[2] for record in eligible_records],
         )
         latest_probs = _apply_probability_calibrator(final_calibrator, latest_raw_probs)[0]
         requested = int(np.argmax(latest_probs))
@@ -386,8 +400,10 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "probabilities_calibrated": final_calibrator is not None,
             "probability_calibration": {
                 "method": "prequential_multinomial_logistic" if final_calibrator is not None else "not_available",
-                "training_oos_samples": int(len(calibration_actual_history)),
+                "training_oos_samples": int(len(eligible_records)),
                 "prequential_calibrated_oos_samples": int(calibrated_oos_samples),
+                "probabilities_calibrated": bool(oos_actual and calibrated_oos_samples == len(oos_actual)),
+                "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "expert_used": expert_used,
             "expert_training_samples": int(expert_samples),
