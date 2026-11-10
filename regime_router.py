@@ -507,6 +507,8 @@ def _forecast_metrics(rows):
     return {
         "status": "available",
         "oos_samples": int(len(rows)),
+        "oos_start_date": min((row["forecast_asof"] for row in rows if row.get("forecast_asof")), default=None),
+        "oos_end_date": max((row["forecast_asof"] for row in rows if row.get("forecast_asof")), default=None),
         "routed_mae_points": _safe_mae(predicted, actual),
         "global_ridge_mae_points": _safe_mae(global_predicted, actual),
         "routed_direction_accuracy": round(float(np.mean(np.sign(predicted_returns) == np.sign(actual_returns))), 4),
@@ -652,6 +654,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                     probs[offset].tolist(), actual_class, calibrator is not None,
                 ))
                 oos_forecasts.append({
+                    "forecast_asof": str(asof_date.date()),
                     "predicted_close": base_point * (1.0 + predicted_return),
                     "actual_close": actual_point,
                     "base_close": base_point,
