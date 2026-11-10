@@ -21,7 +21,14 @@ concurrency:
 
 jobs:
   real-market-backtest:
+    # Supabase service credentials are used only for a read-only historical-cache GET.
+    # Do not expose repository secrets to pull requests from forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
+    env:
+      TAIEX_STORAGE: supabase
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
