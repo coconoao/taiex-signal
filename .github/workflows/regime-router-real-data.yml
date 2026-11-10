@@ -25,11 +25,6 @@ jobs:
     # Do not expose repository secrets to pull requests from forks.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    env:
-      TAIEX_STORAGE: supabase
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      REGIME_ROUTER_REQUIRE_SUPABASE_CACHE: "1"
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
@@ -39,6 +34,11 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
       - name: Run real-market point-in-time walk-forward research
+        env:
+          TAIEX_STORAGE: supabase
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REGIME_ROUTER_REQUIRE_SUPABASE_CACHE: "1"
         run: python research_regime_backtest.py --skip-backfill
       - name: Upload real-market research metrics
         if: always()
