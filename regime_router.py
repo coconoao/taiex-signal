@@ -82,6 +82,22 @@ def _lag_base_cross_market_features(X):
     return features
 
 
+def _lag_post_close_source_frame(frame, trading_index):
+    """Align post-close Taiwan data to the full cash-session calendar, then lag one session.
+
+    Institutional flow, margin/short-sale balances, and futures open interest are
+    published after the Taiwan cash close. Reindex before shifting so missing
+    source dates never compress the session lag.
+    """
+    if frame is None:
+        return None
+    aligned = frame.copy()
+    aligned.index = pd.to_datetime(aligned.index).tz_localize(None).normalize()
+    aligned = aligned[~aligned.index.duplicated(keep="last")].sort_index()
+    calendar = pd.DatetimeIndex(trading_index).tz_localize(None).normalize()
+    return aligned.reindex(calendar).shift(1)
+
+
 def _augment_router_features(X, market_data):
     """Add point-in-time volatility and cross-market level/momentum features."""
     if market_data is None:
