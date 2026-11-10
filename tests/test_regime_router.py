@@ -88,7 +88,9 @@ class RegimeRouterTests(unittest.TestCase):
             self.assertIn(item["expert_used"], (*REGIME_NAMES, "global_fallback"))
             self.assertIn("router_validation", item)
             self.assertIn("routed_forecast_validation", item)
-            self.assertFalse(item["probabilities_calibrated"])
+            self.assertIsInstance(item["probabilities_calibrated"], bool)
+            if item["probabilities_calibrated"]:
+                self.assertEqual(item["probability_calibration"]["method"], "prequential_multinomial_logistic")
 
 
 if __name__ == "__main__":
