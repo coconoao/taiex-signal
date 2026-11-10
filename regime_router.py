@@ -921,8 +921,6 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 [record[3] for record in eligible_records],
             )
             probs = _apply_probability_calibrator(calibrator, raw_probs)
-            if calibrator is not None:
-                calibrated_oos_samples += len(test_idx)
             calibrated_records = [record for record in eligible_records if record[4]]
             decision_thresholds = _select_risk_thresholds(
                 [record[2] for record in calibrated_records],
@@ -996,6 +994,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 actual_max_move = float(actual_max_moves[offset])
                 if not all(np.isfinite(x) for x in (base_point, actual_point, actual_return, actual_max_move, predicted_return, predicted_max_move)):
                     continue
+                if calibrator is not None:
+                    calibrated_oos_samples += 1
                 actual_class = int(classify_regimes([actual_max_move])[0])
                 oos_actual.append(actual_class)
                 oos_predicted.append(requested)
@@ -1137,6 +1137,9 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "unmatured_training_samples_excluded": int(len(train_idx) - len(final_train_idx)),
              "latest_eligible_training_origin_date": str(
                 X.index[max(0, latest_position - horizon)].date()
+            ),
+            "latest_included_training_origin_date": (
+                str(final_train_idx[-1].date()) if len(final_train_idx) else None
             ),
             "regime": REGIME_NAMES[requested],
             "regime_label": REGIME_LABELS[REGIME_NAMES[requested]],
