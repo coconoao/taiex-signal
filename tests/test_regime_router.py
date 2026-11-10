@@ -11,6 +11,7 @@ from regime_router import (
     _eligible_calibration_records,
     _historical_magnitude_profile,
     _future_max_daily_move,
+    _route_regime,
 )
 
 
@@ -47,6 +48,16 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertLess(profile["scenario_p10_close"], 10000.0)
         self.assertGreater(profile["scenario_p90_close"], 10000.0)
         self.assertEqual(set(profile["historical_abs_move_exceedance_pct"]), {"1.0", "2.0", "3.0", "5.0", "7.5"})
+
+    def test_risk_first_router_escalates_to_high_even_when_low_is_top_score(self):
+        probabilities = [0.52, 0.20, 0.23, 0.05]
+        thresholds = {"high_extreme": 0.25, "extreme": 0.15}
+        self.assertEqual(_route_regime(probabilities, thresholds), 2)
+
+    def test_extreme_probability_escalates_directly_to_extreme(self):
+        probabilities = [0.40, 0.20, 0.10, 0.30]
+        thresholds = {"high_extreme": 0.25, "extreme": 0.15}
+        self.assertEqual(_route_regime(probabilities, thresholds), 3)
 
     def test_extreme_expert_falls_back_to_high_when_sparse(self):
         class Dummy:
