@@ -26,7 +26,24 @@ from pipeline import (
     load_live,
     TICKERS,
     write_taiwan_data_status,
+    _future_taiwan_trading_dates,
 )
+
+
+
+class ForecastTargetDateTests(unittest.TestCase):
+    def test_d1_is_next_session_not_the_asof_date(self):
+        with patch("pipeline._fetch_twse_closed_dates", return_value=frozenset()):
+            dates_after_nov9, source = _future_taiwan_trading_dates(
+                dt.date(2026, 11, 9), 3
+            )
+            dates_after_nov10, _ = _future_taiwan_trading_dates(
+                dt.date(2026, 11, 10), 3
+            )
+
+        self.assertEqual(dates_after_nov9, ["2026-11-10", "2026-11-11", "2026-11-12"])
+        self.assertEqual(dates_after_nov10, ["2026-11-11", "2026-11-12", "2026-11-13"])
+        self.assertEqual(source, "twse_official")
 
 
 class LoadLiveTests(unittest.TestCase):
