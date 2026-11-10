@@ -517,29 +517,44 @@ def save_research_snapshot(hl):
                 except Exception:
                     continue
 
+    # Read the same-day market model context independently of whether the
+    # immutable news snapshot already exists. The market pipeline may finish
+    # after an earlier news run on the same trading date.
+    market_context = {}
+    try:
+        with open("signals.json", encoding="utf-8") as stream:
+            signal_data = json.load(stream)
+        probability = float(signal_data.get("prob_up"))
+        if signal_data.get("asof") == asof and 0 <= probability <= 1:
+            market_context = {
+                "prob_up": probability,
+                "missing_layer_count": len(signal_data.get("missing_layers") or []),
+            }
+    except (OSError, ValueError, TypeError):
+        pass
+
     existing = next((row for row in records if str(row.get("asof")) == str(asof)), None)
     if existing:
         old_features = existing.get("features") or {}
-        if int(old_features.get("feature_version") or 0) == 2:
+        features_changed = int(old_features.get("feature_version") or 0) != 2
+        context_changed = bool(market_context) and existing.get("market_context") != market_context
+        if not features_changed and not context_changed:
             print(f"新聞研究快照 {asof} 已存在，保留原始紀錄。", flush=True)
             return
-        # Rebuild only derived features from the immutable stored article list.
-        stored_articles = existing.get("articles") or []
-        existing["features"] = research_features(stored_articles)
+        if features_changed:
+            # Rebuild only derived features from the immutable stored article list.
+            stored_articles = existing.get("articles") or []
+            existing["features"] = research_features(stored_articles)
+        if context_changed:
+            existing["market_context"] = market_context
         snapshot = existing
-        print(f"新聞研究快照 {asof} 已由舊版衍生特徵升級至 v2；原始標題與時間不變。", flush=True)
+        if features_changed and context_changed:
+            print(f"新聞研究快照 {asof} 已升級衍生特徵並補齊市場模型背景；原始標題與時間不變。", flush=True)
+        elif features_changed:
+            print(f"新聞研究快照 {asof} 已由舊版衍生特徵升級至 v2；原始標題與時間不變。", flush=True)
+        else:
+            print(f"新聞研究快照 {asof} 已補齊當日市場模型背景；原始新聞紀錄不變。", flush=True)
     else:
-        market_context = {}
-        try:
-            signal_data = json.load(open("signals.json", encoding="utf-8"))
-            probability = float(signal_data.get("prob_up"))
-            if signal_data.get("asof") == asof and 0 <= probability <= 1:
-                market_context = {
-                    "prob_up": probability,
-                    "missing_layer_count": len(signal_data.get("missing_layers") or []),
-                }
-        except (OSError, ValueError, TypeError):
-            pass
         snapshot = {
             "asof": asof, "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "market_context": market_context,
