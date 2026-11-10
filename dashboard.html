@@ -76,6 +76,7 @@ svg{width:100%;height:auto;display:block}
 .forecast-card .forecast-value{font-size:clamp(1.25rem,5vw,2rem);font-weight:750;line-height:1.3;overflow-wrap:anywhere}
 .forecast-card .forecast-change{font-weight:650;margin-top:5px}
 .forecast-card .forecast-meta{font-size:.75rem;color:var(--mute);margin-top:8px}
+.trial-model-block{margin:14px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.trial-model-block h3{font-size:1rem;margin:0 0 4px}
 @media(max-width:520px){.forecast-grid{grid-template-columns:1fr;gap:8px}.forecast-card{display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:8px}.forecast-card .forecast-value{grid-column:1}.forecast-card .forecast-change{grid-column:2;grid-row:1/3;text-align:right}.forecast-card .forecast-meta{grid-column:1}}
 
 .mc{border:1px solid var(--line);border-radius:6px;padding:12px}
@@ -205,6 +206,12 @@ details[open]>summary{margin-bottom:12px}
     <section>
       <h2>模型測試與研究</h2>
       <p class="note">此頁集中呈現模型實驗、樣本外比較、穩健性檢查、新聞增強研究及策略回測。候選模型不會自動取代正式模型。</p>
+    </section>
+    <section id="trialPointForecasts">
+      <h2>測試模型預測</h2>
+      <p class="note" id="trialForecastMeta">等待最新研究候選預測資料…</p>
+      <div id="trialForecastCards"></div>
+      <p class="note">此區為獨立研究候選：Ridge α=10 與 α=100，與正式模型 α=25 使用相同特徵及時間切分規則，但分開訓練與呈現。歷史 MAE、持平基準及命中率均來自各候選自己的樣本外預測；數值不代表未來表現或買賣指示。</p>
     </section>
     <div id="testResearchMount"></div>
   </div>
@@ -371,11 +378,53 @@ function drawCurve(c) {
   $("curveReset").hidden = true;
 }
 
+function renderTrialPointForecasts(forecast) {
+  const meta = $("trialForecastMeta");
+  const root = $("trialForecastCards");
+  const candidates = Array.isArray(forecast?.research_candidates) ? forecast.research_candidates : [];
+  if (!candidates.length) {
+    meta.textContent = "目前尚無測試模型預測資料；等待下一次完整資料更新。";
+    root.innerHTML = '<p class="note">候選模型尚未產生預測，或有效訓練樣本不足。</p>';
+    return;
+  }
+  meta.textContent = "基準收盤 " + (forecast.base_close == null ? "—" : Number(forecast.base_close).toLocaleString("zh-TW") + " 點")
+    + "｜資料日期 " + (forecast.asof || "—") + "｜僅供測試，不影響首頁正式模型。";
+  root.innerHTML = candidates.map(candidate => {
+    const alpha = Number(candidate.ridge_alpha);
+    const title = Number.isFinite(alpha) ? "Ridge α=" + alpha : (candidate.model_version || "研究候選模型");
+    const sessions = Array.isArray(candidate.sessions) ? candidate.sessions : [];
+    const cards = [1,2,3].map(h => {
+      const item = sessions.find(x => Number(x.horizon_sessions) === h) || {};
+      const label = "第 " + h + " 個交易日（D+" + h + "）";
+      const pointValid = item.forecast_close != null && Number.isFinite(Number(item.forecast_close));
+      if (item.status !== "research" || !pointValid) {
+        return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '／至少 120</p></article>';
+      }
+      const point = Number(item.forecast_close);
+      const comparison = item.change_vs_previous || null;
+      const direction = comparison && comparison.direction;
+      const color = direction === "up" ? "var(--up)" : direction === "down" ? "var(--down)" : "var(--hold)";
+      const sign = comparison && Number(comparison.points) > 0 ? "+" : "";
+      const changeText = !comparison ? "前一日估計不足，暫無比較" :
+        (direction === "up" ? "上漲" : direction === "down" ? "下跌" : "持平")
+        + " " + sign + Number(comparison.points).toFixed(0) + " 點（" + sign + Number(comparison.pct).toFixed(2) + "%）";
+      const validation = item.validation || {};
+      const mae = validation.mae_points == null ? "樣本不足" : Number(validation.mae_points).toLocaleString("zh-TW") + " 點";
+      const baselineMae = validation.flat_baseline_mae_points == null ? "—" : Number(validation.flat_baseline_mae_points).toLocaleString("zh-TW") + " 點";
+      const hit = validation.within_0_2_pct_pct == null ? "樣本不足" : Number(validation.within_0_2_pct_pct).toFixed(1) + "%";
+      return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + changeText + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.2% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
+    }).join("");
+    const state = candidate.status === "research" ? "研究候選・尚未核准取代正式模型" : "資料不足";
+    return '<section class="trial-model-block"><h3>' + esc(title) + '</h3><p class="note">版本 ' + esc(candidate.model_version || "—") + '｜' + state + '</p><div class="forecast-grid">' + cards + '</div></section>';
+  }).join("");
+}
+
 function renderDaily(d) {
   $("meta").textContent = "台股最近可用交易日：" + d.asof + "。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。";
   $("demo").hidden = !d.demo;
   $("miss").hidden = true;
   const forecast = d.forecast || {};
+  renderTrialPointForecasts(forecast);
   const sessions = Array.isArray(forecast.sessions) ? forecast.sessions : [];
   if (Number(d.schema_version || 0) < 2 || !sessions.length || !Number.isFinite(Number(forecast.base_close))) {
     $("threeDayMeta").textContent = "資料日期 " + d.asof + "｜三日點位模型尚未完成資料轉換或首次回補。";

@@ -1144,6 +1144,144 @@ def three_day_point_forecast(df, chips, margin, futures=None):
     }
     return forecast, history_records
 
+
+def build_ridge_trial_forecasts(df, chips, margin, futures=None, alphas=(10.0, 100.0)):
+    """Build separate, research-only 3-session Ridge sensitivity candidates."""
+    close = pd.to_numeric(df["TAIEX"], errors="coerce").dropna().sort_index()
+    results = {float(alpha): {} for alpha in alphas}
+    latest_by_horizon = {}
+
+    for h in (1, 2, 3):
+        Xh, _, fwd = build(df, chips, margin, h=h, futures=futures)
+        valid_features = Xh.notna().all(axis=1)
+        latest_candidates = Xh.index[valid_features & close.reindex(Xh.index).notna()]
+        if not len(latest_candidates):
+            for alpha in results:
+                results[alpha][str(h)] = {
+                    "status": "insufficient", "reason": "沒有完整的最新特徵資料"
+                }
+            continue
+
+        latest = latest_candidates[-1]
+        latest_by_horizon[h] = latest
+        train_idx = Xh.index[valid_features & fwd.notna() & (Xh.index < latest)]
+        if len(train_idx) < 120:
+            for alpha in results:
+                results[alpha][str(h)] = {
+                    "status": "insufficient", "asof": str(latest.date()),
+                    "training_samples": int(len(train_idx)),
+                    "minimum_samples": 120, "reason": "有效訓練樣本不足"
+                }
+            continue
+
+        oos = {float(alpha): {"pred": [], "actual": [], "base": []} for alpha in alphas}
+        first_test = min(max(100, h + 30), max(h + 30, len(train_idx) // 2))
+        for i in range(first_test, len(train_idx), 20):
+            fit_idx = train_idx[:i - h + 1]
+            test_idx = train_idx[i:i + 20]
+            if len(fit_idx) < 80 or not len(test_idx):
+                continue
+            base_points = close.reindex(test_idx).to_numpy(dtype=float)
+            actual_points = close.shift(-h).reindex(test_idx).to_numpy(dtype=float)
+            for alpha in alphas:
+                alpha = float(alpha)
+                estimator = make_pipeline(StandardScaler(), Ridge(alpha=alpha))
+                estimator.fit(Xh.loc[fit_idx], fwd.loc[fit_idx].astype(float))
+                predicted_returns = estimator.predict(Xh.loc[test_idx])
+                predicted_points = base_points * (1.0 + predicted_returns)
+                mask = np.isfinite(predicted_points) & np.isfinite(actual_points) & np.isfinite(base_points)
+                oos[alpha]["pred"].extend(predicted_points[mask].tolist())
+                oos[alpha]["actual"].extend(actual_points[mask].tolist())
+                oos[alpha]["base"].extend(base_points[mask].tolist())
+
+        base_close = float(close.loc[latest])
+        for alpha in results:
+            alpha = float(alpha)
+            final_model = make_pipeline(StandardScaler(), Ridge(alpha=alpha))
+            final_model.fit(Xh.loc[train_idx], fwd.loc[train_idx].astype(float))
+            predicted_return = float(final_model.predict(Xh.loc[[latest]])[0])
+            predicted_close = base_close * (1.0 + predicted_return)
+            sample = oos[alpha]
+            metrics = {
+                "oos_samples": len(sample["pred"]),
+                "mae_points": None,
+                "flat_baseline_mae_points": None,
+                "within_0_2_pct_pct": None,
+            }
+            if sample["pred"]:
+                errors = np.abs(np.asarray(sample["pred"]) - np.asarray(sample["actual"]))
+                baseline_errors = np.abs(np.asarray(sample["base"]) - np.asarray(sample["actual"]))
+                relative_errors = errors / np.maximum(np.abs(np.asarray(sample["actual"])), 1.0)
+                metrics.update({
+                    "mae_points": round(float(errors.mean()), 2),
+                    "flat_baseline_mae_points": round(float(baseline_errors.mean()), 2),
+                    "within_0_2_pct_pct": round(float((relative_errors <= 0.002).mean() * 100), 2),
+                })
+            results[alpha][str(h)] = {
+                "status": "research",
+                "asof": str(latest.date()),
+                "base_close": round(base_close, 2),
+                "forecast_close": round(float(predicted_close), 2),
+                "predicted_return_pct": round(predicted_return * 100, 4),
+                "training_samples": int(len(train_idx)),
+                "validation": metrics,
+            }
+
+    candidates = []
+    for alpha, horizon_items in results.items():
+        asof_values = [latest_by_horizon[h] for h in sorted(latest_by_horizon)]
+        if not asof_values:
+            asof = str(close.index[-1].date()) if len(close) else None
+            base_close = round(float(close.iloc[-1]), 2) if len(close) else None
+        else:
+            latest = max(asof_values)
+            asof = str(latest.date())
+            base_close = round(float(close.loc[latest]), 2)
+
+        sessions = []
+        previous = base_close
+        previous_available = base_close is not None and base_close > 0
+        for h in (1, 2, 3):
+            item = horizon_items.get(str(h), {"status": "insufficient"})
+            point = item.get("forecast_close")
+            session = {
+                "horizon_sessions": h,
+                "label": "D+" + str(h),
+                "status": item.get("status", "insufficient"),
+                "training_samples": int(item.get("training_samples", 0)),
+                "forecast_close": item.get("forecast_close"),
+                "predicted_return_pct": item.get("predicted_return_pct"),
+                "validation": item.get("validation", {}),
+            }
+            if item.get("status") == "research" and point is not None and previous_available:
+                delta = float(point) - float(previous)
+                pct = delta / float(previous) * 100 if previous else 0.0
+                direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
+                session["change_vs_previous"] = {
+                    "reference_close": round(float(previous), 2),
+                    "points": round(delta, 2), "pct": round(pct, 4),
+                    "direction": direction,
+                }
+                previous = float(point)
+                previous_available = True
+            else:
+                session["change_vs_previous"] = None
+                if item.get("status") != "research":
+                    previous_available = False
+            sessions.append(session)
+
+        candidates.append({
+            "status": "research" if any(x["status"] == "research" for x in sessions) else "insufficient",
+            "model": "Ridge direct-horizon",
+            "model_version": f"ridge-direct-alpha-{int(alpha)}-trial-v1",
+            "ridge_alpha": alpha,
+            "asof": asof,
+            "base_close": base_close,
+            "sessions": sessions,
+            "note": "正則化強度敏感度測試；與正式模型分開呈現，不代表已優於正式模型。",
+        })
+    return candidates
+
 def backtest(prob, fwd):
     # Classification metrics use only dates with an actual out-of-sample prediction.
     p = prob.dropna()
@@ -1543,6 +1681,14 @@ if __name__ == "__main__":
         write_taiwan_data_status(df, chips, margin, futures)
     X, y, fwd = build(df, chips, margin, futures=futures)
     three_day_forecast, forecast_history = three_day_point_forecast(df, chips, margin, futures=futures)
+    try:
+        three_day_forecast["research_candidates"] = build_ridge_trial_forecasts(
+            df, chips, margin, futures=futures
+        )
+    except Exception as exc:
+        # Experimental candidates must never block the formal forecast refresh.
+        print(f"Ridge 測試候選模型暫不可用：{type(exc).__name__}: {exc}", flush=True)
+        three_day_forecast["research_candidates"] = []
     history_tmp = "index_forecasts_history.jsonl.tmp"
     with open(history_tmp, "w", encoding="utf-8") as stream:
         for record in forecast_history:
