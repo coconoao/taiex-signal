@@ -6,6 +6,7 @@ on:
     paths:
       - "pipeline.py"
       - "regime_router.py"
+      - "tests/test_regime_router.py"
       - "research_regime_backtest.py"
       - "requirements.txt"
       - ".github/workflows/regime-router-real-data.yml"
