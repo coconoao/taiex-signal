@@ -270,10 +270,10 @@ def merge_history(existing: list[dict[str, Any]], incoming: list[dict[str, Any]]
             event["timestamps"]["first_seen_at_utc"] = old_times.get(
                 "first_seen_at_utc", event["timestamps"]["first_seen_at_utc"]
             )
-            event["timestamps"]["forecast_eligible_at_utc"] = old_times.get(
-                "forecast_eligible_at_utc", event["timestamps"]["first_seen_at_utc"]
-            )
             if old_hash and new_hash and old_hash != new_hash:
+                # A materially revised source version is only eligible from
+                # this observation (or its later publication timestamp), never
+                # from the first version's historical eligibility time.
                 event["version"] = old_version + 1
                 event["classification"]["is_material_update"] = True
                 event["classification"]["supersedes_event_version"] = old_version
