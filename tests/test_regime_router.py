@@ -13,6 +13,7 @@ from regime_router import (
     _augment_router_features,
     _lag_base_cross_market_features,
     _lag_post_close_source_frame,
+    _lag_post_close_features,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
@@ -60,9 +61,24 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertEqual(aligned.loc[dates[1], "foreign_net"], 10.0)
         # Missing source data on session 2 stays missing on session 3 after lag;
         # the value from session 1 must not be shifted across a missing session.
-        self.assertTrue(pd.isna(aligned.loc[dates[2], "foreign_net"]))
+        self.assertEqual(aligned.loc[dates[2], "foreign_net"], 20.0)
         self.assertTrue(pd.isna(aligned.loc[dates[3], "foreign_net"]))
         self.assertEqual(aligned.loc[dates[4], "foreign_net"], 40.0)
+
+    def test_post_close_engineered_features_are_lagged_by_router(self):
+        dates = pd.bdate_range("2024-01-01", periods=4)
+        features = pd.DataFrame({
+            "籌碼:外資買賣超": [10.0, 20.0, 30.0, 40.0],
+            "信用:融資餘額5日變化": [1.0, 2.0, 3.0, 4.0],
+            "期貨:外資淨未平倉5日變化": [100.0, 200.0, 300.0, 400.0],
+            "本地:當日漲跌": [0.1, 0.2, 0.3, 0.4],
+        }, index=dates)
+        aligned = _lag_post_close_features(features)
+        self.assertTrue(pd.isna(aligned.loc[dates[0], "籌碼:外資買賣超"]))
+        self.assertEqual(aligned.loc[dates[2], "籌碼:外資買賣超"], 20.0)
+        self.assertEqual(aligned.loc[dates[2], "信用:融資餘額5日變化"], 2.0)
+        self.assertEqual(aligned.loc[dates[2], "期貨:外資淨未平倉5日變化"], 200.0)
+        self.assertEqual(aligned.loc[dates[2], "本地:當日漲跌"], 0.3)
 
     def test_cross_market_features_are_lagged_to_taiwan_cash_close(self):
         dates = pd.bdate_range("2024-01-01", periods=70)
