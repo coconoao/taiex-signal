@@ -754,6 +754,30 @@ def _router_metrics(actual_classes, predicted_classes, probabilities, prior_prob
             "multiclass_brier": round(float(np.mean(np.sum((prior_probs - one_hot) ** 2, axis=1))), 5),
             "log_loss": round(float(log_loss(actual, prior_probs, labels=list(CLASS_IDS))), 5),
         }
+    # Strict user-defined gate: accuracy must be greater than 70%, not equal.
+    # This is a research eligibility flag only; production replacement remains disabled.
+    accuracy = result.get("accuracy")
+    threshold = 0.70
+    baseline = result.get("prequential_prior_frequency_baseline", {})
+    result["accuracy_threshold_gate"] = {
+        "metric": "four_class_regime_oos_accuracy",
+        "threshold_exclusive": threshold,
+        "observed_accuracy": accuracy,
+        "eligible_by_accuracy_only": bool(accuracy is not None and accuracy > threshold),
+        "status": (
+            "eligible_by_accuracy_only"
+            if accuracy is not None and accuracy > threshold
+            else "not_eligible"
+        ),
+        "baseline_accuracy": baseline.get("accuracy"),
+        "accuracy_above_prior_baseline": (
+            bool(accuracy > baseline["accuracy"])
+            if accuracy is not None and baseline.get("accuracy") is not None
+            else None
+        ),
+        "scope": "pooled chronological walk-forward OOS; not an untouched prospective holdout",
+        "production_enabled": False,
+    }
     return result
 
 
