@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+
+import pandas as pd
 from pathlib import Path
 
 # Ensure pipeline.load_live() does not persist caches to Supabase.
