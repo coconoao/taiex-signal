@@ -483,6 +483,121 @@ def _expert_performance_blend_weight(
     }
 
 
+
+def _gate_policy_sensitivity(rows, horizon, early_fraction=0.70):
+    """Compare predeclared expert-shrinkage policies with a chronological holdout.
+
+    Every policy is recalculated at the start of each 60-session OOS block using
+    only outcomes from earlier blocks that have matured by that block's origin.
+    The first 70% is a policy-selection window; the final 30% is a holdout.
+    This diagnostic never changes the forecast used by the main backtest.
+    """
+    ordered = sorted(rows, key=lambda row: int(row["forecast_position"]))
+    if not ordered:
+        return {"status": "insufficient", "oos_samples": 0}
+
+    policies = {
+        "global_only": {"min_samples": 10**9, "full_weight_improvement": 0.05},
+        "gate_60_2pct": {"min_samples": 60, "full_weight_improvement": 0.02},
+        "gate_60_5pct": {"min_samples": 60, "full_weight_improvement": 0.05},
+        "gate_60_10pct": {"min_samples": 60, "full_weight_improvement": 0.10},
+        "gate_120_5pct": {"min_samples": 120, "full_weight_improvement": 0.05},
+    }
+    blocks = sorted({int(row["oos_block_start_position"]) for row in ordered})
+
+    def summarize(items):
+        if not items:
+            return {"oos_samples": 0}
+        predicted = np.asarray([row["policy_predicted_close"] for row in items], dtype=float)
+        actual = np.asarray([row["actual_close"] for row in items], dtype=float)
+        predicted_move = np.asarray([row["policy_predicted_max_daily_move"] for row in items], dtype=float)
+        actual_move = np.asarray([row["actual_max_daily_move"] for row in items], dtype=float)
+        large = actual_move >= 0.01
+        return {
+            "oos_samples": int(len(items)),
+            "point_mae": _safe_mae(predicted, actual),
+            "large_move_point_mae": _safe_mae(predicted[large], actual[large]),
+            "max_daily_move_mae_pct": _safe_mae(predicted_move * 100.0, actual_move * 100.0),
+            "direction_accuracy": round(float(np.mean([
+                np.sign(row["policy_predicted_close"] - row["base_close"])
+                == np.sign(row["actual_close"] - row["base_close"])
+                for row in items
+            ])), 4),
+            "large_move_samples": int(large.sum()),
+        }
+
+    results = {}
+    for policy_name, config in policies.items():
+        policy_rows = []
+        for block_position in blocks:
+            prior = [
+                row for row in ordered
+                if int(row["oos_block_start_position"]) < block_position
+            ]
+            batch = [
+                row for row in ordered
+                if int(row["oos_block_start_position"]) == block_position
+            ]
+            point_gates, magnitude_gates = {}, {}
+            for row in batch:
+                expert_name = row["expert_used"]
+                if expert_name not in point_gates:
+                    point_gates[expert_name] = _expert_performance_blend_weight(
+                        prior, expert_name, block_position, horizon,
+                        "raw_expert_predicted_close", "global_predicted_close",
+                        "actual_close", min_samples=config["min_samples"],
+                        full_weight_improvement=config["full_weight_improvement"],
+                    )
+                    magnitude_gates[expert_name] = _expert_performance_blend_weight(
+                        prior, expert_name, block_position, horizon,
+                        "raw_expert_predicted_max_daily_move",
+                        "global_predicted_max_daily_move", "actual_max_daily_move",
+                        min_samples=config["min_samples"],
+                        full_weight_improvement=config["full_weight_improvement"],
+                    )
+                point_weight = float(point_gates[expert_name]["weight"])
+                magnitude_weight = float(magnitude_gates[expert_name]["weight"])
+                policy_rows.append({
+                    **row,
+                    "policy_predicted_close": (
+                        point_weight * float(row["raw_expert_predicted_close"])
+                        + (1.0 - point_weight) * float(row["global_predicted_close"])
+                    ),
+                    "policy_predicted_max_daily_move": max(
+                        0.0,
+                        magnitude_weight * float(row["raw_expert_predicted_max_daily_move"])
+                        + (1.0 - magnitude_weight) * float(row["global_predicted_max_daily_move"]),
+                    ),
+                })
+        policy_rows.sort(key=lambda row: int(row["forecast_position"]))
+        split = max(1, min(len(policy_rows) - 1, int(len(policy_rows) * early_fraction)))
+        early = summarize(policy_rows[:split])
+        late = summarize(policy_rows[split:])
+        results[policy_name] = {
+            "parameters": config,
+            "full_oos": summarize(policy_rows),
+            "early_selection_window": early,
+            "late_holdout": late,
+        }
+
+    best_policy = min(
+        results,
+        key=lambda name: (
+            results[name]["early_selection_window"].get("point_mae", float("inf")),
+            0 if name == "global_only" else 1,
+        ),
+    )
+    return {
+        "status": "available",
+        "oos_samples": int(len(ordered)),
+        "early_fraction": float(early_fraction),
+        "selection_rule": "lowest point MAE in first chronological 70%; final 30% remains untouched holdout",
+        "best_policy_on_early_window": best_policy,
+        "selected_policy_late_holdout": results[best_policy]["late_holdout"],
+        "policies": results,
+        "note": "僅為門檻敏感度研究；不改變主回測輸出，也不自動選擇正式模型。",
+    }
+
 def _router_metrics(actual_classes, predicted_classes, probabilities):
     if not actual_classes:
         return {"status": "insufficient", "oos_samples": 0}
@@ -777,6 +892,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 oos_forecasts.append({
                     "forecast_asof": str(asof_date.date()),
                     "forecast_position": int(X.index.get_loc(asof_date)),
+                    "oos_block_start_position": int(batch_position),
                     "requested_expert": expert_used,
                     "point_model_used": "expert_blend" if point_weight > 0 else "global_ridge",
                     "point_expert_blend_weight": point_weight,
@@ -931,6 +1047,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
+            "gate_policy_sensitivity": _gate_policy_sensitivity(oos_forecasts, horizon),
             "historical_magnitude_profile": magnitude_profile,
             "note": (
                 "此為研究候選；分流依未來區間最大單日絕對漲跌幅，點位預測另為基準至 D+N 收盤的累積報酬。專家僅在成熟先前 OOS MAE 優於全域 Ridge 時參與點位與幅度輸出，否則自動回退或收縮至全域模型。"
