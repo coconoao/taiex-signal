@@ -839,7 +839,9 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             sessions.append({
                 "horizon_sessions": horizon, "status": "insufficient",
                 "asof": str(latest.date()),
-                "training_samples": int(len(train_idx)),
+                "training_samples": int(len(final_train_idx)),
+            "candidate_training_samples": int(len(train_idx)),
+            "unmatured_training_samples_excluded": int(len(train_idx) - len(final_train_idx)),
                 "minimum_samples": MIN_TRAIN_SAMPLES,
                 "reason": "分流器有效訓練樣本不足",
             })
@@ -986,8 +988,16 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             # folds may calibrate only after each outcome's target close is known.
             calibration_records.extend(batch_calibration_records)
 
-        final_regimes = classify_regimes(future_max_daily_move.loc[train_idx]).astype(int)
-        router = _fit_router(X.loc[train_idx], final_regimes)
+        # The latest feature origin can lag the latest available close when
+        # optional inputs are missing. Purge labels relative to the actual
+        # forecast origin, not merely relative to the end of the price series.
+        final_train_idx = _purged_training_indices(
+            X.index, train_idx, latest, horizon
+        )
+        final_regimes = classify_regimes(
+            future_max_daily_move.loc[final_train_idx]
+        ).astype(int)
+        router = _fit_router(X.loc[final_train_idx], final_regimes)
         fallback_class = int(pd.Series(final_regimes).mode().iloc[0])
         latest_raw_probs = _router_probabilities(router, X.loc[[latest]], fallback_class=fallback_class)
         latest_position = X.index.get_loc(latest)
@@ -1006,9 +1016,9 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         )
         requested = _route_regime(latest_probs, final_decision_thresholds)
         global_model, experts, global_magnitude_model, magnitude_experts, expert_counts = _fit_experts(
-            X.loc[train_idx],
-            forward_returns.loc[train_idx].to_numpy(dtype=float),
-            future_max_daily_move.loc[train_idx].to_numpy(dtype=float),
+            X.loc[final_train_idx],
+            forward_returns.loc[final_train_idx].to_numpy(dtype=float),
+            future_max_daily_move.loc[final_train_idx].to_numpy(dtype=float),
             final_regimes,
         )
         expert, expert_used, expert_samples, fallback_reason = _select_expert(
@@ -1059,11 +1069,11 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         if expert_used in REGIME_NAMES:
             selected_class = REGIME_NAMES.index(expert_used)
             selected_mask = final_regimes.to_numpy(dtype=int) == selected_class
-            selected_returns = forward_returns.loc[train_idx].to_numpy(dtype=float)[selected_mask]
-            selected_moves = future_max_daily_move.loc[train_idx].to_numpy(dtype=float)[selected_mask]
+            selected_returns = forward_returns.loc[final_train_idx].to_numpy(dtype=float)[selected_mask]
+            selected_moves = future_max_daily_move.loc[final_train_idx].to_numpy(dtype=float)[selected_mask]
         else:
-            selected_returns = forward_returns.loc[train_idx].to_numpy(dtype=float)
-            selected_moves = future_max_daily_move.loc[train_idx].to_numpy(dtype=float)
+            selected_returns = forward_returns.loc[final_train_idx].to_numpy(dtype=float)
+            selected_moves = future_max_daily_move.loc[final_train_idx].to_numpy(dtype=float)
         magnitude_profile = _historical_magnitude_profile(selected_returns, selected_moves, base_close)
         meta = target_meta.get(horizon, {})
         sessions.append({

@@ -311,6 +311,14 @@ class RegimeRouterTests(unittest.TestCase):
             "USDTWD": 30.0 * np.cumprod(1.0 + rng.normal(0.0, 0.002, n)),
             "US10Y": np.linspace(1.5, 4.5, n),
         }, index=dates)
+        # Simulate the latest complete feature row lagging the latest close:
+        # the last three feature rows are unavailable, while their close labels
+        # may already exist beyond the actual forecast origin.
+        X.iloc[-3:, 0] = np.nan
+        features_by_horizon = {
+            horizon: (X, close.shift(-horizon) / close - 1.0)
+            for horizon in (1, 2, 3)
+        }
         result = build_regime_router_forecasts(
             features_by_horizon,
             close,
@@ -322,6 +330,11 @@ class RegimeRouterTests(unittest.TestCase):
         for horizon, item in enumerate(result["sessions"], start=1):
             self.assertEqual(item["horizon_sessions"], horizon)
             self.assertEqual(item["status"], "research")
+            self.assertEqual(item["unmatured_training_samples_excluded"], horizon - 1)
+            self.assertEqual(
+                item["candidate_training_samples"] - item["training_samples"],
+                horizon - 1,
+            )
             self.assertGreaterEqual(item["predicted_max_daily_move_pct"], 0.0)
             self.assertEqual(set(item["regime_probabilities"]), set(REGIME_NAMES))
             self.assertTrue(item["routing_reason"])
