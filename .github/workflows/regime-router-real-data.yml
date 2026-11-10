@@ -1,0 +1,41 @@
+name: Real market data regime-router research
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pipeline.py"
+      - "regime_router.py"
+      - "research_regime_backtest.py"
+      - "requirements.txt"
+      - ".github/workflows/regime-router-real-data.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regime-router-real-data-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-market-backtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: Run real-market point-in-time walk-forward research
+        run: python research_regime_backtest.py --skip-backfill
+      - name: Upload real-market research metrics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: regime-router-real-market-metrics
+          path: regime-router-real-data.json
+          if-no-files-found: ignore
+          retention-days: 14
