@@ -8,6 +8,7 @@ from regime_router import (
     build_regime_router_forecasts,
     classify_regimes,
     _select_expert,
+    _eligible_calibration_records,
 )
 
 
@@ -18,6 +19,17 @@ class RegimeRouterTests(unittest.TestCase):
             classify_regimes(values).tolist(),
             [0, 0, 1, 1, 2, 2, 3, 3],
         )
+
+    def test_calibration_only_uses_outcomes_known_at_forecast_origin(self):
+        records = [
+            (4, [0.7, 0.2, 0.08, 0.02], 0),
+            (6, [0.6, 0.25, 0.1, 0.05], 1),
+            (7, [0.5, 0.3, 0.15, 0.05], 2),
+        ]
+        eligible = _eligible_calibration_records(records, current_position=10, horizon=3)
+        self.assertEqual([record[0] for record in eligible], [4, 6, 7])
+        eligible = _eligible_calibration_records(records, current_position=9, horizon=3)
+        self.assertEqual([record[0] for record in eligible], [4, 6])
 
     def test_extreme_expert_falls_back_to_high_when_sparse(self):
         class Dummy:
