@@ -75,7 +75,7 @@ class RegimeRouterTests(unittest.TestCase):
         for i in range(150, 170):
             probabilities[i] = [0.1, 0.1, 0.7, 0.1]
         thresholds = _select_risk_thresholds(probabilities, actual)
-        self.assertEqual(thresholds["source"], "prior_calibrated_oos_f2")
+        self.assertEqual(thresholds["source"], "prior_calibrated_oos_f2_with_prevalence_guard")
         self.assertLessEqual(thresholds["high_extreme"], 0.8)
         self.assertEqual(thresholds["training_oos_samples"], 170)
 
