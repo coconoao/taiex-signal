@@ -681,7 +681,22 @@ def _prior_regime_probabilities(training_regimes, smoothing=1.0):
 
 def _router_metrics(actual_classes, predicted_classes, probabilities, prior_probabilities=None):
     if not actual_classes:
-        return {"status": "insufficient", "oos_samples": 0}
+        return {
+            "status": "insufficient",
+            "oos_samples": 0,
+            "accuracy": None,
+            "accuracy_threshold_gate": {
+                "metric": "four_class_regime_oos_accuracy",
+                "threshold_exclusive": 0.70,
+                "observed_accuracy": None,
+                "eligible_by_accuracy_only": False,
+                "status": "not_eligible",
+                "baseline_accuracy": None,
+                "accuracy_above_prior_baseline": None,
+                "scope": "insufficient OOS samples",
+                "production_enabled": False,
+            },
+        }
     actual = np.asarray(actual_classes, dtype=int)
     predicted = np.asarray(predicted_classes, dtype=int)
     probs = np.asarray(probabilities, dtype=float)
