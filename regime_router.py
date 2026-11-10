@@ -52,6 +52,32 @@ def classify_regimes(forward_returns):
     return labels
 
 
+def _augment_router_features(X, market_data):
+    """Add point-in-time volatility and cross-market level/momentum features."""
+    if market_data is None:
+        return X
+    market = market_data.reindex(X.index).apply(pd.to_numeric, errors="coerce")
+    features = X.copy()
+    if "TAIEX" in market:
+        close = market["TAIEX"]
+        daily = close.pct_change()
+        features["router:TAIEX_realized_vol_5d"] = daily.rolling(5, min_periods=5).std()
+        features["router:TAIEX_realized_vol_20d"] = daily.rolling(20, min_periods=15).std()
+        features["router:TAIEX_abs_move_max_10d"] = daily.abs().rolling(10, min_periods=8).max()
+        features["router:TAIEX_abs_return_5d"] = close.pct_change(5).abs()
+        features["router:TAIEX_drawdown_20d"] = close / close.rolling(20, min_periods=15).max() - 1.0
+    for ticker in ("SOX", "TSM", "N225", "KOSPI", "USDTWD"):
+        if ticker in market:
+            features[f"router:{ticker}_momentum_5d"] = market[ticker].pct_change(5)
+    if "VIX" in market:
+        vix = market["VIX"]
+        features["router:VIX_level_vs_60d_mean"] = vix / vix.rolling(60, min_periods=20).mean() - 1.0
+        features["router:VIX_change_5d"] = vix.pct_change(5)
+    if "US10Y" in market:
+        features["router:US10Y_change_5d"] = market["US10Y"].diff(5)
+    return features
+
+
 def _fit_router(X, y):
     classes = np.sort(pd.Series(y).dropna().astype(int).unique())
     if len(classes) < 2:
@@ -196,7 +222,7 @@ def _forecast_metrics(rows):
     }
 
 
-def build_regime_router_forecasts(features_by_horizon, close, target_meta=None):
+def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None):
     """Train and evaluate an independent router + four specialists per horizon.
 
     features_by_horizon maps horizon -> (feature_frame, forward_return_series).
@@ -214,8 +240,12 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None):
             })
             continue
         X, forward_returns = features_by_horizon[horizon]
+        X = _augment_router_features(X, market_data)
         forward_returns = pd.to_numeric(forward_returns, errors="coerce").reindex(X.index)
-        valid_features = X.notna().all(axis=1)
+        numeric_features = X.apply(pd.to_numeric, errors="coerce")
+        valid_features = pd.Series(
+            np.isfinite(numeric_features.to_numpy(dtype=float)).all(axis=1), index=X.index
+        )
         latest_candidates = X.index[valid_features & close.reindex(X.index).notna()]
         if not len(latest_candidates):
             sessions.append({
