@@ -389,7 +389,7 @@ def access_message(status):
 
 
 def run_jobs(*whats):
-    if not LOCK.acquire(blocking=False): return False
+    if not LOCK.acquire(blocking=False): return None
     log, exit_code = "", 0
     try:
         for w in whats:
@@ -496,12 +496,15 @@ def stale():
 def scheduler():
     last = None
     # Supabase Cron wakes this free Render service before the Taiwan market session.
-    # Run the full weekday market/news refresh here and persist outputs to Supabase.
+    # Start once after 08:30, even if a cold start finishes a few minutes late.
+    # If another job holds the lock, retry on the next scheduler tick.
     while True:
         now = dt.datetime.now(TZ)
-        if now.weekday() < 5 and (now.hour, now.minute) == (8, 30) and last != now.date():
-            last = now.date()
-            run_jobs("pipeline", "news", "news_enhanced_model")
+        in_window = (now.hour, now.minute) >= (8, 30) and (now.hour, now.minute) < (10, 30)
+        if now.weekday() < 5 and in_window and last != now.date():
+            started = run_jobs("pipeline", "news", "news_enhanced_model")
+            if started is not None:
+                last = now.date()
         time.sleep(20)
 
 def _spot_session(now):
