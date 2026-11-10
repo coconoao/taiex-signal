@@ -112,6 +112,7 @@ details[open]>summary{margin-bottom:12px}
     <section id="hero" aria-live="polite">
       <h2>未來三個交易日加權指數點位預測</h2>
       <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
+      <div id="regimeRouterSummary" aria-live="polite"></div>
       <div id="threeDayForecast" class="forecast-grid"></div>
       <p id="sumline" class="note" hidden></p>
       <p class="note"><span style="color:var(--up);font-weight:700">紅色＝上漲</span>；<span style="color:var(--down);font-weight:700">綠色＝下跌</span>。每日變化與前一交易日（或前一預測日）比較。點位為模型估計，仍在研究驗證中。</p>
@@ -420,12 +421,51 @@ function renderTrialPointForecasts(forecast) {
   }).join("");
 }
 
+function renderRegimeRouter(router) {
+  const root = $("regimeRouterSummary");
+  if (!router || !Array.isArray(router.sessions) || !router.sessions.length) {
+    root.innerHTML = '<p class="note">四級波動分流器研究資料尚未產生；正式預測不受影響。</p>';
+    return;
+  }
+  const names = {low:"低波動",normal:"正常波動",high:"高波動",extreme:"極高波動"};
+  const cards = router.sessions.map(item => {
+    const horizon = Number(item.horizon_sessions || 0);
+    const label = "D+" + horizon;
+    if (item.status !== "research") {
+      return '<article class="forecast-card"><b>' + label + ' 分流</b><div class="forecast-value">樣本不足</div><p class="forecast-meta">' + Number(item.training_samples || 0).toLocaleString("zh-TW") + ' 筆訓練樣本｜' + esc(item.reason || "等待資料") + '</p></article>';
+    }
+    const probabilities = item.regime_probabilities || {};
+    const probabilityText = ["low","normal","high","extreme"].map(key =>
+      names[key] + " " + (Number(probabilities[key] || 0) * 100).toFixed(1) + "%"
+    ).join("｜");
+    const selected = names[item.regime] || item.regime_label || "未分類";
+    const expert = item.expert_used === "global_fallback" ? "全域備援模型" : (names[item.expert_used] || item.expert_used);
+    const validation = item.router_validation || {};
+    const metrics = validation.status === "available"
+      ? "路由樣本外 " + Number(validation.oos_samples || 0).toLocaleString("zh-TW") +
+        " 筆｜Macro-F1 " + (validation.macro_f1 == null ? "—" : (Number(validation.macro_f1) * 100).toFixed(1) + "%") +
+        "｜高／極高召回率 " + (validation.high_extreme_recall == null ? "—" : (Number(validation.high_extreme_recall) * 100).toFixed(1) + "%")
+      : "路由樣本外驗證資料不足";
+    const fallback = item.fallback_reason ? "｜備援：" + esc(item.fallback_reason) : "";
+    const returnText = Number(item.predicted_return_pct) >= 0 ? "+" : "";
+    return '<article class="forecast-card"><b>' + label + '｜分流器選定 ' + selected + '</b>' +
+      '<div class="forecast-value">' + returnText + Number(item.predicted_return_pct).toFixed(2) + '%</div>' +
+      '<p class="forecast-change">實際選用：' + expert + '｜專家訓練樣本 ' + Number(item.expert_training_samples || 0).toLocaleString("zh-TW") + '</p>' +
+      '<p class="forecast-meta">四類分流分數：' + probabilityText + '</p>' +
+      '<p class="forecast-meta">' + metrics + fallback + '</p></article>';
+  }).join("");
+  root.innerHTML = '<h3>核心分流器：先判斷波動，再選專家模型</h3>' +
+    '<p class="note">各期限獨立分流。下列百分比為尚未校準的模型分流分數，不是已驗證的真實發生機率；D+N 報酬以基準收盤至第 N 個交易日收盤計算。研究結果不取代正式點位模型。</p>' +
+    '<div class="forecast-grid">' + cards + '</div>';
+}
+
 function renderDaily(d) {
   $("meta").textContent = "台股最近可用交易日：" + d.asof + "。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。";
   $("demo").hidden = !d.demo;
   $("miss").hidden = true;
   const forecast = d.forecast || {};
   renderTrialPointForecasts(forecast);
+  renderRegimeRouter(forecast.regime_router);
   const sessions = Array.isArray(forecast.sessions) ? forecast.sessions : [];
   if (Number(d.schema_version || 0) < 2 || !sessions.length || !Number.isFinite(Number(forecast.base_close))) {
     $("threeDayMeta").textContent = "資料日期 " + d.asof + "｜三日點位模型尚未完成資料轉換或首次回補。";
