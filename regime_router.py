@@ -213,7 +213,7 @@ def _select_risk_thresholds(probability_history, actual_history):
     actual = np.asarray(actual_history, dtype=int)
     high_extreme = _best_f2_threshold(
         probs[:, 2] + probs[:, 3], actual >= 2,
-        default=0.40, min_positives=20, precision_floor=0.30, max_rate_multiplier=1.5,
+        default=0.40, min_positives=20, precision_floor=0.30, max_rate_multiplier=1.0,
     )
     extreme = _best_f2_threshold(
         probs[:, 3], actual == 3,
