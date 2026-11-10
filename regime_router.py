@@ -484,6 +484,55 @@ def _expert_performance_blend_weight(
 
 
 
+
+def _paired_block_bootstrap_delta(
+    rows, predicted_key, global_key, actual_key,
+    seed=20261110, block_size=20, replicates=500,
+):
+    """Block-bootstrap paired absolute-error differences against global Ridge.
+
+    Negative values favor the expert policy. Contiguous blocks preserve
+    short-run dependence in the time-ordered out-of-sample errors.
+    """
+    valid = [
+        row for row in rows
+        if all(
+            row.get(key) is not None and np.isfinite(float(row[key]))
+            for key in (predicted_key, global_key, actual_key)
+        )
+    ]
+    n = len(valid)
+    if n < 30:
+        return {"status": "insufficient", "samples": n}
+    delta = np.asarray([
+        abs(float(row[predicted_key]) - float(row[actual_key]))
+        - abs(float(row[global_key]) - float(row[actual_key]))
+        for row in valid
+    ], dtype=float)
+    size = min(int(block_size), n)
+    blocks_per_sample = int(np.ceil(n / size))
+    rng = np.random.default_rng(int(seed))
+    boot_means = np.empty(int(replicates), dtype=float)
+    offsets = np.arange(size)
+    for i in range(int(replicates)):
+        starts = rng.integers(0, n, size=blocks_per_sample)
+        indices = ((starts[:, None] + offsets[None, :]) % n).reshape(-1)[:n]
+        boot_means[i] = float(np.mean(delta[indices]))
+    lower, upper = np.percentile(boot_means, [2.5, 97.5])
+    return {
+        "status": "available",
+        "samples": n,
+        "block_size": size,
+        "replicates": int(replicates),
+        "observed_mae_delta_vs_global": round(float(np.mean(delta)), 4),
+        "ci_95_lower": round(float(lower), 4),
+        "ci_95_upper": round(float(upper), 4),
+        "bootstrap_probability_expert_better": round(float(np.mean(boot_means < 0.0)), 4),
+        "significant_improvement_at_95pct": bool(upper < 0.0),
+    }
+
+
+
 def _gate_policy_sensitivity(rows, horizon, early_fraction=0.70):
     """Compare predeclared expert-shrinkage policies with a chronological holdout.
 
@@ -513,11 +562,24 @@ def _gate_policy_sensitivity(rows, horizon, early_fraction=0.70):
         predicted_move = np.asarray([row["policy_predicted_max_daily_move"] for row in items], dtype=float)
         actual_move = np.asarray([row["actual_max_daily_move"] for row in items], dtype=float)
         large = actual_move >= 0.01
+        global_predicted = np.asarray([row["global_predicted_close"] for row in items], dtype=float)
+        global_move = np.asarray([row["global_predicted_max_daily_move"] for row in items], dtype=float)
         return {
             "oos_samples": int(len(items)),
             "point_mae": _safe_mae(predicted, actual),
+            "point_mae_delta_vs_global": round(
+                _safe_mae(predicted, actual) - _safe_mae(global_predicted, actual), 4
+            ),
             "large_move_point_mae": _safe_mae(predicted[large], actual[large]),
+            "large_move_point_mae_delta_vs_global": round(
+                _safe_mae(predicted[large], actual[large])
+                - _safe_mae(global_predicted[large], actual[large]), 4
+            ) if large.any() else None,
             "max_daily_move_mae_pct": _safe_mae(predicted_move * 100.0, actual_move * 100.0),
+            "max_daily_move_mae_delta_vs_global_pct": round(
+                _safe_mae(predicted_move * 100.0, actual_move * 100.0)
+                - _safe_mae(global_move * 100.0, actual_move * 100.0), 4
+            ),
             "direction_accuracy": round(float(np.mean([
                 np.sign(row["policy_predicted_close"] - row["base_close"])
                 == np.sign(row["actual_close"] - row["base_close"])
@@ -578,6 +640,13 @@ def _gate_policy_sensitivity(rows, horizon, early_fraction=0.70):
             "full_oos": summarize(policy_rows),
             "early_selection_window": early,
             "late_holdout": late,
+            "late_holdout_point_mae_delta_ci_vs_global": _paired_block_bootstrap_delta(
+                policy_rows[split:],
+                "policy_predicted_close",
+                "global_predicted_close",
+                "actual_close",
+                seed=20261110 + int(horizon) * 101 + len(policy_name),
+            ),
         }
 
     best_policy = min(
@@ -721,7 +790,7 @@ def _forecast_metrics(rows):
     }
 
 
-def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None):
+def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True):
     """Train and evaluate an independent router + four specialists per horizon.
 
     features_by_horizon maps horizon -> (feature_frame, cumulative forward-return series).
@@ -1047,7 +1116,13 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
-            "gate_policy_sensitivity": _gate_policy_sensitivity(oos_forecasts, horizon),
+            "gate_policy_sensitivity": (
+                _gate_policy_sensitivity(oos_forecasts, horizon)
+                if include_gate_sensitivity else {
+                    "status": "skipped",
+                    "reason": "僅對主要價格特徵組進行門檻敏感度與保留樣本檢驗",
+                }
+            ),
             "historical_magnitude_profile": magnitude_profile,
             "note": (
                 "此為研究候選；分流依未來區間最大單日絕對漲跌幅，點位預測另為基準至 D+N 收盤的累積報酬。專家僅在成熟先前 OOS MAE 優於全域 Ridge 時參與點位與幅度輸出，否則自動回退或收縮至全域模型。"
