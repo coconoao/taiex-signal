@@ -10,10 +10,17 @@ from regime_router import (
     _select_expert,
     _eligible_calibration_records,
     _historical_magnitude_profile,
+    _future_max_daily_move,
 )
 
 
 class RegimeRouterTests(unittest.TestCase):
+    def test_router_target_uses_max_daily_move_not_cumulative_return(self):
+        prices = pd.Series([100.0, 102.0, 100.0, 101.0], index=pd.bdate_range("2024-01-01", periods=4))
+        target = _future_max_daily_move(prices, 2)
+        self.assertAlmostEqual(float(target.iloc[0]), 0.02, places=8)
+        self.assertAlmostEqual(float(prices.iloc[2] / prices.iloc[0] - 1.0), 0.0, places=8)
+
     def test_regime_boundaries_are_mutually_exclusive(self):
         values = np.array([0.0, 0.005, -0.007, 0.01, -0.02, 0.0749, -0.075, 0.10])
         self.assertEqual(
