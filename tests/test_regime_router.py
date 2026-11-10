@@ -34,7 +34,7 @@ class RegimeRouterTests(unittest.TestCase):
 
     def test_historical_scenario_profile_uses_return_fractions_for_points(self):
         returns = np.resize(np.array([-0.05, -0.02, 0.01, 0.03, 0.08]), 40)
-        profile = _historical_magnitude_profile(returns, 10000.0)
+        profile = _historical_magnitude_profile(returns, np.abs(returns), 10000.0)
         self.assertEqual(profile["status"], "available")
         self.assertEqual(profile["samples"], 40)
         self.assertLess(profile["scenario_p10_close"], 10000.0)
@@ -93,6 +93,7 @@ class RegimeRouterTests(unittest.TestCase):
         for horizon, item in enumerate(result["sessions"], start=1):
             self.assertEqual(item["horizon_sessions"], horizon)
             self.assertEqual(item["status"], "research")
+            self.assertGreaterEqual(item["predicted_max_daily_move_pct"], 0.0)
             self.assertEqual(set(item["regime_probabilities"]), set(REGIME_NAMES))
             self.assertAlmostEqual(sum(item["regime_probabilities"].values()), 1.0, places=4)
             self.assertIn(item["expert_used"], (*REGIME_NAMES, "global_fallback"))
