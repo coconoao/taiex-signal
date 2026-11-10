@@ -440,9 +440,11 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         calibration_records = []
         calibrated_oos_samples = 0
         first_test = min(max(300, horizon + 30), max(horizon + 30, len(train_idx) // 2))
-        # Refit every 60 sessions: enough OOS checkpoints while keeping the
-        # nonlinear router's repeated expanding-window fits operationally bounded.
-        for start in range(first_test, len(train_idx), 60):
+        # Evaluate the most recent 2,000 labelled origins (or all available
+        # origins for shorter histories), while retaining an expanding train set.
+        # Refit every 60 sessions to keep scheduled refresh cost bounded.
+        oos_start = max(first_test, len(train_idx) - 2000)
+        for start in range(oos_start, len(train_idx), 60):
             fit_idx = train_idx[:start - horizon + 1]
             test_idx = train_idx[start:start + 60]
             if len(fit_idx) < MIN_TRAIN_SAMPLES or not len(test_idx):
@@ -633,6 +635,6 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         },
         "sessions": sessions,
         "probability_note": "使用先前樣本外分流預測進行逐段時間序列校準；校準樣本不足時保留原始分流分數並明確標示。Brier 與 log-loss 以樣本外資料計算。",
-        "validation_method": "purged_expanding_walk_forward_oos",
+        "validation_method": "purged_expanding_walk_forward_oos_recent_2000_sessions",
         "production_replacement": False,
     }
