@@ -38,9 +38,9 @@ EXPERT_ALPHA = {0: 25.0, 1: 15.0, 2: 1.0, 3: 0.1}
 CLASS_IDS = (0, 1, 2, 3)
 
 
-def classify_regimes(forward_returns):
-    """Map signed forward returns to mutually exclusive absolute-volatility regimes."""
-    values = np.asarray(forward_returns, dtype=float)
+def classify_regimes(future_max_daily_moves):
+    """Map future maximum absolute one-day moves to mutually exclusive regimes."""
+    values = np.asarray(future_max_daily_moves, dtype=float)
     magnitude = np.abs(values)
     labels = np.full(values.shape, -1, dtype=int)
     valid = np.isfinite(values)
@@ -51,6 +51,17 @@ def classify_regimes(forward_returns):
     if isinstance(forward_returns, pd.Series):
         return pd.Series(labels, index=forward_returns.index, name="regime")
     return labels
+
+
+def _future_max_daily_move(close, horizon):
+    """Maximum absolute one-session close-to-close move in the next h sessions."""
+    prices = pd.to_numeric(close, errors="coerce").sort_index()
+    daily_returns = prices.pct_change()
+    future_moves = pd.concat(
+        [daily_returns.shift(-offset).abs().rename(f"D+{offset}") for offset in range(1, int(horizon) + 1)],
+        axis=1,
+    )
+    return future_moves.max(axis=1)
 
 
 def _augment_router_features(X, market_data):
@@ -352,11 +363,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             })
             continue
         latest = latest_candidates[-1]
-        daily_returns = close.pct_change()
-        future_max_daily_move = pd.concat(
-            [daily_returns.shift(-offset).abs().rename(f"D+{offset}") for offset in range(1, horizon + 1)],
-            axis=1,
-        ).max(axis=1).reindex(X.index)
+        future_max_daily_move = _future_max_daily_move(close, horizon).reindex(X.index)
         train_idx = X.index[
             valid_features & forward_returns.notna() & future_max_daily_move.notna() & (X.index < latest)
         ]
@@ -532,7 +539,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
             "historical_magnitude_profile": magnitude_profile,
             "note": (
-                "此為研究候選；D+N 報酬為基準收盤至第 N 個交易日收盤的累積報酬。"
+                "此為研究候選；分流依未來區間最大單日絕對漲跌幅，點位預測另為基準至 D+N 收盤的累積報酬。"
                 "分流機率使用先前可得的樣本外預測逐段校準；校準樣本不足時保留原始分流分數。"
                 "極端專家樣本不足時會退回高波動或全域模型。"
             ),
@@ -543,11 +550,12 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         "model_version": "four-regime-router-moE-research-v1",
         "routing_priority": "router_first",
         "regime_definitions": {
-            "low": {"max_abs_return_pct": 0.5},
-            "normal": {"min_abs_return_pct_exclusive": 0.5, "max_abs_return_pct": 1.0},
-            "high": {"min_abs_return_pct_exclusive": 1.0, "max_abs_return_pct_exclusive": 7.5},
-            "extreme": {"min_abs_return_pct": 7.5},
-            "return_definition": "maximum absolute one-day close-to-close return within the next N trading sessions; point forecast separately uses cumulative close-to-close return",
+            "low": {"max_future_max_daily_move_pct": 0.5},
+            "normal": {"min_future_max_daily_move_pct_exclusive": 0.5, "max_future_max_daily_move_pct": 1.0},
+            "high": {"min_future_max_daily_move_pct_exclusive": 1.0, "max_future_max_daily_move_pct_exclusive": 7.5},
+            "extreme": {"min_future_max_daily_move_pct": 7.5},
+            "regime_target_definition": "maximum absolute one-day close-to-close return within the next N trading sessions",
+            "point_forecast_definition": "cumulative close-to-close return from forecast origin to the Nth session close",
         },
         "sessions": sessions,
         "probability_note": "使用先前樣本外分流預測進行逐段時間序列校準；校準樣本不足時保留原始分流分數並明確標示。Brier 與 log-loss 以樣本外資料計算。",
