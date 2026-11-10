@@ -52,6 +52,30 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertEqual(later["samples"], 100)
         self.assertEqual(later["weight"], 0.0)
 
+    def test_gate_policy_sensitivity_uses_earlier_blocks_and_reports_holdout(self):
+        rows = []
+        for block, start in enumerate((100, 160, 220, 280)):
+            for offset in range(10):
+                position = start + offset
+                rows.append({
+                    "forecast_position": position,
+                    "oos_block_start_position": start,
+                    "expert_used": "high",
+                    "raw_expert_predicted_close": 102.0,
+                    "global_predicted_close": 101.0,
+                    "actual_close": 100.0,
+                    "base_close": 100.0,
+                    "raw_expert_predicted_max_daily_move": 0.02,
+                    "global_predicted_max_daily_move": 0.015,
+                    "actual_max_daily_move": 0.02,
+                })
+        result = _gate_policy_sensitivity(rows, horizon=1)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["oos_samples"], 40)
+        self.assertIn(result["best_policy_on_early_window"], result["policies"])
+        self.assertEqual(result["selected_policy_late_holdout"]["oos_samples"], 12)
+        self.assertEqual(result["policies"]["global_only"]["full_oos"]["point_mae"], 1.0)
+
     def test_forecast_metrics_reports_exact_oos_date_window(self):
         rows = [
             {
