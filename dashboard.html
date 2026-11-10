@@ -450,8 +450,9 @@ function renderRegimeRouter(router) {
     const fallback = item.fallback_reason ? "｜備援：" + esc(item.fallback_reason) : "";
     const profile = item.historical_magnitude_profile || {};
     const profileText = profile.status === "available"
-      ? "同類歷史幅度中位數 " + Number(profile.median_abs_move_pct).toFixed(2) + "%｜90 分位 " + Number(profile.p90_abs_move_pct).toFixed(2) +
-        "%｜歷史達 2%／3%／5% 比例 " + Number(profile.historical_abs_move_exceedance_pct?.["2.0"] || 0).toFixed(1) + "%／" +
+      ? "同類歷史報酬 p10～p90 " + Number(profile.p10_return_pct).toFixed(2) + "%～" + Number(profile.p90_return_pct).toFixed(2) +
+        "%｜絕對幅度中位數／90 分位 " + Number(profile.median_abs_move_pct).toFixed(2) + "%／" + Number(profile.p90_abs_move_pct).toFixed(2) +
+        "%｜歷史達 2%／3%／5% 比例 " + Number(profile.historical_abs_move_exceedance_pct?.["2.0"] || 0).toFixed(1) + "%／"
         Number(profile.historical_abs_move_exceedance_pct?.["3.0"] || 0).toFixed(1) + "%／" +
         Number(profile.historical_abs_move_exceedance_pct?.["5.0"] || 0).toFixed(1) + "%（樣本 " + Number(profile.samples || 0) + "）"
       : "同類歷史幅度樣本不足";
