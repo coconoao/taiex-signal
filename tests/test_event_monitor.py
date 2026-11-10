@@ -85,6 +85,7 @@ class EventMonitorTests(unittest.TestCase):
     def test_first_seen_is_immutable_on_repeat_observation(self):
         first = event_monitor.build_event(self.item(), self.watchlist, self.now)
         first["timestamps"]["first_seen_at_utc"] = "2026-11-09T23:00:00Z"
+        first["timestamps"]["forecast_eligible_at_utc"] = "2026-11-09T23:00:00Z"
         later = event_monitor.build_event(
             self.item(), self.watchlist, self.now + dt.timedelta(hours=3)
         )
