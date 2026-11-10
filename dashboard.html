@@ -1212,7 +1212,7 @@ function renderStock(s, cached=false) {
   const quote = s.intraday_quote || {};
   const quotePrice = Number.isFinite(Number(quote.price)) && quote.available
     ? Number(quote.price).toFixed(2) : "尚無可用報價";
-  const quoteChange = Number.isFinite(Number(quote.change_percent))
+  const quoteChange = quote.change_percent != null && Number.isFinite(Number(quote.change_percent))
     ? (Number(quote.change_percent) > 0 ? "+" : "") + Number(quote.change_percent).toFixed(2) + "%"
     : "—";
   const quoteTimestamp = quote.updated_at || quote.trade_time;
