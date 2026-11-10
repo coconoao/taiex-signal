@@ -453,7 +453,29 @@ function renderDaily(d) {
     return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + change + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.7% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
   }).join("");
   $("threeDayForecast").innerHTML = cards || '<p class="note">目前沒有可用的三日預測資料。</p>';
-  $("threeDayMeta").textContent = "基準收盤 " + Number(forecast.base_close).toLocaleString("zh-TW") + " 點｜收盤資料日期 " + (forecast.asof || d.asof) + "｜預測誤差容許值 ±0.7%｜模型：" + (forecast.model_version || "direct-horizon") + "（研究中）";
+  const updatedAt = d.computed_at ? new Date(d.computed_at) : null;
+  const updatedText = updatedAt && Number.isFinite(updatedAt.getTime())
+    ? updatedAt.toLocaleString("zh-TW", {timeZone:"Asia/Taipei", hour12:false}) : "未知";
+  const ageHours = updatedAt && Number.isFinite(updatedAt.getTime())
+    ? (Date.now() - updatedAt.getTime()) / 3600000 : Infinity;
+  const taipeiParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone:"Asia/Taipei", year:"numeric", month:"2-digit", day:"2-digit",
+    hour:"2-digit", minute:"2-digit", hourCycle:"h23"
+  }).formatToParts(new Date());
+  const part = type => taipeiParts.find(x => x.type === type)?.value || "";
+  const taipeiToday = part("year") + "-" + part("month") + "-" + part("day");
+  const taipeiHour = Number(part("hour"));
+  const d1 = sessions.find(x => Number(x.horizon_sessions) === 1);
+  const targetAlreadyPassed = Boolean(d1?.target_date === taipeiToday && taipeiHour >= 14);
+  const freshnessWarning = targetAlreadyPassed
+    ? "⚠ D+1 仍指向今天，模型尚未納入今天收盤資料。"
+    : ageHours > 2.5
+      ? "⚠ 模型超過 2.5 小時未更新，請留意資料時效。"
+      : "每小時排程更新";
+  $("threeDayMeta").textContent = "基準收盤 " + Number(forecast.base_close).toLocaleString("zh-TW") +
+    " 點｜收盤資料日期 " + (forecast.asof || d.asof) + "｜模型更新時間 " + updatedText +
+    "（台灣）｜" + freshnessWarning + "｜預測誤差容許值 ±0.7%｜模型：" +
+    (forecast.model_version || "direct-horizon") + "（研究中）";
 }
 function renderWeekly(w) {
   const hh = w.horizon_history || {};

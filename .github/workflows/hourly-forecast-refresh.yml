@@ -1,0 +1,42 @@
+name: Hourly three-day forecast refresh
+
+on:
+  # 09:17–17:17 Taiwan time, once per hour on weekdays.
+  schedule:
+    - cron: "17 1-9 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: taiex-data-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-forecast:
+    # Production Supabase writes are allowed only from the default branch.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TAIEX_STORAGE: supabase
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Restore latest market data
+        run: python storage.py restore
+      - name: Ensure forecast data schema is current
+        run: python storage.py migrate-v2
+      - name: Refresh market inputs and recompute three-day model
+        # Reuse the latest saved institutional, margin and futures datasets.
+        # load_live still refreshes the market-price history before recomputing forecasts.
+        run: python pipeline.py --skip-backfill
+      - name: Persist updated forecast and market data
+        run: python storage.py save
