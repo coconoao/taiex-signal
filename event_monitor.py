@@ -280,7 +280,15 @@ def merge_history(existing: list[dict[str, Any]], incoming: list[dict[str, Any]]
                 by_version[(event["event_id"], event["version"])] = event
             else:
                 event["version"] = old_version
-                event["timestamps"]["last_seen_at_utc"] = event["timestamps"]["last_seen_at_utc"]
+                # Re-observing unchanged content must not move its eligibility
+                # cutoff forward to the latest poll time. Keep the later of the
+                # prior cutoff and any newly supplied publication timestamp.
+                old_eligible = old_times.get("forecast_eligible_at_utc")
+                new_eligible = event["timestamps"].get("forecast_eligible_at_utc")
+                if old_eligible and new_eligible:
+                    event["timestamps"]["forecast_eligible_at_utc"] = max(old_eligible, new_eligible)
+                elif old_eligible:
+                    event["timestamps"]["forecast_eligible_at_utc"] = old_eligible
                 by_version[(event["event_id"], old_version)] = event
         else:
             event["version"] = 1
