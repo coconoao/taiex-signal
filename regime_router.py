@@ -526,7 +526,7 @@ def _forecast_metrics(rows):
     }
 
 
-def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False):
+def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None):
     """Train and evaluate an independent router + four specialists per horizon.
 
     features_by_horizon maps horizon -> (feature_frame, cumulative forward-return series).
@@ -554,6 +554,11 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         valid_features = pd.Series(
             np.isfinite(numeric_features.to_numpy(dtype=float)).all(axis=1), index=X.index
         )
+        if allowed_sample_index_by_horizon and horizon in allowed_sample_index_by_horizon:
+            allowed_dates = pd.DatetimeIndex(
+                allowed_sample_index_by_horizon[horizon]
+            ).tz_localize(None).normalize()
+            valid_features &= pd.Series(X.index.isin(allowed_dates), index=X.index)
         latest_candidates = X.index[valid_features & close.reindex(X.index).notna()]
         if not len(latest_candidates):
             sessions.append({
