@@ -52,6 +52,27 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertIn("multiclass_brier", baseline)
         self.assertIn("log_loss", baseline)
 
+    def test_regime_accuracy_gate_requires_strictly_more_than_70_percent(self):
+        def metrics_for(correct):
+            actual = [0] * 10
+            predicted = [0] * correct + [1] * (10 - correct)
+            probabilities = np.full((10, 4), 0.25, dtype=float)
+            return _router_metrics(actual, predicted, probabilities)
+
+        exactly_70 = metrics_for(7)["accuracy_threshold_gate"]
+        above_70 = metrics_for(8)["accuracy_threshold_gate"]
+        self.assertFalse(exactly_70["eligible_by_accuracy_only"])
+        self.assertEqual(exactly_70["status"], "not_eligible")
+        self.assertTrue(above_70["eligible_by_accuracy_only"])
+        self.assertEqual(above_70["status"], "eligible_by_accuracy_only")
+        self.assertFalse(above_70["production_enabled"])
+        self.assertIn("not an untouched prospective holdout", above_70["scope"])
+
+    def test_regime_accuracy_gate_is_not_eligible_without_oos_samples(self):
+        metrics = _router_metrics([], [], np.empty((0, 4)))
+        self.assertEqual(metrics["accuracy_threshold_gate"]["status"], "not_eligible")
+        self.assertIsNone(metrics["accuracy_threshold_gate"]["observed_accuracy"])
+
     def test_expert_performance_gate_uses_only_matured_prior_oos_records(self):
         records = []
         for position in range(100):
