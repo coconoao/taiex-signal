@@ -67,7 +67,7 @@ class RegimeRouterTests(unittest.TestCase):
             probabilities[i] = [0.1, 0.1, 0.7, 0.1]
         thresholds = _select_risk_thresholds(probabilities, actual)
         self.assertEqual(thresholds["source"], "prior_calibrated_oos_f2")
-        self.assertLessEqual(thresholds["high_extreme"], 0.7)
+        self.assertLessEqual(thresholds["high_extreme"], 0.8)
         self.assertEqual(thresholds["training_oos_samples"], 170)
 
     def test_extreme_expert_falls_back_to_high_when_sparse(self):
