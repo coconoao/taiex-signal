@@ -105,6 +105,28 @@ def _router_probabilities(estimator, X, fallback_class=None):
     return np.divide(probabilities, row_sums, out=np.zeros_like(probabilities), where=row_sums > 0)
 
 
+def _fit_probability_calibrator(probability_history, actual_history):
+    """Fit a point-in-time calibrator using only earlier OOS router predictions."""
+    if len(actual_history) < 100 or len(set(actual_history)) < 2:
+        return None
+    features = np.log(np.clip(np.asarray(probability_history, dtype=float), 1e-7, 1.0))
+    calibrator = LogisticRegression(C=1.0, max_iter=800, random_state=29)
+    calibrator.fit(features, np.asarray(actual_history, dtype=int))
+    return calibrator
+
+
+def _apply_probability_calibrator(calibrator, raw_probabilities):
+    raw = np.asarray(raw_probabilities, dtype=float)
+    if calibrator is None:
+        return raw
+    features = np.log(np.clip(raw, 1e-7, 1.0))
+    calibrated = np.zeros((len(raw), 4), dtype=float)
+    for column, class_id in enumerate(calibrator.classes_):
+        calibrated[:, int(class_id)] = calibrator.predict_proba(features)[:, column]
+    totals = calibrated.sum(axis=1, keepdims=True)
+    return np.divide(calibrated, totals, out=np.zeros_like(calibrated), where=totals > 0)
+
+
 def _fit_experts(X, returns, regimes):
     global_model = make_pipeline(StandardScaler(), Ridge(alpha=25.0))
     global_model.fit(X, np.asarray(returns, dtype=float))
@@ -267,6 +289,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
 
         train_regimes = classify_regimes(forward_returns.loc[train_idx]).astype(int)
         oos_actual, oos_predicted, oos_probabilities, oos_forecasts = [], [], [], []
+        calibration_prob_history, calibration_actual_history = [], []
+        calibrated_oos_samples = 0
         first_test = min(max(300, horizon + 30), max(horizon + 30, len(train_idx) // 2))
         for start in range(first_test, len(train_idx), 30):
             fit_idx = train_idx[:start - horizon + 1]
@@ -276,8 +300,15 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             fit_regimes = classify_regimes(forward_returns.loc[fit_idx]).astype(int)
             router = _fit_router(X.loc[fit_idx], fit_regimes)
             fallback_class = int(pd.Series(fit_regimes).mode().iloc[0])
-            probs = _router_probabilities(router, X.loc[test_idx], fallback_class=fallback_class)
+            raw_probs = _router_probabilities(router, X.loc[test_idx], fallback_class=fallback_class)
+            calibrator = _fit_probability_calibrator(
+                calibration_prob_history, calibration_actual_history
+            )
+            probs = _apply_probability_calibrator(calibrator, raw_probs)
+            if calibrator is not None:
+                calibrated_oos_samples += len(test_idx)
             predicted_classes = probs.argmax(axis=1)
+            batch_raw_probs, batch_actual_classes = [], []
             global_model, experts, expert_counts = _fit_experts(
                 X.loc[fit_idx], forward_returns.loc[fit_idx].to_numpy(dtype=float), fit_regimes
             )
@@ -296,9 +327,12 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 actual_return = float(actual_returns[offset])
                 if not all(np.isfinite(x) for x in (base_point, actual_point, actual_return, predicted_return)):
                     continue
-                oos_actual.append(int(classify_regimes([actual_return])[0]))
+                actual_class = int(classify_regimes([actual_return])[0])
+                oos_actual.append(actual_class)
                 oos_predicted.append(requested)
                 oos_probabilities.append(probs[offset].tolist())
+                batch_raw_probs.append(raw_probs[offset].tolist())
+                batch_actual_classes.append(actual_class)
                 oos_forecasts.append({
                     "predicted_close": base_point * (1.0 + predicted_return),
                     "actual_close": actual_point,
@@ -309,11 +343,18 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                     "actual_regime": int(classify_regimes([actual_return])[0]),
                     "expert_used": expert_used,
                 })
+            # Outcomes from this block become calibration data only for later blocks.
+            calibration_prob_history.extend(batch_raw_probs)
+            calibration_actual_history.extend(batch_actual_classes)
 
         final_regimes = classify_regimes(forward_returns.loc[train_idx]).astype(int)
         router = _fit_router(X.loc[train_idx], final_regimes)
         fallback_class = int(pd.Series(final_regimes).mode().iloc[0])
-        latest_probs = _router_probabilities(router, X.loc[[latest]], fallback_class=fallback_class)[0]
+        latest_raw_probs = _router_probabilities(router, X.loc[[latest]], fallback_class=fallback_class)
+        final_calibrator = _fit_probability_calibrator(
+            calibration_prob_history, calibration_actual_history
+        )
+        latest_probs = _apply_probability_calibrator(final_calibrator, latest_raw_probs)[0]
         requested = int(np.argmax(latest_probs))
         global_model, experts, expert_counts = _fit_experts(
             X.loc[train_idx], forward_returns.loc[train_idx].to_numpy(dtype=float), final_regimes
@@ -342,7 +383,12 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 name: round(float(latest_probs[class_id]), 5)
                 for class_id, name in enumerate(REGIME_NAMES)
             },
-            "probabilities_calibrated": False,
+            "probabilities_calibrated": final_calibrator is not None,
+            "probability_calibration": {
+                "method": "prequential_multinomial_logistic" if final_calibrator is not None else "not_available",
+                "training_oos_samples": int(len(calibration_actual_history)),
+                "prequential_calibrated_oos_samples": int(calibrated_oos_samples),
+            },
             "expert_used": expert_used,
             "expert_training_samples": int(expert_samples),
             "requested_expert_training_samples": int(expert_counts.get(requested, 0)),
@@ -352,7 +398,10 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 name: int(expert_counts.get(class_id, 0))
                 for class_id, name in enumerate(REGIME_NAMES)
             },
-            "router_validation": _router_metrics(oos_actual, oos_predicted, oos_probabilities),
+            "router_validation": {
+                **_router_metrics(oos_actual, oos_predicted, oos_probabilities),
+                "prequential_calibrated_oos_samples": int(calibrated_oos_samples),
+            },
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
             "note": (
                 "此為研究候選；D+N 報酬為基準收盤至第 N 個交易日收盤的累積報酬。"
@@ -372,7 +421,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "return_definition": "absolute cumulative close-to-close return from forecast origin to each horizon close",
         },
         "sessions": sessions,
-        "probability_note": "LogisticRegression 原始分流機率，尚未完成獨立時間序列校準；Brier 與 log-loss 僅作校準診斷。",
+        "probability_note": "使用先前樣本外分流預測進行逐段時間序列校準；校準樣本不足時保留原始分流分數並明確標示。Brier 與 log-loss 以樣本外資料計算。",
         "validation_method": "purged_expanding_walk_forward_oos",
         "production_replacement": False,
     }
