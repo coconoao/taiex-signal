@@ -138,6 +138,107 @@ def _request_json(url: str) -> dict:
         diagnostic_code=diagnostic,
     )
 
+
+def _fugle_timestamp(value):
+    """Parse Fugle epoch timestamps (seconds, milliseconds, or microseconds)."""
+    if value is None:
+        return None
+    try:
+        stamp = float(value)
+        if stamp > 1e14:
+            stamp /= 1_000_000
+        elif stamp > 1e11:
+            stamp /= 1_000
+        return dt.datetime.fromtimestamp(stamp, tz=dt.timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def load_intraday_quote(code: str):
+    """Fetch one on-demand Fugle quote; never substitute historical close as realtime."""
+    import os
+    from zoneinfo import ZoneInfo
+
+    api_key = os.environ.get("FUGLE_API_KEY", "").strip()
+    if not api_key:
+        return {"available": False, "realtime": False, "status": "NO_API_KEY"}
+
+    symbol = str(code).strip().upper()
+    if not symbol or not symbol[0].isdigit() or not symbol.isalnum() or len(symbol) > 12:
+        return {"available": False, "realtime": False, "status": "INVALID_SYMBOL"}
+
+    url = (
+        "https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/"
+        + urllib.parse.quote(symbol, safe="")
+    )
+    try:
+        response = curl_requests.get(
+            url,
+            headers={"X-API-KEY": api_key, "Accept": "application/json"},
+            timeout=8,
+            impersonate="chrome",
+        )
+        status_code = response.status_code
+        if status_code in (401, 403):
+            return {"available": False, "realtime": False, "status": "AUTH_FAILED"}
+        if status_code == 429:
+            return {"available": False, "realtime": False, "status": "RATE_LIMITED"}
+        if status_code != 200:
+            return {"available": False, "realtime": False, "status": "PROVIDER_ERROR"}
+
+        payload = json.loads(response.content.decode("utf-8-sig"))
+        if not isinstance(payload, dict) or str(payload.get("symbol", "")).upper() != symbol:
+            return {"available": False, "realtime": False, "status": "INVALID_DATA"}
+
+        price = _number(payload.get("lastPrice"))
+        if price is None or price <= 0:
+            price = _number(payload.get("closePrice"))
+        if price is None or price <= 0:
+            last_trade = payload.get("lastTrade") or {}
+            price = _number(last_trade.get("price")) if isinstance(last_trade, dict) else None
+        if price is None or price <= 0:
+            return {"available": False, "realtime": False, "status": "NO_TRADE_DATA"}
+
+        last_trade = payload.get("lastTrade") or {}
+        trade_time = _fugle_timestamp(
+            last_trade.get("time") if isinstance(last_trade, dict) else None
+        ) or _fugle_timestamp(payload.get("closeTime"))
+        updated_time = _fugle_timestamp(payload.get("lastUpdated")) or trade_time
+        if updated_time is None:
+            return {"available": False, "realtime": False, "status": "INVALID_TIMESTAMP"}
+
+        now = dt.datetime.now(dt.timezone.utc)
+        age_seconds = (now - updated_time).total_seconds()
+        local_today = now.astimezone(ZoneInfo("Asia/Taipei")).date().isoformat()
+        quote_date = str(payload.get("date") or "")
+        realtime = (
+            quote_date == local_today
+            and -30 <= age_seconds <= 300
+        )
+        return {
+            "available": True,
+            "realtime": realtime,
+            "status": "REALTIME" if realtime else "STALE",
+            "symbol": symbol,
+            "name": str(payload.get("name") or "")[:40],
+            "price": round(float(price), 4),
+            "change": _number(payload.get("change")),
+            "change_percent": _number(payload.get("changePercent")),
+            "volume": _number((payload.get("total") or {}).get("tradeVolume"))
+            if isinstance(payload.get("total"), dict) else None,
+            "exchange": str(payload.get("exchange") or "")[:12],
+            "market": str(payload.get("market") or "")[:12],
+            "date": quote_date,
+            "trade_time": trade_time.isoformat() if trade_time else None,
+            "updated_at": updated_time.isoformat(),
+            "age_seconds": max(0, round(age_seconds)),
+            "is_trial": bool(payload.get("isTrial", False)),
+        }
+    except Exception as exc:
+        # Never log or return exception text: it may contain request details.
+        status = "TIMEOUT" if "timeout" in type(exc).__name__.lower() else "PROVIDER_ERROR"
+        return {"available": False, "realtime": False, "status": status}
+
 def _month_starts(years: int = 10):
     today = dt.date.today()
     start = dt.date(today.year - years, today.month, 1)
