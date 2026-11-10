@@ -158,20 +158,25 @@ def _eligible_calibration_records(records, current_position, horizon):
     return [record for record in records if record[0] + int(horizon) <= int(current_position)]
 
 
-def _fit_experts(X, returns, regimes):
+def _fit_experts(X, cumulative_returns, max_daily_moves, regimes):
     global_model = make_pipeline(StandardScaler(), Ridge(alpha=25.0))
-    global_model.fit(X, np.asarray(returns, dtype=float))
-    models = {}
-    counts = {}
+    global_model.fit(X, np.asarray(cumulative_returns, dtype=float))
+    global_magnitude_model = make_pipeline(StandardScaler(), Ridge(alpha=25.0))
+    global_magnitude_model.fit(X, np.asarray(max_daily_moves, dtype=float))
+    models, magnitude_models, counts = {}, {}, {}
     for class_id in CLASS_IDS:
         mask = np.asarray(regimes, dtype=int) == class_id
         count = int(mask.sum())
         counts[class_id] = count
         if count >= MIN_EXPERT_SAMPLES[class_id]:
+            selected_X = X.iloc[np.flatnonzero(mask)]
             model = make_pipeline(StandardScaler(), Ridge(alpha=EXPERT_ALPHA[class_id]))
-            model.fit(X.iloc[np.flatnonzero(mask)], np.asarray(returns, dtype=float)[mask])
+            model.fit(selected_X, np.asarray(cumulative_returns, dtype=float)[mask])
+            magnitude_model = make_pipeline(StandardScaler(), Ridge(alpha=EXPERT_ALPHA[class_id]))
+            magnitude_model.fit(selected_X, np.asarray(max_daily_moves, dtype=float)[mask])
             models[class_id] = model
-    return global_model, models, counts
+            magnitude_models[class_id] = magnitude_model
+    return global_model, models, global_magnitude_model, magnitude_models, counts
 
 
 def _select_expert(requested_class, global_model, models, counts):
@@ -197,33 +202,37 @@ def _safe_mae(predicted, actual):
     return round(float(np.mean(np.abs(np.asarray(predicted) - np.asarray(actual)))), 2)
 
 
-def _historical_magnitude_profile(returns, base_close):
-    """Summarize only past, labelled returns from the expert actually selected."""
-    values = np.asarray(returns, dtype=float)
-    values = values[np.isfinite(values)]
-    if len(values) < 20:
-        return {"status": "insufficient", "samples": int(len(values))}
-    absolute = np.abs(values)
-    quantiles = {
-        "p10_return_pct": round(float(np.percentile(values, 10) * 100), 3),
-        "p50_return_pct": round(float(np.percentile(values, 50) * 100), 3),
-        "p90_return_pct": round(float(np.percentile(values, 90) * 100), 3),
-        "median_abs_move_pct": round(float(np.percentile(absolute, 50) * 100), 3),
-        "p90_abs_move_pct": round(float(np.percentile(absolute, 90) * 100), 3),
+def _historical_magnitude_profile(cumulative_returns, max_daily_moves, base_close):
+    """Summarize past cumulative returns and maximum daily moves in the selected regime."""
+    returns = np.asarray(cumulative_returns, dtype=float)
+    moves = np.asarray(max_daily_moves, dtype=float)
+    valid = np.isfinite(returns) & np.isfinite(moves)
+    returns, moves = returns[valid], moves[valid]
+    if len(returns) < 20:
+        return {"status": "insufficient", "samples": int(len(returns))}
+    return_quantiles = {
+        "p10_return_pct": round(float(np.percentile(returns, 10) * 100), 3),
+        "p50_return_pct": round(float(np.percentile(returns, 50) * 100), 3),
+        "p90_return_pct": round(float(np.percentile(returns, 90) * 100), 3),
+    }
+    move_quantiles = {
+        "median_abs_move_pct": round(float(np.percentile(moves, 50) * 100), 3),
+        "p90_abs_move_pct": round(float(np.percentile(moves, 90) * 100), 3),
     }
     exceedance = {
-        str(threshold): round(float(np.mean(absolute >= threshold / 100.0) * 100), 2)
+        str(threshold): round(float(np.mean(moves >= threshold / 100.0) * 100), 2)
         for threshold in (1.0, 2.0, 3.0, 5.0, 7.5)
     }
     return {
         "status": "available",
-        "samples": int(len(values)),
-        **quantiles,
+        "samples": int(len(returns)),
+        **return_quantiles,
+        **move_quantiles,
         "historical_abs_move_exceedance_pct": exceedance,
-        "scenario_p10_close": round(float(base_close * (1.0 + np.percentile(values, 10))), 2),
-        "scenario_p50_close": round(float(base_close * (1.0 + np.percentile(values, 50))), 2),
-        "scenario_p90_close": round(float(base_close * (1.0 + np.percentile(values, 90))), 2),
-        "note": "僅為所選專家訓練樣本的歷史條件分布，不是未來機率或保證區間。",
+        "scenario_p10_close": round(float(base_close * (1.0 + np.percentile(returns, 10))), 2),
+        "scenario_p50_close": round(float(base_close * (1.0 + np.percentile(returns, 50))), 2),
+        "scenario_p90_close": round(float(base_close * (1.0 + np.percentile(returns, 90))), 2),
+        "note": "最大單日幅度為未來區間內最大單日漲跌；點位情境為累積報酬歷史分布。僅供歷史參考，不是未來機率。",
     }
 
 
@@ -270,12 +279,14 @@ def _forecast_metrics(rows):
         return {"status": "insufficient", "oos_samples": 0}
     predicted = np.asarray([row["predicted_close"] for row in rows], dtype=float)
     actual = np.asarray([row["actual_close"] for row in rows], dtype=float)
-    base = np.asarray([row["base_close"] for row in rows], dtype=float)
     actual_returns = np.asarray([row["actual_return"] for row in rows], dtype=float)
     predicted_returns = np.asarray([row["predicted_return"] for row in rows], dtype=float)
+    actual_max_moves = np.asarray([row["actual_max_daily_move"] for row in rows], dtype=float)
+    predicted_max_moves = np.asarray([row["predicted_max_daily_move"] for row in rows], dtype=float)
     global_predicted = np.asarray([row["global_predicted_close"] for row in rows], dtype=float)
-    large = np.abs(actual_returns) >= 0.01
-    extreme = np.abs(actual_returns) >= EXTREME_MIN_RETURN
+    global_max_moves = np.asarray([row["global_predicted_max_daily_move"] for row in rows], dtype=float)
+    large = actual_max_moves >= 0.01
+    extreme = actual_max_moves >= EXTREME_MIN_RETURN
     by_actual = {}
     for class_id, name in enumerate(REGIME_NAMES):
         subset = [row for row in rows if row["actual_regime"] == class_id]
@@ -298,6 +309,9 @@ def _forecast_metrics(rows):
         "large_move_samples": int(large.sum()),
         "large_move_routed_mae_points": _safe_mae(predicted[large], actual[large]),
         "large_move_global_mae_points": _safe_mae(global_predicted[large], actual[large]),
+        "max_daily_move_mae_pct": _safe_mae(predicted_max_moves * 100.0, actual_max_moves * 100.0),
+        "global_max_daily_move_mae_pct": _safe_mae(global_max_moves * 100.0, actual_max_moves * 100.0),
+        "large_move_max_daily_move_mae_pct": _safe_mae(predicted_max_moves[large] * 100.0, actual_max_moves[large] * 100.0),
         "extreme_move_samples": int(extreme.sum()),
         "extreme_move_routed_mae_points": _safe_mae(predicted[extreme], actual[extreme]),
         "by_actual_regime": by_actual,
@@ -308,7 +322,8 @@ def _forecast_metrics(rows):
 def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None):
     """Train and evaluate an independent router + four specialists per horizon.
 
-    features_by_horizon maps horizon -> (feature_frame, forward_return_series).
+    features_by_horizon maps horizon -> (feature_frame, cumulative forward-return series).
+    Regimes use the maximum absolute one-day return in the next h sessions.
     OOS folds are expanding-window; the last h labelled observations are purged.
     This module is research-only and does not replace the production Ridge forecast.
     """
@@ -337,7 +352,14 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             })
             continue
         latest = latest_candidates[-1]
-        train_idx = X.index[valid_features & forward_returns.notna() & (X.index < latest)]
+        daily_returns = close.pct_change()
+        future_max_daily_move = pd.concat(
+            [daily_returns.shift(-offset).abs().rename(f"D+{offset}") for offset in range(1, horizon + 1)],
+            axis=1,
+        ).max(axis=1).reindex(X.index)
+        train_idx = X.index[
+            valid_features & forward_returns.notna() & future_max_daily_move.notna() & (X.index < latest)
+        ]
         if len(train_idx) < MIN_TRAIN_SAMPLES:
             sessions.append({
                 "horizon_sessions": horizon, "status": "insufficient",
@@ -348,7 +370,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             })
             continue
 
-        train_regimes = classify_regimes(forward_returns.loc[train_idx]).astype(int)
+        train_regimes = classify_regimes(future_max_daily_move.loc[train_idx]).astype(int)
         oos_actual, oos_predicted, oos_probabilities, oos_forecasts = [], [], [], []
         calibration_records = []
         calibrated_oos_samples = 0
@@ -360,7 +382,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             test_idx = train_idx[start:start + 60]
             if len(fit_idx) < MIN_TRAIN_SAMPLES or not len(test_idx):
                 continue
-            fit_regimes = classify_regimes(forward_returns.loc[fit_idx]).astype(int)
+            fit_regimes = classify_regimes(future_max_daily_move.loc[fit_idx]).astype(int)
             router = _fit_router(X.loc[fit_idx], fit_regimes)
             fallback_class = int(pd.Series(fit_regimes).mode().iloc[0])
             raw_probs = _router_probabilities(router, X.loc[test_idx], fallback_class=fallback_class)
@@ -376,25 +398,35 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 calibrated_oos_samples += len(test_idx)
             predicted_classes = probs.argmax(axis=1)
             batch_calibration_records = []
-            global_model, experts, expert_counts = _fit_experts(
-                X.loc[fit_idx], forward_returns.loc[fit_idx].to_numpy(dtype=float), fit_regimes
+            global_model, experts, global_magnitude_model, magnitude_experts, expert_counts = _fit_experts(
+                X.loc[fit_idx],
+                forward_returns.loc[fit_idx].to_numpy(dtype=float),
+                future_max_daily_move.loc[fit_idx].to_numpy(dtype=float),
+                fit_regimes,
             )
             global_returns = global_model.predict(X.loc[test_idx])
+            global_max_moves = np.maximum(0.0, global_magnitude_model.predict(X.loc[test_idx]))
             base_points = close.reindex(test_idx).to_numpy(dtype=float)
             actual_points = close.shift(-horizon).reindex(test_idx).to_numpy(dtype=float)
             actual_returns = forward_returns.reindex(test_idx).to_numpy(dtype=float)
+            actual_max_moves = future_max_daily_move.reindex(test_idx).to_numpy(dtype=float)
             for offset, asof_date in enumerate(test_idx):
                 requested = int(predicted_classes[offset])
                 expert, expert_used, expert_samples, fallback_reason = _select_expert(
                     requested, global_model, experts, expert_counts
                 )
+                magnitude_expert, _, _, _ = _select_expert(
+                    requested, global_magnitude_model, magnitude_experts, expert_counts
+                )
                 predicted_return = float(expert.predict(X.loc[[asof_date]])[0])
+                predicted_max_move = max(0.0, float(magnitude_expert.predict(X.loc[[asof_date]])[0]))
                 base_point = float(base_points[offset])
                 actual_point = float(actual_points[offset])
                 actual_return = float(actual_returns[offset])
-                if not all(np.isfinite(x) for x in (base_point, actual_point, actual_return, predicted_return)):
+                actual_max_move = float(actual_max_moves[offset])
+                if not all(np.isfinite(x) for x in (base_point, actual_point, actual_return, actual_max_move, predicted_return, predicted_max_move)):
                     continue
-                actual_class = int(classify_regimes([actual_return])[0])
+                actual_class = int(classify_regimes([actual_max_move])[0])
                 oos_actual.append(actual_class)
                 oos_predicted.append(requested)
                 oos_probabilities.append(probs[offset].tolist())
@@ -406,14 +438,17 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                     "predicted_return": predicted_return,
                     "actual_return": actual_return,
                     "global_predicted_close": base_point * (1.0 + float(global_returns[offset])),
-                    "actual_regime": int(classify_regimes([actual_return])[0]),
+                    "predicted_max_daily_move": predicted_max_move,
+                    "actual_max_daily_move": actual_max_move,
+                    "global_predicted_max_daily_move": float(global_max_moves[offset]),
+                    "actual_regime": actual_class,
                     "expert_used": expert_used,
                 })
             # Outcomes from this block are retained with target timing; later
             # folds may calibrate only after each outcome's target close is known.
             calibration_records.extend(batch_calibration_records)
 
-        final_regimes = classify_regimes(forward_returns.loc[train_idx]).astype(int)
+        final_regimes = classify_regimes(future_max_daily_move.loc[train_idx]).astype(int)
         router = _fit_router(X.loc[train_idx], final_regimes)
         fallback_class = int(pd.Series(final_regimes).mode().iloc[0])
         latest_raw_probs = _router_probabilities(router, X.loc[[latest]], fallback_class=fallback_class)
@@ -427,22 +462,31 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         )
         latest_probs = _apply_probability_calibrator(final_calibrator, latest_raw_probs)[0]
         requested = int(np.argmax(latest_probs))
-        global_model, experts, expert_counts = _fit_experts(
-            X.loc[train_idx], forward_returns.loc[train_idx].to_numpy(dtype=float), final_regimes
+        global_model, experts, global_magnitude_model, magnitude_experts, expert_counts = _fit_experts(
+            X.loc[train_idx],
+            forward_returns.loc[train_idx].to_numpy(dtype=float),
+            future_max_daily_move.loc[train_idx].to_numpy(dtype=float),
+            final_regimes,
         )
         expert, expert_used, expert_samples, fallback_reason = _select_expert(
             requested, global_model, experts, expert_counts
         )
+        magnitude_expert, _, _, _ = _select_expert(
+            requested, global_magnitude_model, magnitude_experts, expert_counts
+        )
         predicted_return = float(expert.predict(X.loc[[latest]])[0])
+        predicted_max_move = max(0.0, float(magnitude_expert.predict(X.loc[[latest]])[0]))
         base_close = float(close.loc[latest])
         forecast_close = base_close * (1.0 + predicted_return)
         if expert_used in REGIME_NAMES:
             selected_class = REGIME_NAMES.index(expert_used)
             selected_mask = final_regimes.to_numpy(dtype=int) == selected_class
             selected_returns = forward_returns.loc[train_idx].to_numpy(dtype=float)[selected_mask]
+            selected_moves = future_max_daily_move.loc[train_idx].to_numpy(dtype=float)[selected_mask]
         else:
             selected_returns = forward_returns.loc[train_idx].to_numpy(dtype=float)
-        magnitude_profile = _historical_magnitude_profile(selected_returns, base_close)
+            selected_moves = future_max_daily_move.loc[train_idx].to_numpy(dtype=float)
+        magnitude_profile = _historical_magnitude_profile(selected_returns, selected_moves, base_close)
         meta = target_meta.get(horizon, {})
         sessions.append({
             "horizon_sessions": horizon,
@@ -454,6 +498,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "base_close": round(base_close, 2),
             "forecast_close": round(float(forecast_close), 2),
             "predicted_return_pct": round(predicted_return * 100, 4),
+            "predicted_max_daily_move_pct": round(predicted_max_move * 100, 4),
             "training_samples": int(len(train_idx)),
             "regime": REGIME_NAMES[requested],
             "regime_label": REGIME_LABELS[REGIME_NAMES[requested]],
@@ -502,7 +547,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "normal": {"min_abs_return_pct_exclusive": 0.5, "max_abs_return_pct": 1.0},
             "high": {"min_abs_return_pct_exclusive": 1.0, "max_abs_return_pct_exclusive": 7.5},
             "extreme": {"min_abs_return_pct": 7.5},
-            "return_definition": "absolute cumulative close-to-close return from forecast origin to each horizon close",
+            "return_definition": "maximum absolute one-day close-to-close return within the next N trading sessions; point forecast separately uses cumulative close-to-close return",
         },
         "sessions": sessions,
         "probability_note": "使用先前樣本外分流預測進行逐段時間序列校準；校準樣本不足時保留原始分流分數並明確標示。Brier 與 log-loss 以樣本外資料計算。",
