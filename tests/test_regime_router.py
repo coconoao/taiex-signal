@@ -17,6 +17,7 @@ from regime_router import (
     _forecast_metrics,
     _expert_performance_blend_weight,
     _gate_policy_sensitivity,
+    _paired_block_bootstrap_delta,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
@@ -76,6 +77,19 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertIn(result["best_policy_on_early_window"], result["policies"])
         self.assertEqual(result["selected_policy_late_holdout"]["oos_samples"], 12)
         self.assertEqual(result["policies"]["global_only"]["full_oos"]["point_mae"], 1.0)
+
+    def test_paired_block_bootstrap_detects_consistent_expert_improvement(self):
+        rows = [
+            {"expert_prediction": 101.0, "global_prediction": 102.0, "actual": 100.0}
+            for _ in range(80)
+        ]
+        result = _paired_block_bootstrap_delta(
+            rows, "expert_prediction", "global_prediction", "actual",
+            seed=17, block_size=10, replicates=100,
+        )
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["observed_mae_delta_vs_global"], -1.0)
+        self.assertTrue(result["significant_improvement_at_95pct"])
 
     def test_forecast_metrics_reports_exact_oos_date_window(self):
         rows = [
