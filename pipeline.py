@@ -1268,8 +1268,13 @@ def three_day_point_forecast(df, chips, margin, futures=None):
     return forecast, history_records
 
 
-def build_ridge_trial_forecasts(df, chips, margin, futures=None, alphas=(10.0, 100.0)):
-    """Build separate, research-only 3-session Ridge sensitivity candidates."""
+def build_ridge_trial_forecasts(df, chips, margin, futures=None, alphas=(1.0, 5.0, 10.0, 25.0, 100.0)):
+    """Build research-only Ridge candidates from aggressive to conservative regularization.
+
+    Alpha 25.0 is the incumbent production setting. Lower alpha values allow
+    stronger feature response; candidates remain research-only until paired
+    out-of-sample validation supports promotion.
+    """
     close = pd.to_numeric(df["TAIEX"], errors="coerce").dropna().sort_index()
     results = {float(alpha): {} for alpha in alphas}
     latest_by_horizon = {}
@@ -1335,13 +1340,23 @@ def build_ridge_trial_forecasts(df, chips, margin, futures=None, alphas=(10.0, 1
                 "within_0_7_pct_pct": None,
             }
             if sample["pred"]:
-                errors = np.abs(np.asarray(sample["pred"]) - np.asarray(sample["actual"]))
-                baseline_errors = np.abs(np.asarray(sample["base"]) - np.asarray(sample["actual"]))
-                relative_errors = errors / np.maximum(np.abs(np.asarray(sample["actual"])), 1.0)
+                predicted = np.asarray(sample["pred"], dtype=float)
+                actual = np.asarray(sample["actual"], dtype=float)
+                base = np.asarray(sample["base"], dtype=float)
+                errors = np.abs(predicted - actual)
+                baseline_errors = np.abs(base - actual)
+                relative_errors = errors / np.maximum(np.abs(actual), 1.0)
+                # Large-move subset is defined only from realized outcomes,
+                # never from the model prediction, so the diagnostic cannot
+                # select easy cases after seeing the forecast.
+                large_move = np.abs(actual / np.maximum(np.abs(base), 1.0) - 1.0) >= 0.01
                 metrics.update({
                     "mae_points": round(float(errors.mean()), 2),
                     "flat_baseline_mae_points": round(float(baseline_errors.mean()), 2),
                     "within_0_7_pct_pct": round(float((relative_errors <= FORECAST_ERROR_TOLERANCE).mean() * 100), 2),
+                    "large_move_samples": int(large_move.sum()),
+                    "large_move_mae_points": round(float(errors[large_move].mean()), 2) if large_move.any() else None,
+                    "large_move_flat_baseline_mae_points": round(float(baseline_errors[large_move].mean()), 2) if large_move.any() else None,
                 })
             results[alpha][str(h)] = {
                 "status": "research",
