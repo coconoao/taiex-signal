@@ -448,12 +448,20 @@ function renderRegimeRouter(router) {
         "｜高／極高召回率 " + (validation.high_extreme_recall == null ? "—" : (Number(validation.high_extreme_recall) * 100).toFixed(1) + "%")
       : "路由樣本外驗證資料不足";
     const fallback = item.fallback_reason ? "｜備援：" + esc(item.fallback_reason) : "";
+    const profile = item.historical_magnitude_profile || {};
+    const profileText = profile.status === "available"
+      ? "同類歷史幅度中位數 " + Number(profile.median_abs_move_pct).toFixed(2) + "%｜90 分位 " + Number(profile.p90_abs_move_pct).toFixed(2) +
+        "%｜歷史達 2%／3%／5% 比例 " + Number(profile.historical_abs_move_exceedance_pct?.["2.0"] || 0).toFixed(1) + "%／" +
+        Number(profile.historical_abs_move_exceedance_pct?.["3.0"] || 0).toFixed(1) + "%／" +
+        Number(profile.historical_abs_move_exceedance_pct?.["5.0"] || 0).toFixed(1) + "%（樣本 " + Number(profile.samples || 0) + "）"
+      : "同類歷史幅度樣本不足";
     const returnText = Number(item.predicted_return_pct) >= 0 ? "+" : "";
     return '<article class="forecast-card"><b>' + label + '｜分流器選定 ' + selected + '</b>' +
       '<div class="forecast-value">' + returnText + Number(item.predicted_return_pct).toFixed(2) + '%</div>' +
       '<p class="forecast-change">實際選用：' + expert + '｜專家訓練樣本 ' + Number(item.expert_training_samples || 0).toLocaleString("zh-TW") + '</p>' +
       '<p class="forecast-meta">' + probabilityLabel + probabilityText + '</p>' +
-      '<p class="forecast-meta">' + metrics + fallback + '</p></article>';
+      '<p class="forecast-meta">' + metrics + fallback + '</p>' +
+      '<p class="forecast-meta">' + profileText + '；僅為歷史條件分布參考</p></article>';
   }).join("");
   root.innerHTML = '<h3>核心分流器：先判斷波動，再選專家模型</h3>' +
     '<p class="note">各期限獨立分流。若先前樣本外資料足夠，會進行逐段時間序列機率校準；不足時明確標示為未校準分流分數。D+N 報酬以基準收盤至第 N 個交易日收盤計算。研究結果不取代正式點位模型。</p>' +
