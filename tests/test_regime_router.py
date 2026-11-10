@@ -12,6 +12,7 @@ from regime_router import (
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
+    _select_risk_thresholds,
 )
 
 
@@ -58,6 +59,16 @@ class RegimeRouterTests(unittest.TestCase):
         probabilities = [0.40, 0.20, 0.10, 0.30]
         thresholds = {"high_extreme": 0.25, "extreme": 0.15}
         self.assertEqual(_route_regime(probabilities, thresholds), 3)
+
+    def test_risk_thresholds_learn_from_prior_oos_scores(self):
+        probabilities = [[0.7, 0.2, 0.08, 0.02] for _ in range(170)]
+        actual = [0] * 150 + [2] * 20
+        for i in range(150, 170):
+            probabilities[i] = [0.1, 0.1, 0.7, 0.1]
+        thresholds = _select_risk_thresholds(probabilities, actual)
+        self.assertEqual(thresholds["source"], "prior_calibrated_oos_f2")
+        self.assertLessEqual(thresholds["high_extreme"], 0.7)
+        self.assertEqual(thresholds["training_oos_samples"], 170)
 
     def test_extreme_expert_falls_back_to_high_when_sparse(self):
         class Dummy:
@@ -113,6 +124,8 @@ class RegimeRouterTests(unittest.TestCase):
             self.assertEqual(item["status"], "research")
             self.assertGreaterEqual(item["predicted_max_daily_move_pct"], 0.0)
             self.assertEqual(set(item["regime_probabilities"]), set(REGIME_NAMES))
+            self.assertIn("high_extreme", item["router_decision_thresholds"])
+            self.assertIn("extreme", item["router_decision_thresholds"])
             self.assertAlmostEqual(sum(item["regime_probabilities"].values()), 1.0, places=4)
             self.assertIn(item["expert_used"], (*REGIME_NAMES, "global_fallback"))
             self.assertIn("router_validation", item)
