@@ -7,6 +7,7 @@ pipeline's production persistence path.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -71,6 +72,8 @@ def main() -> int:
     cache_dir = Path("/tmp/taiex-regime-router-cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_status = _restore_supabase_research_cache(cache_dir)
+    if os.environ.get("REGIME_ROUTER_REQUIRE_SUPABASE_CACHE") == "1" and not cache_status["enabled"]:
+        raise RuntimeError("本次真實資料驗證要求 Supabase 唯讀歷史快取，但連線設定不可用")
     cache_path = str(cache_dir / "market_history.csv")
     market = pipeline.load_live(years=10, cache_path=cache_path)
     market = market.sort_index()
@@ -96,6 +99,18 @@ def main() -> int:
             market, chips=chips, margin=margin, futures=futures, h=horizon
         )
         features_by_horizon[horizon] = (X, forward_returns)
+
+    if cache_status["enabled"]:
+        prefixes = ("籌碼:", "信用:", "期貨:")
+        included = {
+            prefix: any(str(column).startswith(prefix) for column in features_by_horizon[1][0].columns)
+            for prefix in prefixes
+        }
+        if not all(included.values()):
+            raise RuntimeError(
+                "Supabase 歷史資料已取得，但 optional feature layers 未完整進入模型："
+                + json.dumps(included, ensure_ascii=False)
+            )
 
     result = build_regime_router_forecasts(
         features_by_horizon,
