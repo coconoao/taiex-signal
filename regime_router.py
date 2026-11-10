@@ -220,9 +220,9 @@ def _historical_magnitude_profile(returns, base_close):
         "samples": int(len(values)),
         **quantiles,
         "historical_abs_move_exceedance_pct": exceedance,
-        "scenario_p10_close": round(float(base_close * (1.0 + np.percentile(values, 10) / 100.0)), 2),
-        "scenario_p50_close": round(float(base_close * (1.0 + np.percentile(values, 50) / 100.0)), 2),
-        "scenario_p90_close": round(float(base_close * (1.0 + np.percentile(values, 90) / 100.0)), 2),
+        "scenario_p10_close": round(float(base_close * (1.0 + np.percentile(values, 10))), 2),
+        "scenario_p50_close": round(float(base_close * (1.0 + np.percentile(values, 50))), 2),
+        "scenario_p90_close": round(float(base_close * (1.0 + np.percentile(values, 90))), 2),
         "note": "僅為所選專家訓練樣本的歷史條件分布，不是未來機率或保證區間。",
     }
 
