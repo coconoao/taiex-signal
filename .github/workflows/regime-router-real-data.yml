@@ -29,6 +29,7 @@ jobs:
       TAIEX_STORAGE: supabase
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      REGIME_ROUTER_REQUIRE_SUPABASE_CACHE: "1"
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
