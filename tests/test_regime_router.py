@@ -44,8 +44,8 @@ class RegimeRouterTests(unittest.TestCase):
         }, index=dates)
         aligned = _lag_base_cross_market_features(features)
         self.assertTrue(pd.isna(aligned.loc[dates[0], "國際:NASDAQ"]))
-        self.assertEqual(aligned.loc[dates[3], "國際:NASDAQ"], 0.02)
-        self.assertEqual(aligned.loc[dates[3], "區域:N225"], 0.12)
+        self.assertEqual(aligned.loc[dates[3], "國際:NASDAQ"], -0.03)
+        self.assertEqual(aligned.loc[dates[3], "區域:N225"], -0.13)
         self.assertEqual(aligned.loc[dates[3], "本地:當日漲跌"], 0.004)
         self.assertEqual(aligned.loc[dates[3], "籌碼:外資買賣超"], 4)
 
