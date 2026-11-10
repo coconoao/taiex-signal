@@ -340,10 +340,17 @@ class RegimeRouterTests(unittest.TestCase):
         # the last three feature rows are unavailable, while their close labels
         # may already exist beyond the actual forecast origin.
         X.iloc[-3:, 0] = np.nan
-        features_by_horizon = {
-            horizon: (X, close.shift(-horizon) / close - 1.0)
-            for horizon in (1, 2, 3)
-        }
+        features_by_horizon = {}
+        for horizon in (1, 2, 3):
+            horizon_features = X.copy()
+            # Make the theoretical purge cutoff unavailable as a feature row.
+            # The cutoff date must remain distinct from the last row actually
+            # included in the final training set.
+            horizon_features.iloc[-4 - horizon, 0] = np.nan
+            features_by_horizon[horizon] = (
+                horizon_features,
+                close.shift(-horizon) / close - 1.0,
+            )
         result = build_regime_router_forecasts(
             features_by_horizon,
             close,
@@ -363,6 +370,10 @@ class RegimeRouterTests(unittest.TestCase):
             self.assertEqual(
                 item["latest_eligible_training_origin_date"],
                 str(dates[-4 - horizon].date()),
+            )
+            self.assertEqual(
+                item["latest_included_training_origin_date"],
+                str(dates[-5 - horizon].date()),
             )
             self.assertGreaterEqual(item["predicted_max_daily_move_pct"], 0.0)
             self.assertEqual(set(item["regime_probabilities"]), set(REGIME_NAMES))
