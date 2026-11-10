@@ -196,7 +196,7 @@ def _select_risk_thresholds(probability_history, actual_history):
     """Tune risk-first escalation using only earlier calibrated OOS probabilities."""
     if len(actual_history) < 100:
         return {
-            "high_extreme": 0.25, "extreme": 0.15,
+            "high_extreme": 0.40, "extreme": 0.20,
             "source": "default_insufficient_calibrated_oos",
             "training_oos_samples": int(len(actual_history)),
         }
@@ -204,11 +204,11 @@ def _select_risk_thresholds(probability_history, actual_history):
     actual = np.asarray(actual_history, dtype=int)
     high_extreme = _best_f2_threshold(
         probs[:, 2] + probs[:, 3], actual >= 2,
-        default=0.25, min_positives=20, precision_floor=0.15,
+        default=0.40, min_positives=20, precision_floor=0.30,
     )
     extreme = _best_f2_threshold(
         probs[:, 3], actual == 3,
-        default=0.15, min_positives=12, precision_floor=0.10,
+        default=0.20, min_positives=12, precision_floor=0.20,
     )
     return {
         "high_extreme": round(float(high_extreme), 4),
@@ -342,7 +342,10 @@ def _router_metrics(actual_classes, predicted_classes, probabilities):
             "support": support,
         }
     high_mask = actual >= 2
-    high_missed = high_mask & (predicted < 2)
+    high_predicted = predicted >= 2
+    high_missed = high_mask & ~high_predicted
+    high_true_positive = int(np.sum(high_mask & high_predicted))
+    high_precision = high_true_positive / int(high_predicted.sum()) if high_predicted.any() else None
     one_hot = np.eye(4, dtype=float)[actual]
     clipped = np.clip(probs, 1e-8, 1.0)
     return {
@@ -353,7 +356,10 @@ def _router_metrics(actual_classes, predicted_classes, probabilities):
         "macro_f1": round(float(f1_score(actual, predicted, labels=CLASS_IDS, average="macro", zero_division=0)), 4),
         "per_class": per_class,
         "confusion_matrix": matrix.tolist(),
-        "high_extreme_recall": round(float(np.mean(predicted[high_mask] >= 2)), 4) if high_mask.any() else None,
+        "high_extreme_recall": round(float(np.sum(high_mask & high_predicted) / high_mask.sum()), 4) if high_mask.any() else None,
+        "high_extreme_precision": round(float(high_precision), 4) if high_precision is not None else None,
+        "high_extreme_predicted_rate": round(float(high_predicted.mean()), 4),
+        "high_extreme_actual_rate": round(float(high_mask.mean()), 4),
         "high_extreme_missed": int(high_missed.sum()),
         "high_extreme_missed_rate": round(float(high_missed.sum() / high_mask.sum()), 4) if high_mask.any() else None,
         "multiclass_brier": round(float(np.mean(np.sum((probs - one_hot) ** 2, axis=1))), 5),
