@@ -127,9 +127,7 @@ def _expected_twse_trading_days(start, end):
             return pd.DatetimeIndex([]), "unavailable"
         closures.update(year_closures)
     weekdays = pd.bdate_range(start_day, end_day)
-    expected = weekdays[~weekdays.date.astype(object).__array__().astype(object).astype(str).isin(
-        {day.isoformat() for day in closures}
-    )]
+    expected = weekdays[~pd.Index(weekdays.date).isin(closures)]
     return pd.DatetimeIndex(expected), "twse_official_holiday_schedule"
 
 
@@ -1590,9 +1588,9 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
         recent_expected = expected[expected >= recent_start]
         empty = {
             "source": "無可用資料", "latest_date": None, "start_date": None,
-            "valid_rows": 0, "expected_rows": int(len(expected)),
-            "coverage_pct": 0.0 if len(expected) else None,
-            "full_history_coverage_pct": 0.0 if len(expected) else None,
+            "valid_rows": 0, "expected_rows": int(len(expected)) if calendar_source != "unavailable" else None,
+            "coverage_pct": 0.0 if len(expected) and calendar_source != "unavailable" else None,
+            "full_history_coverage_pct": 0.0 if len(expected) and calendar_source != "unavailable" else None,
             "recent_1y_expected_rows": int(len(recent_expected)),
             "recent_1y_valid_rows": 0,
             "recent_1y_coverage_pct": 0.0 if len(recent_expected) else None,
@@ -1603,7 +1601,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "source_window_expected_rows": None,
             "source_window_valid_rows": None,
             "source_window_coverage_pct": None,
-            "missing_rows": int(len(expected)), "missing_dates": [str(x.date()) for x in expected[:20]],
+            "missing_rows": int(len(expected)) if calendar_source != "unavailable" else None, "missing_dates": [str(x.date()) for x in expected[:20]],
             "required_columns": list(columns), "age_calendar_days": None
         }
         if frame is None or not isinstance(frame, pd.DataFrame) or not len(frame):
@@ -1634,9 +1632,9 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "latest_date": str(latest.date()) if latest is not None else None,
             "start_date": str(valid_index.min().date()) if len(valid_index) else None,
             "valid_rows": int(valid.sum()),
-            "expected_rows": int(len(expected)),
-            "coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) else None,
-            "full_history_coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) else None,
+            "expected_rows": int(len(expected)) if calendar_source != "unavailable" else None,
+            "coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) and calendar_source != "unavailable" else None,
+            "full_history_coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) and calendar_source != "unavailable" else None,
             "recent_1y_expected_rows": int(len(recent_expected)),
             "recent_1y_valid_rows": int(len(recent_valid)),
             "recent_1y_coverage_pct": round(len(recent_valid) / len(recent_expected) * 100, 1) if len(recent_expected) else None,
@@ -1647,7 +1645,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "source_window_expected_rows": source_expected,
             "source_window_valid_rows": source_valid,
             "source_window_coverage_pct": source_pct,
-            "missing_rows": int(len(missing)),
+            "missing_rows": int(len(missing)) if calendar_source != "unavailable" else None,
             "missing_dates": [str(x.date()) for x in missing[:20]],
             "required_columns": list(columns),
             "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
