@@ -21,7 +21,7 @@ class FakeWebSocket:
     def recv(self):
         if self.messages:
             return json.dumps(self.messages.pop(0))
-        raise TimeoutError("no more messages")
+        import websocket\n        raise websocket.WebSocketTimeoutException("no more messages")
 
     def close(self):
         self.closed = True
