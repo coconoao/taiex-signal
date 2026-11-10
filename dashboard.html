@@ -103,7 +103,7 @@ details[open]>summary{margin-bottom:12px}
 
   <div id="tab-daily">
   <div class="live" id="live" hidden></div>
-  <section id="taiexRealtime" aria-live="polite"><h2>加權指數即時行情</h2><div class="forecast-grid"><div class="mc"><b>發行量加權股價指數</b><div class="big" id="taiexRealtimeValue">載入中…</div><p class="note" id="taiexRealtimeMeta">正在向 Fugle 取得盤中指數快照</p></div></div><p class="note">資料來源 Fugle WebSocket｜僅在收到新鮮盤中資料時標示即時；休市、連線失敗或資料過期時會明確標示。</p></section>
+  <section id="taiexRealtime" aria-live="polite"><h2>台股／臺指期自動行情</h2><div class="forecast-grid"><div class="mc"><b id="taiexRealtimeLabel">正在判斷市場時段…</b><div class="big" id="taiexRealtimeValue">載入中…</div><p class="note" id="taiexRealtimeChange">漲跌資料載入中…</p><p class="note" id="taiexRealtimeMeta">依交易時段自動切換資料來源</p></div></div><p class="note">台股日盤顯示加權指數；休市後的期貨夜盤時段顯示臺指期近月；兩者皆無有效行情時，明確標示最近收盤或暫不可用。報價來源可能延遲，請以更新時間為準。</p></section>
   <p class="meta" id="meta">正在連線至資料伺服器…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
@@ -804,22 +804,45 @@ let dailyLoadFailed = false, retryTimer = null;
 let taiexRealtimeTimer = null;
 let taiexRealtimeLoading = false;
 async function loadTaiexRealtime() {
-  const value = $("taiexRealtimeValue"), meta = $("taiexRealtimeMeta");
-  if (!value || !meta || taiexRealtimeLoading) return;
+  const label = $("taiexRealtimeLabel"), value = $("taiexRealtimeValue");
+  const change = $("taiexRealtimeChange"), meta = $("taiexRealtimeMeta");
+  if (!label || !value || !change || !meta || taiexRealtimeLoading) return;
   taiexRealtimeLoading = true;
   try {
-    const r = await fetch("/api/taiex-realtime", {cache:"no-store", headers:{"Accept":"application/json"}});
-    const d = await r.json();
-    if (!r.ok || !d.available || typeof d.index !== "number") {
-      value.textContent = "暫不可用";
-      meta.textContent = d.status === "NO_API_KEY" ? "Fugle API Key 尚未設定" : "目前沒有可驗證的即時指數快照（" + (d.status || "資料來源異常") + "）";
+    // Reuse the server's session-aware quote router:
+    // spot session -> TAIEX; futures night session -> front-month TAIEX futures;
+    // otherwise -> explicitly labelled latest completed TAIEX close.
+    const r = await fetch("/api/quote", {cache:"no-store", headers:{"Accept":"application/json"}});
+    const q = await r.json();
+    if (!r.ok || !q || !Number.isFinite(Number(q.last))) {
+      label.textContent = "行情暫不可用";
+      value.textContent = "—";
+      change.textContent = "目前沒有可驗證的市場報價";
+      meta.textContent = (q && q.error) || "行情服務暫時無法取得資料，請稍後重試。";
       return;
     }
-    value.textContent = d.index.toLocaleString("zh-TW", {minimumFractionDigits:2, maximumFractionDigits:2});
-    meta.textContent = (d.realtime ? "即時資料" : "資料已過期，非即時") + "｜更新 " + (d.timestamp || "時間未知") + "｜來源 " + (d.source || "Fugle");
+    label.textContent = q.market === "futures" ? "臺指期近月（夜盤）"
+      : q.market === "spot" ? "發行量加權股價指數（日盤）"
+      : "加權指數最近收盤（非即時）";
+    value.textContent = Number(q.last).toLocaleString("zh-TW", {minimumFractionDigits:2, maximumFractionDigits:2});
+    if (Number.isFinite(Number(q.change)) && Number.isFinite(Number(q.pct))) {
+      const changeNum = Number(q.change), pctNum = Number(q.pct);
+      const arrow = changeNum > 0 ? "▲ " : changeNum < 0 ? "▼ " : "";
+      change.textContent = arrow + Math.abs(changeNum).toFixed(2) +
+        " 點（" + Math.abs(pctNum).toFixed(2) + "%）";
+    } else {
+      change.textContent = "漲跌資料不足";
+    }
+    const mode = q.market === "futures" ? "期貨夜盤報價"
+      : q.market === "spot" ? "加權指數日盤報價"
+      : "休市／無盤中報價；以下為最近一次加權指數收盤";
+    meta.textContent = mode + "｜" + (q.time || "時間未知") + " 更新｜" +
+      (q.source || "來源未提供") + (q.delay_note ? "｜" + q.delay_note : "");
   } catch (_) {
-    value.textContent = "暫不可用";
-    meta.textContent = "目前無法連接即時指數服務；請稍後重試。";
+    label.textContent = "行情連線暫時失敗";
+    value.textContent = "—";
+    change.textContent = "目前沒有可驗證的即時數據";
+    meta.textContent = "無法連接行情服務；請稍後重試。";
   } finally {
     taiexRealtimeLoading = false;
   }
