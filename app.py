@@ -273,6 +273,29 @@ def request_stock_worker(code):
     return result
 
 
+def request_taiex_worker():
+    if not STOCK_WORKER_URL or not STOCK_WORKER_TOKEN:
+        raise StockServiceUnavailable("即時加權指數服務尚未設定")
+    warm_stock_worker()
+    req = urllib.request.Request(
+        STOCK_WORKER_URL + "/api/taiex",
+        headers={"Authorization": "Bearer " + STOCK_WORKER_TOKEN},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        print("[stock-worker] taiex endpoint returned HTTP %s" % exc.code, flush=True)
+        raise StockWorkerGatewayError("即時加權指數來源暫時無法取得")
+    except Exception as exc:
+        print("[stock-worker] taiex transport failed: %s" % type(exc).__name__, flush=True)
+        raise StockWorkerGatewayError("無法連接即時加權指數服務")
+    if not isinstance(result, dict):
+        raise StockWorkerGatewayError("即時加權指數回傳格式錯誤")
+    return result
+
+
 def analyze_stock(code):
     # Public/read-only deployments must use the isolated official-data Worker.
     # Never silently fall back to the legacy local/Yahoo implementation in production.
@@ -1102,6 +1125,13 @@ class H(SimpleHTTPRequestHandler):
                 except Exception:
                     pass
             return self.send_json(state)
+        if u.path == "/api/taiex-realtime":
+            try:
+                return self.send_json(request_taiex_worker())
+            except StockServiceUnavailable as e:
+                return self.send_json({"available": False, "realtime": False, "status": "NOT_CONFIGURED", "error": str(e)}, 503)
+            except StockWorkerGatewayError as e:
+                return self.send_json({"available": False, "realtime": False, "status": "UPSTREAM_ERROR", "error": str(e)}, 502)
         if u.path == "/api/us-market":
             try:
                 return self.send_json(us_market_quote())
