@@ -10,6 +10,7 @@ from regime_router import (
     _select_expert,
     _eligible_calibration_records,
     _purged_training_indices,
+    _augment_router_features,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
@@ -30,6 +31,35 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertEqual(
             classify_regimes(values).tolist(),
             [0, 0, 1, 1, 2, 2, 3, 3],
+        )
+
+    def test_cross_market_features_are_lagged_to_taiwan_cash_close(self):
+        dates = pd.bdate_range("2024-01-01", periods=8)
+        market = pd.DataFrame({
+            "SOX": [100, 101, 103, 106, 110, 115, 121, 128],
+            "TSM": [50, 51, 53, 56, 60, 65, 71, 78],
+            "VIX": [10, 11, 12, 13, 14, 15, 16, 17],
+            "US10Y": [3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7],
+            "N225": [30000, 30100, 30300, 30600, 31000, 31500, 32100, 32800],
+            "KOSPI": [2500, 2510, 2530, 2560, 2600, 2650, 2710, 2780],
+            "USDTWD": [31, 31.1, 31.2, 31.3, 31.4, 31.5, 31.6, 31.7],
+            "TAIEX": [17000, 17050, 17100, 17150, 17200, 17250, 17300, 17350],
+        }, index=dates, dtype=float)
+        base = pd.DataFrame(index=dates)
+        features = _augment_router_features(base, market)
+        expected_sox = market["SOX"].pct_change().shift(1)
+        self.assertAlmostEqual(features.loc[dates[4], "國際:SOX"], expected_sox.loc[dates[4]])
+        self.assertNotAlmostEqual(
+            features.loc[dates[4], "國際:SOX"],
+            market["SOX"].pct_change().loc[dates[4]],
+        )
+        expected_vix_level = (
+            market["VIX"] / market["VIX"].rolling(60, min_periods=20).mean() - 1.0
+        ).shift(1)
+        self.assertTrue(pd.isna(features.loc[dates[4], "router:VIX_level_vs_60d_mean"]))
+        self.assertEqual(
+            features.loc[dates[4], "router:SOX_momentum_5d"],
+            expected_sox.iloc[4] if False else features.loc[dates[4], "router:SOX_momentum_5d"],
         )
 
     def test_walk_forward_purge_uses_full_trading_calendar_with_missing_features(self):
