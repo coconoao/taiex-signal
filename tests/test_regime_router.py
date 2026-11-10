@@ -9,6 +9,7 @@ from regime_router import (
     classify_regimes,
     _select_expert,
     _eligible_calibration_records,
+    _historical_magnitude_profile,
 )
 
 
@@ -30,6 +31,15 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertEqual([record[0] for record in eligible], [4, 6, 7])
         eligible = _eligible_calibration_records(records, current_position=9, horizon=3)
         self.assertEqual([record[0] for record in eligible], [4, 6])
+
+    def test_historical_scenario_profile_uses_return_fractions_for_points(self):
+        returns = np.resize(np.array([-0.05, -0.02, 0.01, 0.03, 0.08]), 40)
+        profile = _historical_magnitude_profile(returns, 10000.0)
+        self.assertEqual(profile["status"], "available")
+        self.assertEqual(profile["samples"], 40)
+        self.assertLess(profile["scenario_p10_close"], 10000.0)
+        self.assertGreater(profile["scenario_p90_close"], 10000.0)
+        self.assertEqual(set(profile["historical_abs_move_exceedance_pct"]), {"1.0", "2.0", "3.0", "5.0", "7.5"})
 
     def test_extreme_expert_falls_back_to_high_when_sparse(self):
         class Dummy:
