@@ -11,6 +11,7 @@ from regime_router import (
     _eligible_calibration_records,
     _purged_training_indices,
     _augment_router_features,
+    _lag_base_cross_market_features,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
@@ -32,6 +33,21 @@ class RegimeRouterTests(unittest.TestCase):
             classify_regimes(values).tolist(),
             [0, 0, 1, 1, 2, 2, 3, 3],
         )
+
+    def test_existing_pipeline_cross_market_features_are_lagged(self):
+        dates = pd.bdate_range("2024-01-01", periods=6)
+        features = pd.DataFrame({
+            "國際:NASDAQ": [0.01, 0.02, -0.03, 0.04, 0.05, 0.06],
+            "區域:N225": [0.11, 0.12, -0.13, 0.14, 0.15, 0.16],
+            "本地:當日漲跌": [0.001, 0.002, 0.003, 0.004, 0.005, 0.006],
+            "籌碼:外資買賣超": [1, 2, 3, 4, 5, 6],
+        }, index=dates)
+        aligned = _lag_base_cross_market_features(features)
+        self.assertTrue(pd.isna(aligned.loc[dates[0], "國際:NASDAQ"]))
+        self.assertEqual(aligned.loc[dates[3], "國際:NASDAQ"], 0.02)
+        self.assertEqual(aligned.loc[dates[3], "區域:N225"], 0.12)
+        self.assertEqual(aligned.loc[dates[3], "本地:當日漲跌"], 0.004)
+        self.assertEqual(aligned.loc[dates[3], "籌碼:外資買賣超"], 4)
 
     def test_cross_market_features_are_lagged_to_taiwan_cash_close(self):
         dates = pd.bdate_range("2024-01-01", periods=70)
