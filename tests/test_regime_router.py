@@ -47,22 +47,36 @@ class RegimeRouterTests(unittest.TestCase):
             index=dates,
             columns=["global", "local", "vol", "momentum", "flow"],
         )
+        features_by_horizon = {}
+        for horizon in (1, 2, 3):
+            features_by_horizon[horizon] = (X, close.shift(-horizon) / close - 1.0)
+        market_data = pd.DataFrame({
+            "TAIEX": close,
+            "VIX": np.linspace(12.0, 28.0, n),
+            "SOX": 100.0 * np.cumprod(1.0 + rng.normal(0.0005, 0.012, n)),
+            "TSM": 100.0 * np.cumprod(1.0 + rng.normal(0.0006, 0.01, n)),
+            "N225": 20000.0 * np.cumprod(1.0 + rng.normal(0.0002, 0.008, n)),
+            "KOSPI": 2500.0 * np.cumprod(1.0 + rng.normal(0.0002, 0.009, n)),
+            "USDTWD": 30.0 * np.cumprod(1.0 + rng.normal(0.0, 0.002, n)),
+            "US10Y": np.linspace(1.5, 4.5, n),
+        }, index=dates)
         result = build_regime_router_forecasts(
-            {1: (X, returns)},
+            features_by_horizon,
             close,
-            target_meta={1: {"target_date": "2021-01-01", "trading_calendar_source": "test"}},
+            target_meta={h: {"target_date": "2021-01-01", "trading_calendar_source": "test"} for h in (1, 2, 3)},
+            market_data=market_data,
         )
         self.assertEqual(result["routing_priority"], "router_first")
         self.assertEqual(len(result["sessions"]), 3)
-        d1 = result["sessions"][0]
-        self.assertEqual(d1["horizon_sessions"], 1)
-        self.assertIn(d1["status"], ("research", "insufficient"))
-        if d1["status"] == "research":
-            self.assertEqual(set(d1["regime_probabilities"]), set(REGIME_NAMES))
-            self.assertIn(d1["expert_used"], (*REGIME_NAMES, "global_fallback"))
-            self.assertIn("router_validation", d1)
-            self.assertIn("routed_forecast_validation", d1)
-            self.assertFalse(d1["probabilities_calibrated"])
+        for horizon, item in enumerate(result["sessions"], start=1):
+            self.assertEqual(item["horizon_sessions"], horizon)
+            self.assertEqual(item["status"], "research")
+            self.assertEqual(set(item["regime_probabilities"]), set(REGIME_NAMES))
+            self.assertAlmostEqual(sum(item["regime_probabilities"].values()), 1.0, places=4)
+            self.assertIn(item["expert_used"], (*REGIME_NAMES, "global_fallback"))
+            self.assertIn("router_validation", item)
+            self.assertIn("routed_forecast_validation", item)
+            self.assertFalse(item["probabilities_calibrated"])
 
 
 if __name__ == "__main__":
