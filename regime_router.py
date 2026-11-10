@@ -100,7 +100,7 @@ def _fit_router(X, y):
     sample_weights = np.asarray([class_weights[int(label)] for label in labels], dtype=float)
     boosted = HistGradientBoostingClassifier(
         learning_rate=0.06,
-        max_iter=35,
+        max_iter=20,
         max_leaf_nodes=7,
         min_samples_leaf=30,
         l2_regularization=8.0,
