@@ -117,6 +117,7 @@ def main() -> int:
         close,
         target_meta={},
         market_data=market,
+        post_close_features_lagged=True,
     )
     result["real_data_audit"] = {
         "source": "Yahoo Finance daily close with TWSE recent official TAIEX refresh",
