@@ -580,7 +580,7 @@ function newsCard(n, key, el) {
   if (!n) { el.innerHTML = '<p class="note">尚無新聞分析（news.json）。</p>'; return; }
   const cards = Object.entries(n.models || {}).map(([name, r]) => r.error
     ? `<div class="mc"><b>${esc(name)}</b><p class="note">暫無資料</p></div>`
-    : `<div class="mc"><b>${esc(name)}</b><div class="big" style="color:${tone(r[key])}">${sc(r[key])}</div><div class="note">信心 ${Math.round(r.confidence * 100)}%</div><p>${esc(r.summary)}</p></div>`).join("");
+    : `<div class="mc"><b>${esc(name)}</b><div class="big" style="color:${tone(r[key])}">${sc(r[key])}</div><div class="note">${name === "標題規則整理" ? "規則式整理，非 AI 語意分析" : "信心 " + Math.round(r.confidence * 100) + "%"}</div><p>${esc(r.summary)}</p></div>`).join("");
   const modelStatus = Object.entries(n.model_status || {}).map(([name, status]) => {
     const state = status.status === "ok" ? "分析成功"
       : status.status === "not_configured" ? "尚未設定伺服器 API 金鑰"
@@ -594,6 +594,7 @@ function newsCard(n, key, el) {
   const policy = (n.headlines || []).filter(h => h.kind === "policy").slice(0,12);
   const list = rows => rows.length ? '<ul>' + rows.map(h => { const href = safeNewsHref(h.link); return '<li>' + (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(h.title) + '</a>' : esc(h.title)) + '<small> · ' + esc(h.source || h.tag || "") + ' · ' + esc(h.published || "") + (h.description ? ' · ' + esc(h.description) : '') + '</small></li>'; }).join("") + '</ul>' : '<p class="note">目前沒有取得這個分類的新聞。</p>';
   el.innerHTML = (n.demo ? '<div class="banner">以下為示範新聞資料，不是真實新聞。</div>' : "") +
+    (n.analysis_mode === "rules_only" ? '<p class="note">新聞方向僅依標題關鍵字規則整理，不使用 Gemini 等 AI API；不代表語意判讀或投資建議。</p>' : "") +
     `<div class="mcs">${cards}</div>${statusNote}<h3>國際市場新聞與機構觀點</h3>` + list(headlines) +
     '<h3>台灣本地新聞（中央社 RSS）</h3>' + list(taiwan) +
     '<h3>政府政策與國際局勢（官方網站檢索）</h3>' + list(policy);
