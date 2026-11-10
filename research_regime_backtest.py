@@ -18,7 +18,7 @@ if "--skip-backfill" not in sys.argv:
     sys.argv.append("--skip-backfill")
 
 import pipeline  # noqa: E402
-from regime_router import build_regime_router_forecasts  # noqa: E402
+from regime_router import build_regime_router_forecasts, _lag_post_close_source_frame  # noqa: E402
 
 
 def _restore_supabase_research_cache(cache_dir: Path) -> dict:
@@ -88,39 +88,159 @@ def main() -> int:
     chips_raw = _read_optional_frame(cache_dir, "chips.csv")
     margin_raw = _read_optional_frame(cache_dir, "margin.csv")
     futures_raw = _read_optional_frame(cache_dir, "futures.csv")
-    # Shift raw source frames before pipeline feature engineering. This is
-    # essential for margin: pipeline.build() forward-fills delayed publications,
-    # so shifting the finished features would accidentally add a second lag.
-    chips = __import__("regime_router")._lag_post_close_source_frame(chips_raw, market.index)
-    margin = __import__("regime_router")._lag_post_close_source_frame(margin_raw, market.index)
-    futures = __import__("regime_router")._lag_post_close_source_frame(futures_raw, market.index)
+    # Shift raw source frames before feature engineering. The full Taiwan
+    # trading calendar is used so missing source dates cannot compress the lag.
+    chips = _lag_post_close_source_frame(chips_raw, market.index)
+    margin = _lag_post_close_source_frame(margin_raw, market.index)
+    futures = _lag_post_close_source_frame(futures_raw, market.index)
 
-    features_by_horizon = {}
-    for horizon in (1, 2, 3):
-        X, _, forward_returns = pipeline.build(
-            market, chips=chips, margin=margin, futures=futures, h=horizon
+    def build_features(chips_frame, margin_frame, futures_frame):
+        frames = {}
+        for horizon in (1, 2, 3):
+            X, _, forward_returns = pipeline.build(
+                market,
+                chips=chips_frame,
+                margin=margin_frame,
+                futures=futures_frame,
+                h=horizon,
+            )
+            frames[horizon] = (X, forward_returns)
+        return frames
+
+    # Determine the earliest date at which the complete feature set is valid,
+    # then use that same calendar and expanding training history for every
+    # ablation group. This prevents the futures layer's shorter history from
+    # being mistaken for a model improvement or deterioration.
+    full_features_raw = build_features(chips, margin, futures)
+    full_d1 = full_features_raw[1][0].apply(pd.to_numeric, errors="coerce")
+    full_valid_dates = full_d1.index[full_d1.notna().all(axis=1)]
+    if not len(full_valid_dates):
+        raise RuntimeError("完整特徵組沒有可用的共同起始交易日")
+    common_start = full_valid_dates[0]
+
+    def trim_features(frames, group_name):
+        trimmed = {}
+        for horizon, (X, forward_returns) in frames.items():
+            X = X.loc[X.index >= common_start].copy()
+            missing_rows = int(X.isna().any(axis=1).sum())
+            if missing_rows:
+                raise RuntimeError(
+                    f"{group_name} D+{horizon} 在共同起始日 {common_start.date()} 後仍有 "
+                    f"{missing_rows} 個特徵缺值交易日；不能做不公平的消融比較"
+                )
+            trimmed[horizon] = (X, forward_returns.reindex(X.index))
+        return trimmed
+
+    feature_groups = {
+        "price_only": trim_features(
+            build_features(None, None, None), "price_only"
+        ),
+        "chips_margin": trim_features(
+            build_features(chips, margin, None), "chips_margin"
+        ),
+        "chips_margin_futures": trim_features(
+            full_features_raw, "chips_margin_futures"
+        ),
+    }
+
+    group_results = {}
+    for group_name, group_features in feature_groups.items():
+        group_results[group_name] = build_regime_router_forecasts(
+            group_features,
+            close,
+            target_meta={},
+            market_data=market,
+            post_close_features_lagged=True,
         )
-        features_by_horizon[horizon] = (X, forward_returns)
 
-    if cache_status["enabled"]:
-        prefixes = ("籌碼:", "信用:", "期貨:")
-        included = {
-            prefix: any(str(column).startswith(prefix) for column in features_by_horizon[1][0].columns)
-            for prefix in prefixes
+    # Assert identical OOS windows for every feature group and horizon before
+    # calculating incremental feature value.
+    alignment = {}
+    for horizon in (1, 2, 3):
+        signatures = {}
+        for group_name, group_result in group_results.items():
+            item = next(
+                (session for session in group_result.get("sessions", [])
+                 if session.get("horizon_sessions") == horizon),
+                {},
+            )
+            metrics = item.get("routed_forecast_validation", {})
+            signatures[group_name] = {
+                "oos_samples": metrics.get("oos_samples", 0),
+                "start_date": metrics.get("oos_start_date"),
+                "end_date": metrics.get("oos_end_date"),
+            }
+        unique = {
+            (value["oos_samples"], value["start_date"], value["end_date"])
+            for value in signatures.values()
         }
-        if not all(included.values()):
+        if len(unique) != 1:
             raise RuntimeError(
-                "Supabase 歷史資料已取得，但 optional feature layers 未完整進入模型："
-                + json.dumps(included, ensure_ascii=False)
+                f"D+{horizon} feature ablation 的 OOS 日期未對齊："
+                + json.dumps(signatures, ensure_ascii=False)
+            )
+        alignment[f"D+{horizon}"] = next(iter(signatures.values()))
+
+    result = group_results["chips_margin_futures"]
+
+    def summarize_group(group_result):
+        summary = {}
+        for session in group_result.get("sessions", []):
+            validation = session.get("router_validation", {})
+            forecast = session.get("routed_forecast_validation", {})
+            label = session.get("label", f"D+{session.get('horizon_sessions')}")
+            summary[label] = {
+                "oos_samples": forecast.get("oos_samples"),
+                "oos_start_date": forecast.get("oos_start_date"),
+                "oos_end_date": forecast.get("oos_end_date"),
+                "macro_f1": validation.get("macro_f1"),
+                "high_extreme_recall": validation.get("high_extreme_recall"),
+                "high_extreme_precision": validation.get("high_extreme_precision"),
+                "routed_mae_points": forecast.get("routed_mae_points"),
+                "global_ridge_mae_points": forecast.get("global_ridge_mae_points"),
+                "routed_minus_global_mae_points": (
+                    round(forecast["routed_mae_points"] - forecast["global_ridge_mae_points"], 2)
+                    if forecast.get("routed_mae_points") is not None
+                    and forecast.get("global_ridge_mae_points") is not None else None
+                ),
+                "max_daily_move_mae_pct": forecast.get("max_daily_move_mae_pct"),
+                "global_max_daily_move_mae_pct": forecast.get("global_max_daily_move_mae_pct"),
+            }
+        return summary
+
+    ablation_groups = {
+        name: summarize_group(group_result)
+        for name, group_result in group_results.items()
+    }
+    price_reference = ablation_groups["price_only"]
+    for group_name in ("chips_margin", "chips_margin_futures"):
+        for label, metrics in ablation_groups[group_name].items():
+            base = price_reference.get(label, {})
+            metrics["global_mae_delta_vs_price_only"] = (
+                round(metrics["global_ridge_mae_points"] - base["global_ridge_mae_points"], 2)
+                if metrics.get("global_ridge_mae_points") is not None
+                and base.get("global_ridge_mae_points") is not None else None
+            )
+            metrics["macro_f1_delta_vs_price_only"] = (
+                round(metrics["macro_f1"] - base["macro_f1"], 4)
+                if metrics.get("macro_f1") is not None and base.get("macro_f1") is not None else None
+            )
+            metrics["high_extreme_recall_delta_vs_price_only"] = (
+                round(metrics["high_extreme_recall"] - base["high_extreme_recall"], 4)
+                if metrics.get("high_extreme_recall") is not None
+                and base.get("high_extreme_recall") is not None else None
             )
 
-    result = build_regime_router_forecasts(
-        features_by_horizon,
-        close,
-        target_meta={},
-        market_data=market,
-        post_close_features_lagged=True,
-    )
+    result["feature_ablation"] = {
+        "common_feature_start_date": str(common_start.date()),
+        "oos_window_alignment": alignment,
+        "groups": ablation_groups,
+        "note": (
+            "價格層、法人＋融資融券、法人＋融資融券＋期貨三組使用相同起始特徵日期、"
+            "相同台灣交易日曆與完全相同的 OOS 日期；增量差異才可歸因於特徵組合。"
+        ),
+    }
+
     result["real_data_audit"] = {
         "source": "Yahoo Finance daily close with TWSE recent official TAIEX refresh",
         "start_date": str(close.index.min().date()),
