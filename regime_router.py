@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import (
     accuracy_score,
@@ -33,7 +34,7 @@ NORMAL_MAX_RETURN = 0.01
 EXTREME_MIN_RETURN = 0.075
 MIN_TRAIN_SAMPLES = 180
 MIN_EXPERT_SAMPLES = {0: 60, 1: 60, 2: 45, 3: 40}
-EXPERT_ALPHA = {0: 25.0, 1: 15.0, 2: 5.0, 3: 1.0}
+EXPERT_ALPHA = {0: 25.0, 1: 15.0, 2: 1.0, 3: 0.1}
 CLASS_IDS = (0, 1, 2, 3)
 
 
@@ -79,15 +80,35 @@ def _augment_router_features(X, market_data):
 
 
 def _fit_router(X, y):
-    classes = np.sort(pd.Series(y).dropna().astype(int).unique())
+    labels = np.asarray(y, dtype=int)
+    classes = np.sort(np.unique(labels))
     if len(classes) < 2:
         return None
-    estimator = make_pipeline(
+    # Blend a balanced linear classifier with a regularized nonlinear tree
+    # booster. The latter captures volatility interactions; the former keeps
+    # a stable baseline. Both remain subject to OOS calibration and evaluation.
+    logistic = make_pipeline(
         StandardScaler(),
-        LogisticRegression(C=0.35, max_iter=800, random_state=17),
+        LogisticRegression(C=0.25, max_iter=900, class_weight="balanced", random_state=17),
     )
-    estimator.fit(X, np.asarray(y, dtype=int))
-    return estimator
+    logistic.fit(X, labels)
+    counts = np.bincount(labels, minlength=4)
+    class_weights = {
+        class_id: min(4.0, len(labels) / (max(1, len(classes)) * max(1, counts[class_id])))
+        for class_id in classes
+    }
+    sample_weights = np.asarray([class_weights[int(label)] for label in labels], dtype=float)
+    boosted = HistGradientBoostingClassifier(
+        learning_rate=0.06,
+        max_iter=70,
+        max_leaf_nodes=9,
+        min_samples_leaf=25,
+        l2_regularization=8.0,
+        early_stopping=False,
+        random_state=23,
+    )
+    boosted.fit(X, labels, sample_weight=sample_weights)
+    return {"logistic": logistic, "boosted": boosted}
 
 
 def _router_probabilities(estimator, X, fallback_class=None):
@@ -98,9 +119,13 @@ def _router_probabilities(estimator, X, fallback_class=None):
         else:
             probabilities[:, 1] = 1.0
         return probabilities
-    raw = estimator.predict_proba(X)
-    for column, class_id in enumerate(estimator[-1].classes_):
-        probabilities[:, int(class_id)] = raw[:, column]
+    for model in (estimator["logistic"], estimator["boosted"]):
+        raw = model.predict_proba(X)
+        classes = model[-1].classes_ if hasattr(model, "steps") else model.classes_
+        aligned = np.zeros((len(X), 4), dtype=float)
+        for column, class_id in enumerate(classes):
+            aligned[:, int(class_id)] = raw[:, column]
+        probabilities += aligned / 2.0
     row_sums = probabilities.sum(axis=1, keepdims=True)
     return np.divide(probabilities, row_sums, out=np.zeros_like(probabilities), where=row_sums > 0)
 
