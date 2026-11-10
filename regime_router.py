@@ -169,6 +169,64 @@ def _eligible_calibration_records(records, current_position, horizon):
     return [record for record in records if record[0] + int(horizon) <= int(current_position)]
 
 
+def _best_f2_threshold(scores, actual_positive, default, min_positives, precision_floor):
+    scores = np.asarray(scores, dtype=float)
+    actual_positive = np.asarray(actual_positive, dtype=bool)
+    positives = int(actual_positive.sum())
+    if positives < min_positives:
+        return float(default)
+    best_threshold, best_score = float(default), -1.0
+    for threshold in np.arange(0.05, 0.951, 0.025):
+        predicted = scores >= threshold
+        true_positive = int(np.sum(predicted & actual_positive))
+        predicted_count = int(predicted.sum())
+        if predicted_count == 0:
+            continue
+        precision = true_positive / predicted_count
+        recall = true_positive / positives
+        if precision < precision_floor:
+            continue
+        f2 = 5.0 * precision * recall / max(1e-12, 4.0 * precision + recall)
+        if f2 > best_score or (np.isclose(f2, best_score) and threshold > best_threshold):
+            best_threshold, best_score = float(threshold), float(f2)
+    return best_threshold if best_score >= 0 else float(default)
+
+
+def _select_risk_thresholds(probability_history, actual_history):
+    """Tune risk-first escalation using only earlier calibrated OOS probabilities."""
+    if len(actual_history) < 100:
+        return {
+            "high_extreme": 0.25, "extreme": 0.15,
+            "source": "default_insufficient_calibrated_oos",
+            "training_oos_samples": int(len(actual_history)),
+        }
+    probs = np.asarray(probability_history, dtype=float)
+    actual = np.asarray(actual_history, dtype=int)
+    high_extreme = _best_f2_threshold(
+        probs[:, 2] + probs[:, 3], actual >= 2,
+        default=0.25, min_positives=20, precision_floor=0.15,
+    )
+    extreme = _best_f2_threshold(
+        probs[:, 3], actual == 3,
+        default=0.15, min_positives=12, precision_floor=0.10,
+    )
+    return {
+        "high_extreme": round(float(high_extreme), 4),
+        "extreme": round(float(extreme), 4),
+        "source": "prior_calibrated_oos_f2",
+        "training_oos_samples": int(len(actual)),
+    }
+
+
+def _route_regime(probabilities, thresholds):
+    probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities[3] >= float(thresholds["extreme"]):
+        return 3
+    if probabilities[2] + probabilities[3] >= float(thresholds["high_extreme"]):
+        return 2
+    return 0 if probabilities[0] >= probabilities[1] else 1
+
+
 def _fit_experts(X, cumulative_returns, max_daily_moves, regimes):
     global_model = make_pipeline(StandardScaler(), Ridge(alpha=25.0))
     global_model.fit(X, np.asarray(cumulative_returns, dtype=float))
@@ -398,12 +456,19 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             )
             calibrator = _fit_probability_calibrator(
                 [record[1] for record in eligible_records],
-                [record[2] for record in eligible_records],
+                [record[3] for record in eligible_records],
             )
             probs = _apply_probability_calibrator(calibrator, raw_probs)
             if calibrator is not None:
                 calibrated_oos_samples += len(test_idx)
-            predicted_classes = probs.argmax(axis=1)
+            calibrated_records = [record for record in eligible_records if record[4]]
+            decision_thresholds = _select_risk_thresholds(
+                [record[2] for record in calibrated_records],
+                [record[3] for record in calibrated_records],
+            )
+            predicted_classes = np.asarray(
+                [_route_regime(row, decision_thresholds) for row in probs], dtype=int
+            )
             batch_calibration_records = []
             global_model, experts, global_magnitude_model, magnitude_experts, expert_counts = _fit_experts(
                 X.loc[fit_idx],
@@ -437,7 +502,10 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 oos_actual.append(actual_class)
                 oos_predicted.append(requested)
                 oos_probabilities.append(probs[offset].tolist())
-                batch_calibration_records.append((X.index.get_loc(asof_date), raw_probs[offset].tolist(), actual_class))
+                batch_calibration_records.append((
+                    X.index.get_loc(asof_date), raw_probs[offset].tolist(),
+                    probs[offset].tolist(), actual_class, calibrator is not None,
+                ))
                 oos_forecasts.append({
                     "predicted_close": base_point * (1.0 + predicted_return),
                     "actual_close": actual_point,
@@ -465,10 +533,15 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         )
         final_calibrator = _fit_probability_calibrator(
             [record[1] for record in eligible_records],
-            [record[2] for record in eligible_records],
+            [record[3] for record in eligible_records],
         )
         latest_probs = _apply_probability_calibrator(final_calibrator, latest_raw_probs)[0]
-        requested = int(np.argmax(latest_probs))
+        calibrated_records = [record for record in eligible_records if record[4]]
+        final_decision_thresholds = _select_risk_thresholds(
+            [record[2] for record in calibrated_records],
+            [record[3] for record in calibrated_records],
+        )
+        requested = _route_regime(latest_probs, final_decision_thresholds)
         global_model, experts, global_magnitude_model, magnitude_experts, expert_counts = _fit_experts(
             X.loc[train_idx],
             forward_returns.loc[train_idx].to_numpy(dtype=float),
@@ -513,6 +586,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 name: round(float(latest_probs[class_id]), 5)
                 for class_id, name in enumerate(REGIME_NAMES)
             },
+            "router_decision_thresholds": final_decision_thresholds,
             "probabilities_calibrated": final_calibrator is not None,
             "probability_calibration": {
                 "method": "prequential_multinomial_logistic" if final_calibrator is not None else "not_available",
