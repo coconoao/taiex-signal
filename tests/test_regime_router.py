@@ -9,6 +9,7 @@ from regime_router import (
     classify_regimes,
     _select_expert,
     _eligible_calibration_records,
+    _purged_training_indices,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
@@ -30,6 +31,16 @@ class RegimeRouterTests(unittest.TestCase):
             classify_regimes(values).tolist(),
             [0, 0, 1, 1, 2, 2, 3, 3],
         )
+
+    def test_walk_forward_purge_uses_full_trading_calendar_with_missing_features(self):
+        dates = pd.bdate_range("2024-01-01", periods=12)
+        # Valid feature rows omit two sessions before the first test origin.
+        candidates = dates[[0, 1, 3, 5, 6, 8]]
+        first_test = dates[9]
+        fit = _purged_training_indices(dates, candidates, first_test, horizon=3)
+        self.assertEqual(list(fit), list(dates[[0, 1, 3, 5, 6]]))
+        # The row at position 8 is only one session before the test origin
+        # and must not leak its still-open three-session target into training.
 
     def test_calibration_only_uses_outcomes_known_at_forecast_origin(self):
         records = [
