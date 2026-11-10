@@ -1113,14 +1113,14 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             continue
         latest = latest_candidates[-1]
         target_dates, calendar_source = _future_taiwan_trading_dates(latest, 3)
-        target_date = target_dates[h - 1] if len(target_dates) >= h else None
+        forecast_target_date = target_dates[h - 1] if len(target_dates) >= h else None
         if forecast_asof is None:
             forecast_asof = latest
         train_idx = Xh.index[valid_features & fwd.notna() & (Xh.index < latest)]
         if len(train_idx) < 120:
             horizons[str(h)] = {
                 "status": "insufficient", "asof": str(latest.date()),
-                "target_date": target_date, "trading_calendar_source": calendar_source,
+                "target_date": forecast_target_date, "trading_calendar_source": calendar_source,
                 "training_samples": int(len(train_idx)),
                 "minimum_samples": 120,
                 "reason": "有效訓練樣本不足"
@@ -1197,7 +1197,7 @@ def three_day_point_forecast(df, chips, margin, futures=None):
         horizons[str(h)] = {
             "status": "research",
             "asof": str(latest.date()),
-            "target_date": target_date,
+            "target_date": forecast_target_date,
             "trading_calendar_source": calendar_source,
             "base_close": round(base_close, 2),
             "forecast_close": round(float(forecast_close), 2),
