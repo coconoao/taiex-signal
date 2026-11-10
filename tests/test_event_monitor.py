@@ -69,6 +69,24 @@ class EventMonitorTests(unittest.TestCase):
         self.assertEqual(event["evidence"]["status"], "official_confirmed")
         self.assertEqual(event["timestamps"]["forecast_eligible_at_utc"], "2026-11-10T00:30:00Z")
 
+    def test_taiwan_substring_does_not_create_false_ai_topic(self):
+        event = event_monitor.build_event(
+            self.item(title="Taiwan stocks rise after policy update", description=""),
+            self.watchlist, self.now
+        )
+        self.assertEqual(event["event_type"], "other")
+        self.assertNotIn("semiconductor_ai", event["classification"]["topics"])
+
+    def test_future_publication_time_delays_forecast_eligibility(self):
+        event = event_monitor.build_event(
+            self.item(published="Tue, 10 Nov 2026 01:00:00 GMT"),
+            self.watchlist, self.now
+        )
+        self.assertEqual(
+            event["timestamps"]["forecast_eligible_at_utc"],
+            "2026-11-10T01:00:00Z"
+        )
+
     def test_allegation_is_flagged_for_review_not_confirmed(self):
         event = event_monitor.build_event(
             self.item(title="Report says alleged intelligence operation targeted Jensen Huang"),
