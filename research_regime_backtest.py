@@ -104,44 +104,34 @@ def main() -> int:
                 futures=futures_frame,
                 h=horizon,
             )
+            # Restore the complete Taiwan cash-session calendar for every
+            # feature group. Missing feature rows remain NaN, not dropped.
+            X = X.reindex(market.index)
+            forward_returns = forward_returns.reindex(market.index)
             frames[horizon] = (X, forward_returns)
         return frames
 
-    # Determine the earliest date at which the complete feature set is valid,
-    # then use that same calendar and expanding training history for every
-    # ablation group. This prevents the futures layer's shorter history from
-    # being mistaken for a model improvement or deterioration.
-    full_features_raw = build_features(chips, margin, futures)
-    full_d1 = full_features_raw[1][0].apply(pd.to_numeric, errors="coerce")
-    full_valid_dates = full_d1.index[full_d1.notna().all(axis=1)]
-    if not len(full_valid_dates):
-        raise RuntimeError("完整特徵組沒有可用的共同起始交易日")
-    common_start = full_valid_dates[0]
-
-    def trim_features(frames, group_name):
-        trimmed = {}
-        for horizon, (X, forward_returns) in frames.items():
-            X = X.loc[X.index >= common_start].copy()
-            missing_rows = int(X.isna().any(axis=1).sum())
-            if missing_rows:
-                raise RuntimeError(
-                    f"{group_name} D+{horizon} 在共同起始日 {common_start.date()} 後仍有 "
-                    f"{missing_rows} 個特徵缺值交易日；不能做不公平的消融比較"
-                )
-            trimmed[horizon] = (X, forward_returns.reindex(X.index))
-        return trimmed
-
     feature_groups = {
-        "price_only": trim_features(
-            build_features(None, None, None), "price_only"
-        ),
-        "chips_margin": trim_features(
-            build_features(chips, margin, None), "chips_margin"
-        ),
-        "chips_margin_futures": trim_features(
-            full_features_raw, "chips_margin_futures"
-        ),
+        "price_only": build_features(None, None, None),
+        "chips_margin": build_features(chips, margin, None),
+        "chips_margin_futures": build_features(chips, margin, futures),
     }
+
+    # Intersect valid dates across groups but keep each X indexed on the full
+    # Taiwan session calendar. The router's purge therefore still uses real
+    # session positions even when a feature source has occasional missing rows.
+    allowed_sample_index_by_horizon = {}
+    for horizon in (1, 2, 3):
+        common_dates = pd.DatetimeIndex(market.index)
+        for group_name, group_frames in feature_groups.items():
+            X = group_frames[horizon][0].apply(pd.to_numeric, errors="coerce")
+            valid_dates = X.index[X.notna().all(axis=1)]
+            common_dates = common_dates.intersection(valid_dates)
+        if len(common_dates) < 800:
+            raise RuntimeError(
+                f"D+{horizon} 三組特徵共同有效日期不足：{len(common_dates)}"
+            )
+        allowed_sample_index_by_horizon[horizon] = common_dates
 
     group_results = {}
     for group_name, group_features in feature_groups.items():
@@ -151,6 +141,7 @@ def main() -> int:
             target_meta={},
             market_data=market,
             post_close_features_lagged=True,
+            allowed_sample_index_by_horizon=allowed_sample_index_by_horizon,
         )
 
     # Assert identical OOS windows for every feature group and horizon before
@@ -233,12 +224,18 @@ def main() -> int:
             )
 
     result["feature_ablation"] = {
-        "common_feature_start_date": str(common_start.date()),
+        "common_feature_start_date": str(min(
+            dates[0] for dates in allowed_sample_index_by_horizon.values()
+        ).date()),
+        "common_valid_samples_by_horizon": {
+            f"D+{horizon}": int(len(dates))
+            for horizon, dates in allowed_sample_index_by_horizon.items()
+        },
         "oos_window_alignment": alignment,
         "groups": ablation_groups,
         "note": (
             "價格層、法人＋融資融券、法人＋融資融券＋期貨三組使用相同起始特徵日期、"
-            "相同台灣交易日曆與完全相同的 OOS 日期；增量差異才可歸因於特徵組合。"
+            "完整台灣交易日曆保留供 purge 使用，並以三組共同有效日期作為相同訓練／OOS 樣本；增量差異才可歸因於特徵組合。"
         ),
     }
 
