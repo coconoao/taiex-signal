@@ -15,6 +15,7 @@ from regime_router import (
     _lag_post_close_source_frame,
     _lag_post_close_features,
     _forecast_metrics,
+    _expert_performance_blend_weight,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
@@ -24,6 +25,33 @@ from regime_router import (
 
 
 class RegimeRouterTests(unittest.TestCase):
+    def test_expert_performance_gate_uses_only_matured_prior_oos_records(self):
+        records = []
+        for position in range(100):
+            records.append({
+                "forecast_position": position,
+                "requested_expert": "high",
+                "raw_expert_predicted_close": 101.0 if position < 78 else 110.0,
+                "global_predicted_close": 102.0,
+                "actual_close": 100.0,
+            })
+        # At position 80 with a 3-session horizon, only origins 0..77
+        # have matured. Their expert MAE is half the global Ridge MAE.
+        gate = _expert_performance_blend_weight(
+            records, "high", 80, 3,
+            "raw_expert_predicted_close", "global_predicted_close", "actual_close",
+        )
+        self.assertEqual(gate["samples"], 78)
+        self.assertEqual(gate["weight"], 1.0)
+        # At position 110, all 100 outcomes are mature; the later expert
+        # errors make it worse than Ridge, so its contribution must be zero.
+        later = _expert_performance_blend_weight(
+            records, "high", 110, 3,
+            "raw_expert_predicted_close", "global_predicted_close", "actual_close",
+        )
+        self.assertEqual(later["samples"], 100)
+        self.assertEqual(later["weight"], 0.0)
+
     def test_forecast_metrics_reports_exact_oos_date_window(self):
         rows = [
             {
