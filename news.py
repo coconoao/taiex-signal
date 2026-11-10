@@ -1,10 +1,8 @@
-"""新聞與機構觀點分析 → news.json（僅供參考，未納入回測模型）。
-僅使用 Gemini 進行新聞語意分析；GitHub Actions 透過 GEMINI_API_KEY 注入金鑰。
+"""新聞 RSS 收集與規則式整理；不呼叫任何生成式 AI API。
 資料來源：國際市場新聞、中央社台灣新聞 RSS，以及台灣／美國政府政策與國際局勢的近 7 日公開資訊。
-機構觀點只計入「標題明確寫出該機構對台股方向」者；每日結果累積到 news_history.jsonl，日後可算各機構命中率。
-用法：python news.py   （時間同 pipeline.py：台股交易日 8:30 前後）
+用法：python news.py
 """
-import os, json, re, html, hashlib, csv, datetime as dt, time, socket, urllib.error, urllib.request, urllib.parse
+import os, json, re, html, hashlib, csv, datetime as dt, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
@@ -31,25 +29,11 @@ POLICY = [
 # 機構清單可自行增刪；也可加入你信任的個人，例如 ("姓名", "姓名 台股 when:7d")
 ANALYSTS = [(n, f"{q} Taiwan stocks when:7d") for n, q in [("高盛", "Goldman Sachs"), ("摩根士丹利", "Morgan Stanley"),
             ("摩根大通", "JPMorgan"), ("花旗", "Citi"), ("瑞銀", "UBS"), ("野村", "Nomura"), ("麥格理", "Macquarie")]]
-STANCE = {"看多": 1, "看空": -1, "中性": 0}
-
 POS = {"surge", "surges", "rally", "rallies", "gain", "gains", "rise", "rises", "rose", "beat", "beats", "record", "boost", "soar",
        "jump", "recover", "ceasefire", "easing", "bullish", "overweight", "upgrad", "raises", "optimis"}
 NEG = {"fall", "falls", "fell", "drop", "drops", "slump", "plunge", "loss", "losses", "miss", "downgrad", "weak", "fear", "fears",
        "tension", "war", "wars", "tariff", "sanction", "curb", "ban", "bans", "recession", "sell-off", "selloff", "slide", "crash",
        "probe", "bearish", "underweight", "cuts"}
-
-PROMPT = """你是台灣加權指數的新聞研究助理。只根據提供的標題與 RSS 摘要判斷，不得補入未提供的事實；資訊不足、方向混合或傳導不清楚時，分數應接近 0 並降低信心。
-先判斷新聞是否與台灣加權指數有合理關聯。排除與台股無關的一般政治、地方活動、其他國家股市及單一公司新聞；若單一公司新聞涉及台灣大型權值股、半導體供應鏈或明確的台灣產業傳導，才納入並說明原因。不要把「提到台灣企業」直接等同「台股方向」。
-政策新聞須區分已公告／已生效、提案／研議及媒體推測，並說明關稅、出口、半導體供應鏈、能源、匯率、利率或財政支出的具體傳導管道。關稅、制裁、戰爭、升降息等詞本身不自動代表利空或利多，須判斷實際影響與雙向風險。
-機構觀點必須同時符合：標題直接點名該機構、明確提到台股／台灣股市／TAIEX，且明確表達該機構對台股方向的看法。泛指美股、中國股市、全球科技股或台灣企業投資的文章不得列為台股機構觀點。
-只輸出 JSON：{"next_day": 數字, "next_week": 數字, "confidence": 0到1, "drivers": [{"id": 標題id, "impact": "正面"或"負面", "why": "20字內理由"}], "summary": "繁體中文，80字內", "analysts": [{"name": 機構名稱, "id": 標題id, "stance": "看多"或"看空"或"中性"或"無明確看法"}]}
-分數代表對台灣加權指數的研究方向：-1 極偏負向、0 中性、1 極偏正向；不是未來上漲機率。next_day 指下一個交易日，next_week 指未來 5 個交易日。drivers 最多 4 則，須引用實際標題 id 並簡述傳導原因。
-analysts 不得依機構搜尋分類或單純情緒字詞推測；只有標題明確表達該機構對台股大盤方向的看法才列出，否則回傳空陣列。"""
-
-def load_settings():  # 儀表板「設定」頁存下的金鑰
-    try: os.environ.update({k: v for k, v in json.load(open("settings.json", encoding="utf-8")).items() if v})
-    except Exception: pass
 
 def _fetch_feed(url, provider):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; TAIEXSignal/1.0)"})
@@ -354,88 +338,6 @@ def lexicon(hl):
     return {"next_day": score, "next_week": score, "confidence": 0.3,
             "drivers": drivers, "summary": summary, "analysts": calls}
 
-def post(url, headers, body):
-    req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json", **headers})
-    # Gemini can be temporarily overloaded. Use low thinking for this bounded
-    # classification task and retry only transient timeouts / HTTP overloads.
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(req, timeout=120) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as exc:
-            if exc.code not in {408, 429, 500, 502, 503, 504} or attempt == 2:
-                raise
-            retry_after = exc.headers.get("Retry-After") if exc.headers else None
-            try:
-                delay = min(30, max(1, int(retry_after))) if retry_after else 2 ** (attempt + 1)
-            except (TypeError, ValueError):
-                delay = 2 ** (attempt + 1)
-            exc.close()
-            time.sleep(delay)
-        except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
-            reason = getattr(exc, "reason", exc)
-            if not isinstance(reason, (TimeoutError, socket.timeout)) or attempt == 2:
-                raise
-            time.sleep(2 ** (attempt + 1))
-
-def ask_claude(p):
-    r = post("https://api.anthropic.com/v1/messages", {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01"},
-             {"model": os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5"), "max_tokens": 2000, "messages": [{"role": "user", "content": p}]})
-    return r["content"][0]["text"]
-
-def ask_openai(p):
-    r = post("https://api.openai.com/v1/chat/completions", {"Authorization": "Bearer " + os.environ["OPENAI_API_KEY"]},
-             {"model": os.environ.get("OPENAI_MODEL", "gpt-6-luna"), "messages": [{"role": "user", "content": p}], "response_format": {"type": "json_object"}})
-    return r["choices"][0]["message"]["content"]
-
-def ask_gemini(p):
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-    url = "https://generativelanguage.googleapis.com/v1beta/models/" + urllib.parse.quote(model, safe="") + ":generateContent"
-    r = post(url, {"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
-             {"contents": [{"parts": [{"text": p}]}],
-              "generationConfig": {
-                  "responseMimeType": "application/json",
-                  "thinkingConfig": {"thinkingLevel": "low"},
-              }})
-    return "".join(x.get("text", "") for x in r["candidates"][0]["content"]["parts"])
-
-MODELS = {"Gemini": (ask_gemini, ["GEMINI_API_KEY"])}
-clip = lambda x: round(max(-1.0, min(1.0, float(x))), 2)
-
-def run(name, fn, p, analyst_headlines=None):
-    try:
-        d = json.loads(re.search(r"\{.*\}", fn(p), re.S).group(0))
-        return name, {"next_day": clip(d["next_day"]), "next_week": clip(d["next_week"]), "confidence": clip(abs(float(d.get("confidence", 0)))),
-                      "drivers": d.get("drivers", [])[:4], "summary": str(d.get("summary", "")),
-                      "analysts": validate_analyst_calls(d.get("analysts", []), analyst_headlines or [])}
-    except Exception as e:
-        return name, {"error": f"{type(e).__name__}: {e}"}
-
-def model_statuses(todo, results):
-    """Expose provider readiness without ever exposing API credentials."""
-    status = {}
-    for name in MODELS:
-        if name not in todo:
-            status[name] = {"status": "not_configured", "message": "未設定伺服器 API 金鑰"}
-        elif results.get(name, {}).get("error"):
-            status[name] = {"status": "error", "message": str(results[name]["error"])}
-        else:
-            status[name] = {"status": "ok"}
-    return status
-
-def aggregate_model_results(results):
-    """Aggregate successful Gemini output; return neutral empty metadata when unavailable."""
-    aggregate = {}
-    for key in ("next_day", "next_week"):
-        values = [result[key] for result in results.values()
-                  if "error" not in result and key in result]
-        aggregate[key] = (
-            {"mean": round(sum(values) / len(values), 2),
-             "spread": round(max(values) - min(values), 2), "n": len(values)}
-            if values else {"mean": 0, "spread": 0, "n": 0}
-        )
-    return aggregate
-
 def research_features(hl):
     """Versioned, Taiwan-market-relevant news features; not a trading signal."""
     kinds = ("market", "taiwan", "policy", "analyst")
@@ -622,47 +524,77 @@ def save_research_snapshot(hl):
     os.replace("news_research.json.tmp", "news_research.json")
 
 def main():
-    load_settings()
     hl = headlines()
-    if len(hl) < 3: raise SystemExit(f"抓到的新聞標題只有 {len(hl)} 則；Google News 與 Bing News RSS 均不足，保留上一版資料。")
-    sec = lambda k: "\\n".join(
-        f'{h["id"]}|{h["tag"]}|來源：{h.get("source", "")}|發布：{h.get("published", "")}|'
-        f'{h["title"]}|摘要：{h.get("description", "")}'
-        for h in hl if h["kind"] == k
-    )
-    p = (PROMPT + "【國際市場新聞】\\n" + sec("market") +
-         "\\n【台灣新聞】\\n" + sec("taiwan") +
-         "\\n【台灣／美國政府政策與國際局勢】\\n" + sec("policy") +
-         "\\n【機構觀點】\\n" + sec("analyst"))
-    todo = {n: f for n, (f, keys) in MODELS.items() if all(os.environ.get(k) for k in keys)}
-    analyst_headlines = [h for h in hl if h.get("kind") == "analyst"]
-    with ThreadPoolExecutor(max_workers=1) as ex:
-        res = dict(ex.map(lambda kv: run(kv[0], kv[1], p, analyst_headlines), todo.items()))
-    model_status = model_statuses(todo, res)
-    ok = {n: r for n, r in res.items() if "error" not in r}
-    agg = aggregate_model_results(ok)
-    rows = {}
-    for n, r in ok.items():
-        for a in r["analysts"]:
-            if a.get("stance") in STANCE:
-                row = rows.setdefault(str(a.get("name", "?")), {"name": str(a.get("name", "?")), "id": a.get("id"), "stances": {}})
-                row["stances"][n] = a["stance"]
-    vals = [sum(STANCE[s] for s in r["stances"].values()) / len(r["stances"]) for r in rows.values()]
+    if len(hl) < 3:
+        raise SystemExit(
+            f"抓到的新聞標題只有 {len(hl)} 則；Google News 與 Bing News RSS 均不足，保留上一版資料。"
+        )
+
+    # 純規則式標題整理，不呼叫 Gemini、OpenAI 或其他生成式 AI API。
+    result = lexicon(hl)
     events = policy_events(hl)
     save_research_snapshot(hl)
     event_history = save_policy_event_history(events)
-    out = {"asof": dt.date.today().isoformat(), "demo": False, "headlines": hl, "policy_events": events,
-           "policy_event_history_count": len(event_history), "prompt": p, "models": res, "agg": agg,
-           "model_status": model_status, "missing": [n for n in MODELS if n not in todo],
-           "analyst": {"rows": list(rows.values()), "score": round(sum(vals) / len(vals), 2) if vals else None}}
-    json.dump(out, open("news.json", "w", encoding="utf-8"), ensure_ascii=False)
-    with open("news_history.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps({"asof": out["asof"], "agg": agg, "analyst": [{"name": r["name"], "stances": r["stances"]} for r in rows.values()],
-                            "models": {n: {k: r[k] for k in ("next_day", "next_week")} for n, r in ok.items()}}, ensure_ascii=False) + "\n")
-    for n, r in res.items(): print(n, r.get("error") or f"隔日 {r['next_day']:+.2f}  一週 {r['next_week']:+.2f}")
-    for n, status in model_status.items():
-        if status["status"] == "not_configured":
-            print(f"{n}: 未啟用（伺服器尚未設定 API 金鑰）")
+
+    relevant_count = sum(1 for item in hl if market_relevant_headline(item))
+    rule_result = {
+        "next_day": result["next_day"],
+        "next_week": result["next_week"],
+        "confidence": result["confidence"],
+        "drivers": result["drivers"],
+        "summary": result["summary"],
+        "analysts": result["analysts"],
+    }
+    agg = {
+        "next_day": {"mean": result["next_day"], "spread": 0,
+                     "n": 1 if relevant_count else 0},
+        "next_week": {"mean": result["next_week"], "spread": 0,
+                      "n": 1 if relevant_count else 0},
+    }
+    analyst_rows = [
+        {"name": item["name"], "id": item["id"],
+         "stances": {"標題規則": item["stance"]}}
+        for item in result["analysts"]
+    ]
+    taipei_today = dt.datetime.now(
+        dt.timezone(dt.timedelta(hours=8))
+    ).date().isoformat()
+    out = {
+        "asof": taipei_today,
+        "demo": False,
+        "headlines": hl,
+        "policy_events": events,
+        "policy_event_history_count": len(event_history),
+        "models": {"標題規則整理": rule_result},
+        "agg": agg,
+        "model_status": {},
+        "missing": [],
+        "analyst": {"rows": analyst_rows, "score": None},
+        "analysis_mode": "rules_only",
+        "analysis_note": "僅依新聞標題關鍵字整理方向；不是 AI 語意分析，也不是投資訊號。",
+    }
+    with open("news.json", "w", encoding="utf-8") as stream:
+        json.dump(out, stream, ensure_ascii=False)
+    with open("news_history.jsonl", "a", encoding="utf-8") as stream:
+        stream.write(json.dumps({
+            "asof": out["asof"],
+            "agg": agg,
+            "analyst": [{"name": row["name"], "stances": row["stances"]}
+                        for row in analyst_rows],
+            "models": {"標題規則整理": {
+                "next_day": result["next_day"],
+                "next_week": result["next_week"],
+            }},
+            "analysis_mode": "rules_only",
+        }, ensure_ascii=False) + "\n")
+
+    print(
+        f"新聞更新成功：{len(hl)} 則標題，"
+        f"{len({str(x.get('source') or x.get('tag') or '').strip() for x in hl if str(x.get('source') or x.get('tag') or '').strip()})} 個來源；"
+        f"規則式方向分數 {result['next_day']:+.2f}（非 AI 分析）。",
+        flush=True,
+    )
+
 
 if __name__ == "__main__":
     main()
