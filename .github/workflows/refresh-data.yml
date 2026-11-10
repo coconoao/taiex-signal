@@ -1,6 +1,9 @@
 name: Refresh market data
 
 on:
+  schedule:
+    # Full official-data refresh after Taiwan cash-market close (16:15 Taipei).
+    - cron: "15 8 * * 1-5"
   push:
     branches:
       - main
