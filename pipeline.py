@@ -12,6 +12,7 @@ FAST_STARTUP = "--skip-backfill" in sys.argv
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
+from regime_router import build_regime_router_forecasts
 
 TICKERS = {"TAIEX": "^TWII", "SOX": "^SOX", "TSM": "TSM", "VIX": "^VIX", "US10Y": "^TNX",
            "N225": "^N225", "KOSPI": "^KS11", "USDTWD": "TWD=X"}
@@ -107,6 +108,27 @@ def _fetch_twse_closed_dates(year):
             flush=True,
         )
         return None
+
+
+def _expected_twse_trading_days(start, end):
+    """Build an independent Taiwan-session index from TWSE annual closure calendars.
+
+    Return an empty index when any requested year cannot be verified; never
+    silently substitute observed TAIEX dates as the expected-session denominator.
+    """
+    start_day = pd.Timestamp(start).tz_localize(None).normalize()
+    end_day = pd.Timestamp(end).tz_localize(None).normalize()
+    if end_day < start_day:
+        return pd.DatetimeIndex([]), "twse_official_holiday_schedule"
+    closures = set()
+    for year in range(start_day.year, end_day.year + 1):
+        year_closures = _fetch_twse_closed_dates(year)
+        if year_closures is None:
+            return pd.DatetimeIndex([]), "unavailable"
+        closures.update(year_closures)
+    weekdays = pd.bdate_range(start_day, end_day)
+    expected = weekdays[~pd.Index(weekdays.date).isin(closures)]
+    return pd.DatetimeIndex(expected), "twse_official_holiday_schedule"
 
 
 def _future_taiwan_trading_dates(asof, count=3):
@@ -1554,17 +1576,21 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     """Persist Taiwan-only source coverage before any international/model validation."""
     now = pd.Timestamp.now(tz="Asia/Taipei")
     taiex = df["TAIEX"].dropna() if isinstance(df, pd.DataFrame) and "TAIEX" in df else pd.Series(dtype=float)
-    expected = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
-    expected = expected.tz_localize(None).normalize().unique().sort_values() if len(expected) else pd.DatetimeIndex([])
+    observed_taiex = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
+    observed_taiex = observed_taiex.tz_localize(None).normalize().unique().sort_values() if len(observed_taiex) else pd.DatetimeIndex([])
+    expected, calendar_source = (
+        _expected_twse_trading_days(observed_taiex.min(), observed_taiex.max())
+        if len(observed_taiex) else (pd.DatetimeIndex([]), "unavailable")
+    )
 
     def coverage(frame, columns, source, source_window_years=None, source_window_start=None):
         recent_start = now.normalize().tz_localize(None) - pd.Timedelta(days=365)
         recent_expected = expected[expected >= recent_start]
         empty = {
             "source": "無可用資料", "latest_date": None, "start_date": None,
-            "valid_rows": 0, "expected_rows": int(len(expected)),
-            "coverage_pct": 0.0 if len(expected) else None,
-            "full_history_coverage_pct": 0.0 if len(expected) else None,
+            "valid_rows": 0, "expected_rows": int(len(expected)) if calendar_source != "unavailable" else None,
+            "coverage_pct": 0.0 if len(expected) and calendar_source != "unavailable" else None,
+            "full_history_coverage_pct": 0.0 if len(expected) and calendar_source != "unavailable" else None,
             "recent_1y_expected_rows": int(len(recent_expected)),
             "recent_1y_valid_rows": 0,
             "recent_1y_coverage_pct": 0.0 if len(recent_expected) else None,
@@ -1575,7 +1601,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "source_window_expected_rows": None,
             "source_window_valid_rows": None,
             "source_window_coverage_pct": None,
-            "missing_rows": int(len(expected)), "missing_dates": [str(x.date()) for x in expected[:20]],
+            "missing_rows": int(len(expected)) if calendar_source != "unavailable" else None, "missing_dates": [str(x.date()) for x in expected[:20]],
             "required_columns": list(columns), "age_calendar_days": None
         }
         if frame is None or not isinstance(frame, pd.DataFrame) or not len(frame):
@@ -1606,9 +1632,9 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "latest_date": str(latest.date()) if latest is not None else None,
             "start_date": str(valid_index.min().date()) if len(valid_index) else None,
             "valid_rows": int(valid.sum()),
-            "expected_rows": int(len(expected)),
-            "coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) else None,
-            "full_history_coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) else None,
+            "expected_rows": int(len(expected)) if calendar_source != "unavailable" else None,
+            "coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) and calendar_source != "unavailable" else None,
+            "full_history_coverage_pct": round(len(expected.intersection(valid_index)) / len(expected) * 100, 1) if len(expected) and calendar_source != "unavailable" else None,
             "recent_1y_expected_rows": int(len(recent_expected)),
             "recent_1y_valid_rows": int(len(recent_valid)),
             "recent_1y_coverage_pct": round(len(recent_valid) / len(recent_expected) * 100, 1) if len(recent_expected) else None,
@@ -1619,7 +1645,7 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
             "source_window_expected_rows": source_expected,
             "source_window_valid_rows": source_valid,
             "source_window_coverage_pct": source_pct,
-            "missing_rows": int(len(missing)),
+            "missing_rows": int(len(missing)) if calendar_source != "unavailable" else None,
             "missing_dates": [str(x.date()) for x in missing[:20]],
             "required_columns": list(columns),
             "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
@@ -1629,26 +1655,30 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
 
     market_status = df.attrs.get("data_status", {}) if isinstance(df, pd.DataFrame) else {}
     latest_taiex = pd.Timestamp(taiex.index[-1]) if len(taiex) else None
-    taiex_index = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
-    taiex_index = taiex_index.tz_localize(None).normalize().unique().sort_values()
-    taiex_missing = expected.difference(taiex_index)
+    taiex_index = observed_taiex
+    taiex_missing = expected.difference(taiex_index) if len(expected) else pd.DatetimeIndex([])
+    taiex_unexpected = taiex_index.difference(expected) if len(expected) else pd.DatetimeIndex([])
     layers = {
         "TAIEX": {
             "source": market_status.get("taiwan_index_source", "來源未確認"),
             "latest_date": str(latest_taiex.date()) if latest_taiex is not None else None,
             "valid_rows": int(len(taiex)),
             "start_date": str(taiex_index.min().date()) if len(taiex_index) else None,
-            "expected_rows": int(len(expected)),
-            "coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) else None,
-            "full_history_coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) else None,
+            "expected_rows": int(len(expected)) if calendar_source != "unavailable" else None,
+            "coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) and calendar_source != "unavailable" else None,
+            "full_history_coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) and calendar_source != "unavailable" else None,
+            "calendar_source": calendar_source,
             "recent_1y_expected_rows": int(len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)])),
             "recent_1y_valid_rows": int(len(taiex_index.intersection(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]))),
             "recent_1y_coverage_pct": round(
                 len(taiex_index.intersection(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)])) /
                 len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]) * 100, 1
             ) if len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]) else None,
-            "missing_rows": int(len(taiex_missing)),
+            "missing_rows": int(len(taiex_missing)) if calendar_source != "unavailable" else None,
             "missing_dates": [str(x.date()) for x in taiex_missing[:20]],
+            "unexpected_rows": int(len(taiex_unexpected)) if calendar_source != "unavailable" else None,
+            "unexpected_dates": [str(x.date()) for x in taiex_unexpected[:20]],
+            "calendar_verified": calendar_source != "unavailable",
             "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
                                              latest_taiex.normalize()).days))
                                   if latest_taiex is not None else None
@@ -1663,7 +1693,18 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     payload = {
         "updated_at": now.isoformat(),
         "demo": False,
-        "note": "籌碼／信用／期貨覆蓋率以加權指數實際有收盤資料的台股交易日為分母；期貨另列自來源可用起始日 2018-06-05 起的覆蓋率。此報表不代表即時報價。",
+        "calendar_validation": {
+            "source": calendar_source,
+            "status": "verified" if calendar_source != "unavailable" else "unavailable",
+            "scope_start": str(observed_taiex.min().date()) if len(observed_taiex) else None,
+            "scope_end": str(observed_taiex.max().date()) if len(observed_taiex) else None,
+            "expected_trading_sessions": int(len(expected)) if calendar_source != "unavailable" else None,
+            "observed_taiex_sessions": int(len(observed_taiex)),
+            "missing_expected_sessions": int(len(taiex_missing)) if calendar_source != "unavailable" else None,
+            "unexpected_observed_sessions": int(len(taiex_unexpected)) if calendar_source != "unavailable" else None,
+            "note": "範圍以實際觀測到的首末 TAIEX 日期為界；不代表首末日期以外的歷史完整性。"
+        },
+        "note": "籌碼／信用／期貨覆蓋率以 TWSE 年度官方休市日曆推導的預期交易日為分母；若日曆無法取得，覆蓋率標示未知，不以實際 TAIEX 日期冒充獨立分母。期貨另列來源可用起始日 2018-06-05 起的覆蓋率。此報表不代表即時報價。",
         "layers": layers
     }
     tmp = "taiwan_data_status.json.tmp"
@@ -1811,6 +1852,30 @@ if __name__ == "__main__":
         write_taiwan_data_status(df, chips, margin, futures)
     X, y, fwd = build(df, chips, margin, futures=futures)
     three_day_forecast, forecast_history = three_day_point_forecast(df, chips, margin, futures=futures)
+    try:
+        router_inputs = {}
+        target_meta = {}
+        for horizon in (1, 2, 3):
+            X_router, _, fwd_router = build(df, chips, margin, h=horizon, futures=futures)
+            router_inputs[horizon] = (X_router, fwd_router)
+        for session in three_day_forecast.get("sessions", []):
+            horizon = int(session.get("horizon_sessions", 0))
+            if horizon in (1, 2, 3):
+                target_meta[horizon] = {
+                    "target_date": session.get("target_date"),
+                    "trading_calendar_source": session.get("trading_calendar_source"),
+                }
+        three_day_forecast["regime_router"] = build_regime_router_forecasts(
+            router_inputs, df["TAIEX"], target_meta=target_meta, market_data=df
+        )
+    except Exception as exc:
+        # Router research must never block the production forecast refresh.
+        print(f"四級波動分流器研究暫不可用：{type(exc).__name__}: {exc}", flush=True)
+        three_day_forecast["regime_router"] = {
+            "status": "unavailable", "model_version": "four-regime-router-moE-research-v1",
+            "routing_priority": "router_first", "sessions": [],
+            "reason": f"{type(exc).__name__}: {exc}", "production_replacement": False,
+        }
     try:
         three_day_forecast["research_candidates"] = build_ridge_trial_forecasts(
             df, chips, margin, futures=futures

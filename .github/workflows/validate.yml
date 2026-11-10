@@ -50,6 +50,34 @@ jobs:
           forecast = signals.get("forecast", {})
           if forecast.get("schema_version") != 2 or len(forecast.get("sessions", [])) != 3:
               raise SystemExit("Expected three schema-v2 forecast sessions")
+          router = forecast.get("regime_router", {})
+          routed_sessions = router.get("sessions", [])
+          if router.get("routing_priority") != "router_first" or len(routed_sessions) != 3:
+              raise SystemExit("Expected three independent router-first horizon outputs")
+          for session in routed_sessions:
+              if session.get("status") != "research":
+                  raise SystemExit(f"Demo router horizon is not research-ready: {session}")
+              probabilities = session.get("regime_probabilities", {})
+              if set(probabilities) != {"low", "normal", "high", "extreme"}:
+                  raise SystemExit("Router probability output is missing a regime")
+              if abs(sum(probabilities.values()) - 1.0) > 0.001:
+                  raise SystemExit("Router regime scores do not sum to one")
+              if not session.get("expert_used"):
+                  raise SystemExit("Router did not identify the selected expert")
+              router_validation = session.get("router_validation", {})
+              forecast_validation = session.get("routed_forecast_validation", {})
+              if router_validation.get("status") != "available" or forecast_validation.get("status") != "available":
+                  raise SystemExit("Demo router must include out-of-sample classification and forecast metrics")
+              print(
+                  "Router D+{}: regime={} expert={} OOS={} macro-F1={} high/extreme-recall={} precision={} predicted-rate={} actual-rate={} routed-MAE={} global-MAE={} max-daily-move-MAE={} max-daily-baseline-MAE={}".format(
+                      session["horizon_sessions"], session["regime"], session["expert_used"],
+                      router_validation["oos_samples"], router_validation["macro_f1"],
+                      router_validation["high_extreme_recall"], router_validation["high_extreme_precision"],
+                      router_validation["high_extreme_predicted_rate"], router_validation["high_extreme_actual_rate"],
+                      forecast_validation["routed_mae_points"], forecast_validation["global_ridge_mae_points"],
+                      forecast_validation["max_daily_move_mae_pct"], forecast_validation["global_max_daily_move_mae_pct"],
+                  )
+              )
           if not signals.get("legacy_direction_model", {}).get("backtest", {}).get("curve", {}).get("dates"):
               raise SystemExit("Legacy research backtest curve is empty")
           if not weekly.get("asof") or "prob_up" not in weekly:

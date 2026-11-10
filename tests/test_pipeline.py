@@ -146,8 +146,9 @@ class TaiwanDataStatusTests(unittest.TestCase):
             previous = os.getcwd()
             try:
                 os.chdir(directory)
-                with patch.dict(sys.modules, {"storage": fake_storage}):
-                    write_taiwan_data_status(market, chips, margin, futures)
+                with patch("pipeline._fetch_twse_closed_dates", return_value=frozenset()):
+                    with patch.dict(sys.modules, {"storage": fake_storage}):
+                        write_taiwan_data_status(market, chips, margin, futures)
                 with open("taiwan_data_status.json", encoding="utf-8") as stream:
                     status = json.load(stream)
             finally:
@@ -159,6 +160,61 @@ class TaiwanDataStatusTests(unittest.TestCase):
             self.assertEqual(status["layers"][layer]["missing_rows"], 0)
         self.assertEqual(status["layers"]["futures"]["source_window_start"], "2018-06-05")
         self.assertEqual(status["layers"]["futures"]["source_window_expected_rows"], 2)
+        self.assertEqual(status["calendar_validation"]["status"], "verified")
+        self.assertEqual(status["calendar_validation"]["expected_trading_sessions"], 2)
+
+    def test_missing_taiex_weekday_is_detected_against_official_calendar(self):
+        import json
+        import os
+        import numpy as np
+
+        dates = pd.to_datetime(["2026-11-09", "2026-11-11"])
+        market = pd.DataFrame({"TAIEX": [100.0, 102.0]}, index=dates)
+        empty_layer = pd.DataFrame(index=dates)
+        fake_storage = types.SimpleNamespace(enabled=lambda: False)
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.getcwd()
+            try:
+                os.chdir(directory)
+                with patch("pipeline._fetch_twse_closed_dates", return_value=frozenset()):
+                    with patch.dict(sys.modules, {"storage": fake_storage}):
+                        write_taiwan_data_status(market, empty_layer, empty_layer, empty_layer)
+                with open("taiwan_data_status.json", encoding="utf-8") as stream:
+                    status = json.load(stream)
+            finally:
+                os.chdir(previous)
+
+        self.assertEqual(status["calendar_validation"]["expected_trading_sessions"], 3)
+        self.assertEqual(status["calendar_validation"]["missing_expected_sessions"], 1)
+        self.assertEqual(status["layers"]["TAIEX"]["missing_dates"], ["2026-11-10"])
+
+    def test_calendar_failure_marks_coverage_unknown_not_one_hundred_percent(self):
+        import json
+        import os
+        import numpy as np
+
+        dates = pd.to_datetime(["2026-11-09", "2026-11-10"])
+        market = pd.DataFrame({"TAIEX": [100.0, 101.0]}, index=dates)
+        layer = pd.DataFrame({"foreign_net": [1.0, 2.0], "trust_net": [2.0, 3.0]}, index=dates)
+        fake_storage = types.SimpleNamespace(enabled=lambda: False)
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.getcwd()
+            try:
+                os.chdir(directory)
+                with patch("pipeline._fetch_twse_closed_dates", return_value=None):
+                    with patch.dict(sys.modules, {"storage": fake_storage}):
+                        write_taiwan_data_status(market, layer, None, None)
+                with open("taiwan_data_status.json", encoding="utf-8") as stream:
+                    status = json.load(stream)
+            finally:
+                os.chdir(previous)
+
+        self.assertEqual(status["calendar_validation"]["status"], "unavailable")
+        self.assertIsNone(status["layers"]["TAIEX"]["coverage_pct"])
+        self.assertIsNone(status["layers"]["institutional"]["coverage_pct"])
+        self.assertIsNone(status["layers"]["institutional"]["expected_rows"])
 
 
 class PendingDatesTests(unittest.TestCase):
@@ -439,6 +495,24 @@ class ForecastTradingCalendarTests(unittest.TestCase):
             dates, source = _future_taiwan_trading_dates("2026-11-10", 3)
         self.assertEqual(dates, ["2026-11-11", "2026-11-12", "2026-11-13"])
         self.assertEqual(source, "weekdays_only_fallback")
+
+    def test_expected_calendar_excludes_weekends_and_official_closures(self):
+        from pipeline import _expected_twse_trading_days
+        with patch("pipeline._fetch_twse_closed_dates",
+                   return_value=frozenset({dt.date(2026, 11, 11)})):
+            dates, source = _expected_twse_trading_days("2026-11-09", "2026-11-15")
+        self.assertEqual(
+            dates.strftime("%Y-%m-%d").tolist(),
+            ["2026-11-09", "2026-11-10", "2026-11-12", "2026-11-13"],
+        )
+        self.assertEqual(source, "twse_official_holiday_schedule")
+
+    def test_expected_calendar_returns_unknown_when_a_year_is_unavailable(self):
+        from pipeline import _expected_twse_trading_days
+        with patch("pipeline._fetch_twse_closed_dates", return_value=None):
+            dates, source = _expected_twse_trading_days("2026-11-09", "2026-11-13")
+        self.assertEqual(len(dates), 0)
+        self.assertEqual(source, "unavailable")
 
 
 if __name__ == "__main__":

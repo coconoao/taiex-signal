@@ -1,0 +1,50 @@
+name: Real market data regime-router research
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pipeline.py"
+      - "regime_router.py"
+      - "tests/test_regime_router.py"
+      - "research_regime_backtest.py"
+      - "requirements.txt"
+      - ".github/workflows/regime-router-real-data.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regime-router-real-data-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-market-backtest:
+    # Supabase service credentials are used only for a read-only historical-cache GET.
+    # Do not expose repository secrets to pull requests from forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: Run real-market point-in-time walk-forward research
+        env:
+          TAIEX_STORAGE: supabase
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REGIME_ROUTER_REQUIRE_SUPABASE_CACHE: "1"
+        run: python research_regime_backtest.py --skip-backfill
+      - name: Upload real-market research metrics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: regime-router-real-market-metrics
+          path: regime-router-real-data.json
+          if-no-files-found: ignore
+          retention-days: 14

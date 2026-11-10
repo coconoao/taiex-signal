@@ -110,8 +110,9 @@ details[open]>summary{margin-bottom:12px}
   <div class="banner" id="miss" hidden></div>
   <div class="banner" id="err" hidden>讀不到 signals.json。請重新整理頁面；若持續發生，請回報此訊息。</div>
     <section id="hero" aria-live="polite">
-      <h2>未來三個交易日加權指數點位預測</h2>
+      <h2>四級波動分流模型｜未來三個交易日點位預測</h2>
       <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
+      <div id="regimeRouterSummary" aria-live="polite"></div>
       <div id="threeDayForecast" class="forecast-grid"></div>
       <p id="sumline" class="note" hidden></p>
       <p class="note"><span style="color:var(--up);font-weight:700">紅色＝上漲</span>；<span style="color:var(--down);font-weight:700">綠色＝下跌</span>。每日變化與前一交易日（或前一預測日）比較。點位為模型估計，仍在研究驗證中。</p>
@@ -420,62 +421,119 @@ function renderTrialPointForecasts(forecast) {
   }).join("");
 }
 
+function renderRegimeRouter(router) {
+  const root = $("regimeRouterSummary");
+  if (!router || !Array.isArray(router.sessions) || !router.sessions.length) {
+    root.innerHTML = '<p class="note">四級波動分流器研究資料尚未產生；正式預測不受影響。</p>';
+    return;
+  }
+  const names = {low:"低波動",normal:"正常波動",high:"高波動",extreme:"極高波動"};
+  const cards = router.sessions.map(item => {
+    const horizon = Number(item.horizon_sessions || 0);
+    const label = "D+" + horizon;
+    if (item.status !== "research") {
+      return '<article class="forecast-card"><b>' + label + ' 分流</b><div class="forecast-value">樣本不足</div><p class="forecast-meta">' + Number(item.training_samples || 0).toLocaleString("zh-TW") + ' 筆訓練樣本｜' + esc(item.reason || "等待資料") + '</p></article>';
+    }
+    const probabilities = item.regime_probabilities || {};
+    const probabilityText = ["low","normal","high","extreme"].map(key =>
+      names[key] + " " + (Number(probabilities[key] || 0) * 100).toFixed(1) + "%"
+    ).join("｜");
+    const probabilityLabel = item.probabilities_calibrated ? "校準後狀態機率：" : "未校準分流分數：";
+    const selected = names[item.regime] || item.regime_label || "未分類";
+    const decisionThresholds = item.router_decision_thresholds || {};
+    const thresholdText = "風險升級門檻：高／極高 " + (Number(decisionThresholds.high_extreme || 0.40) * 100).toFixed(1) +
+      "%｜極高 " + (Number(decisionThresholds.extreme || 0.20) * 100).toFixed(1) + "%";
+    const expert = item.expert_used === "global_fallback" ? "全域備援模型" : (names[item.expert_used] || item.expert_used);
+    const validation = item.router_validation || {};
+    const metrics = validation.status === "available"
+      ? "路由樣本外 " + Number(validation.oos_samples || 0).toLocaleString("zh-TW") +
+        " 筆｜Macro-F1 " + (validation.macro_f1 == null ? "—" : (Number(validation.macro_f1) * 100).toFixed(1) + "%") +
+        "｜高／極高召回率 " + (validation.high_extreme_recall == null ? "—" : (Number(validation.high_extreme_recall) * 100).toFixed(1) + "%")
+      : "路由樣本外驗證資料不足";
+    const fallback = item.fallback_reason ? "｜備援：" + esc(item.fallback_reason) : "";
+    const profile = item.historical_magnitude_profile || {};
+    const profileText = profile.status === "available"
+      ? "同類歷史最大單日幅度中位數／90 分位 " + Number(profile.median_abs_move_pct).toFixed(2) + "%／" + Number(profile.p90_abs_move_pct).toFixed(2) +
+        "%｜累積報酬 p10～p90 " + Number(profile.p10_return_pct).toFixed(2) + "%～" + Number(profile.p90_return_pct).toFixed(2) +
+        "%｜歷史達 2%／3%／5% 比例 " + Number(profile.historical_abs_move_exceedance_pct?.["2.0"] || 0).toFixed(1) + "%／" +
+        Number(profile.historical_abs_move_exceedance_pct?.["3.0"] || 0).toFixed(1) + "%／" +
+        Number(profile.historical_abs_move_exceedance_pct?.["5.0"] || 0).toFixed(1) + "%（樣本 " + Number(profile.samples || 0) + "）"
+      : "同類歷史幅度樣本不足";
+    const returnText = Number(item.predicted_return_pct) >= 0 ? "+" : "";
+    const maxDailyMoveText = item.predicted_max_daily_move_pct == null
+      ? "幅度樣本不足" : "預測區間最大單日幅度 " + Number(item.predicted_max_daily_move_pct).toFixed(2) + "%";
+    return '<article class="forecast-card"><b>' + label + '｜分流器選定 ' + selected + '</b>' +
+      '<div class="forecast-value">' + returnText + Number(item.predicted_return_pct).toFixed(2) + '%</div>' +
+      '<p class="forecast-change">實際選用：' + expert + '｜專家訓練樣本 ' + Number(item.expert_training_samples || 0).toLocaleString("zh-TW") + '</p>' +
+      '<p class="forecast-change">' + maxDailyMoveText + '</p>' +
+      '<p class="forecast-meta">' + probabilityLabel + probabilityText + '</p>' +
+      '<p class="forecast-meta">' + thresholdText + '</p>' +
+      '<p class="forecast-meta">分流理由：' + esc(item.routing_reason || "依分流器風險門檻決策") + '</p>' +
+      '<p class="forecast-meta">' + metrics + fallback + '</p>' +
+      '<p class="forecast-meta">' + profileText + '；僅為歷史條件分布參考</p></article>';
+  }).join("");
+  root.innerHTML = '<h3>核心分流器：先判斷波動，再選專家模型</h3>' +
+    '<p class="note">各期限獨立分流，依未來 N 個交易日內最大單日絕對漲跌幅判斷波動狀態；點位預測另採基準收盤至第 N 個交易日的累積報酬。若先前樣本外資料足夠，會逐段校準分流機率；不足時明確標示為未校準分流分數。研究結果不取代正式點位模型。</p>' +
+    '<div class="forecast-grid">' + cards + '</div>';
+}
+
 function renderDaily(d) {
   $("meta").textContent = "台股最近可用交易日：" + d.asof + "。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。";
   $("demo").hidden = !d.demo;
   $("miss").hidden = true;
   const forecast = d.forecast || {};
   renderTrialPointForecasts(forecast);
-  const sessions = Array.isArray(forecast.sessions) ? forecast.sessions : [];
-  if (Number(d.schema_version || 0) < 2 || !sessions.length || !Number.isFinite(Number(forecast.base_close))) {
-    $("threeDayMeta").textContent = "資料日期 " + d.asof + "｜三日點位模型尚未完成資料轉換或首次回補。";
-    $("threeDayForecast").innerHTML = '<p class="note">正在整理舊行情並建立三日歷史樣本外資料；完成後會顯示三個交易日的預估點位。</p>';
-    return;
-  }
-  const cards = [1,2,3].map(h => {
-    const item = sessions.find(x => Number(x.horizon_sessions) === h) || {};
-    const label = item.target_date ? item.target_date + (item.trading_calendar_source === "twse_official" ? "" : "（暫估）") + "（D+" + h + "）" : "交易日期待確認（D+" + h + "）";
-    if (item.status !== "research" || !Number.isFinite(Number(item.forecast_close))) {
-      return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '／至少 120</p></article>';
-    }
-    const point = Number(item.forecast_close);
-    const comparison = item.change_vs_previous || null;
-    const direction = comparison && comparison.direction;
-    const color = direction === "up" ? "var(--up)" : direction === "down" ? "var(--down)" : "var(--hold)";
-    const sign = comparison && Number(comparison.points) > 0 ? "+" : "";
-    const changeText = !comparison ? "前一日估計不足，暫無比較" :
-      direction === "up" ? "上漲" : direction === "down" ? "下跌" : "持平";
-    const change = comparison ? changeText + " " + sign + Number(comparison.points).toFixed(0) + " 點（" + sign + Number(comparison.pct).toFixed(2) + "%）" : changeText;
-    const validation = item.validation || {};
-    const mae = validation.mae_points == null ? "樣本不足" : Number(validation.mae_points).toLocaleString("zh-TW") + " 點";
-    const hit = validation.within_0_7_pct_pct == null ? "待更新樣本" : Number(validation.within_0_7_pct_pct).toFixed(1) + "%";
-    const baselineMae = validation.flat_baseline_mae_points == null ? "—" : Number(validation.flat_baseline_mae_points).toLocaleString("zh-TW") + " 點";
-    return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + change + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.7% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
-  }).join("");
-  $("threeDayForecast").innerHTML = cards || '<p class="note">目前沒有可用的三日預測資料。</p>';
+  renderRegimeRouter(forecast.regime_router);
+  $("regimeRouterSummary").hidden = true;
+  const router = forecast.regime_router || {};
+  const routerSessions = Array.isArray(router.sessions) ? router.sessions : [];
+  const baseClose = Number(forecast.base_close);
   const updatedAt = d.computed_at ? new Date(d.computed_at) : null;
   const updatedText = updatedAt && Number.isFinite(updatedAt.getTime())
     ? updatedAt.toLocaleString("zh-TW", {timeZone:"Asia/Taipei", hour12:false}) : "未知";
-  const ageHours = updatedAt && Number.isFinite(updatedAt.getTime())
-    ? (Date.now() - updatedAt.getTime()) / 3600000 : Infinity;
-  const taipeiParts = new Intl.DateTimeFormat("en-CA", {
-    timeZone:"Asia/Taipei", year:"numeric", month:"2-digit", day:"2-digit",
-    hour:"2-digit", minute:"2-digit", hourCycle:"h23"
-  }).formatToParts(new Date());
-  const part = type => taipeiParts.find(x => x.type === type)?.value || "";
-  const taipeiToday = part("year") + "-" + part("month") + "-" + part("day");
-  const taipeiHour = Number(part("hour"));
-  const d1 = sessions.find(x => Number(x.horizon_sessions) === 1);
-  const targetAlreadyPassed = Boolean(d1?.target_date === taipeiToday && taipeiHour >= 14);
-  const freshnessWarning = targetAlreadyPassed
-    ? "⚠ D+1 仍指向今天，模型尚未納入今天收盤資料。"
-    : ageHours > 2.5
-      ? "⚠ 模型超過 2.5 小時未更新，請留意資料時效。"
-      : "每小時排程更新";
-  $("threeDayMeta").textContent = "基準收盤 " + Number(forecast.base_close).toLocaleString("zh-TW") +
-    " 點｜收盤資料日期 " + (forecast.asof || d.asof) + "｜模型更新時間 " + updatedText +
-    "（台灣）｜" + freshnessWarning + "｜預測誤差容許值 ±0.7%｜模型：" +
-    (forecast.model_version || "direct-horizon") + "（研究中）";
+  if (!Number.isFinite(baseClose) || !routerSessions.length) {
+    $("threeDayMeta").textContent = "資料日期 " + (forecast.asof || d.asof || "—") + "｜新四級波動分流模型尚無可用點位資料。";
+    $("threeDayForecast").innerHTML = '<p class="note">新模型資料尚未產生或暫時不可用；為避免混淆，首頁不再自動改顯示舊模型點位。</p>';
+    return;
+  }
+  const names = {low:"低波動",normal:"正常波動",high:"高波動",extreme:"極高波動"};
+  const cards = [1,2,3].map(h => {
+    const item = routerSessions.find(x => Number(x.horizon_sessions) === h) || {};
+    const label = (item.target_date ? item.target_date + "｜" : "") + "D+" + h;
+    if (item.status !== "research" || !Number.isFinite(Number(item.forecast_close))) {
+      return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">新模型有效訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + ' 筆</p></article>';
+    }
+    const point = Number(item.forecast_close);
+    const predictedReturn = Number(item.predicted_return_pct);
+    const direction = Number.isFinite(predictedReturn) ? (predictedReturn > 0 ? "up" : predictedReturn < 0 ? "down" : "hold") : "hold";
+    const color = direction === "up" ? "var(--up)" : direction === "down" ? "var(--down)" : "var(--hold)";
+    const returnText = Number.isFinite(predictedReturn)
+      ? (predictedReturn > 0 ? "+" : "") + predictedReturn.toFixed(2) + "%" : "報酬估計不足";
+    const regime = names[item.regime] || item.regime_label || "未分類";
+    const pointSource = item.point_model_used === "expert_blend"
+      ? "波動專家混合模型"
+      : "新模型框架內的全域 Ridge 備援";
+    const magnitude = item.predicted_max_daily_move_pct == null
+      ? "最大單日波動幅度：樣本不足"
+      : "預測區間最大單日波動幅度 " + Number(item.predicted_max_daily_move_pct).toFixed(2) + "%";
+    const fallback = item.point_model_used === "expert_blend" ? "" :
+      "｜專家效能門檻未通過，點位由全域模型備援";
+    return '<article class="forecast-card"><b>' + label + '｜' + regime + '</b>' +
+      '<div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div>' +
+      '<div class="forecast-change" style="color:' + color + '">' + returnText + '</div>' +
+      '<p class="forecast-meta">點位來源：' + pointSource + fallback + '</p>' +
+      '<p class="forecast-meta">' + magnitude + '</p>' +
+      '<p class="forecast-meta">分流器選定：' + regime + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + ' 筆</p>' +
+      (item.fallback_reason ? '<p class="forecast-meta">備援原因：' + esc(item.fallback_reason) + '</p>' : '') +
+      '</article>';
+  }).join("");
+  $("threeDayForecast").innerHTML = cards;
+  $("threeDayMeta").textContent = "基準收盤 " + baseClose.toLocaleString("zh-TW") +
+    " 點｜收盤資料日期 " + (forecast.asof || d.asof || "—") +
+    "｜模型更新時間 " + updatedText + "（台灣）｜模型：" +
+    (router.model_version || "four-regime-router") +
+    "（研究版；專家未達效能門檻時使用新模型框架內的全域 Ridge 備援，不回退顯示舊首頁預測）。";
+
 }
 function renderWeekly(w) {
   const hh = w.horizon_history || {};
