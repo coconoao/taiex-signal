@@ -121,7 +121,7 @@ def classify_event(text: str) -> str:
     low = text.casefold()
     for category in ("policy_trade", "monetary_macro", "geopolitics", "semiconductor_ai",
                      "corporate", "market_structure", "shock"):
-        if any(term in low for term in EVENT_TERMS[category]):
+        if any(_contains(low, term) for term in EVENT_TERMS[category]):
             return category
     return "other"
 
@@ -174,12 +174,17 @@ def build_event(item: dict[str, Any], watchlist: dict[str, Any], now: dt.datetim
     relevance = "high" if taiwan_hits >= 2 else "medium" if taiwan_hits == 1 else "low"
     if relevance == "low":
         relevance = "unknown"
-    topics = [name for name, terms in EVENT_TERMS.items() if any(term in low for term in terms)]
+    topics = [name for name, terms in EVENT_TERMS.items() if any(_contains(low, term) for term in terms)]
     entity_matches = match_entities(item, watchlist)
     factual_identity = url.split("#", 1)[0].rstrip("/")
     event_id = _hash(factual_identity)
     cluster_id = _hash(_normalized_text(title))
     observed = iso_utc(now)
+    eligible_dt = now.astimezone(UTC)
+    if published_utc:
+        published_dt = dt.datetime.fromisoformat(published_utc.replace("Z", "+00:00"))
+        eligible_dt = max(eligible_dt, published_dt)
+    forecast_eligible = iso_utc(eligible_dt)
     return {
         "schema_version": "event-record-v1",
         "event_id": event_id,
@@ -203,7 +208,7 @@ def build_event(item: dict[str, Any], watchlist: dict[str, Any], now: dt.datetim
             "published_at_utc": published_utc,
             "first_seen_at_utc": observed,
             "last_seen_at_utc": observed,
-            "forecast_eligible_at_utc": observed,
+            "forecast_eligible_at_utc": forecast_eligible,
             "timestamp_quality": timestamp_quality,
         },
         "entities": entity_matches,
@@ -211,7 +216,7 @@ def build_event(item: dict[str, Any], watchlist: dict[str, Any], now: dt.datetim
         "evidence": {
             "status": evidence_status,
             "attribution": source_name,
-            "supporting_source_urls": [url] if source_kind in ("official_government", "official_company") else [],
+            "supporting_source_urls": [],
             "contradicting_source_urls": [],
             "review_required": review_required,
             "review_status": "needs_followup" if review_required else "not_reviewed",
