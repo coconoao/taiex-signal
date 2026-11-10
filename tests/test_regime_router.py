@@ -335,6 +335,10 @@ class RegimeRouterTests(unittest.TestCase):
                 item["candidate_training_samples"] - item["training_samples"],
                 horizon - 1,
             )
+            self.assertEqual(
+                item["latest_eligible_training_origin_date"],
+                str(dates[-4 - horizon].date()),
+            )
             self.assertGreaterEqual(item["predicted_max_daily_move_pct"], 0.0)
             self.assertEqual(set(item["regime_probabilities"]), set(REGIME_NAMES))
             self.assertTrue(item["routing_reason"])

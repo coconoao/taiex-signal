@@ -845,7 +845,6 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             })
             continue
 
-        train_regimes = classify_regimes(future_max_daily_move.loc[train_idx]).astype(int)
         oos_actual, oos_predicted, oos_probabilities, oos_forecasts = [], [], [], []
         calibration_records = []
         calibrated_oos_samples = 0
@@ -1088,7 +1087,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "training_samples": int(len(final_train_idx)),
             "candidate_training_samples": int(len(train_idx)),
             "unmatured_training_samples_excluded": int(len(train_idx) - len(final_train_idx)),
-            "training_label_cutoff_date": str(
+             "latest_eligible_training_origin_date": str(
                 X.index[max(0, latest_position - horizon)].date()
             ),
             "regime": REGIME_NAMES[requested],
