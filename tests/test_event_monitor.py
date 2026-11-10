@@ -125,6 +125,7 @@ class EventMonitorTests(unittest.TestCase):
         self.assertTrue(latest["classification"]["is_material_update"])
         self.assertEqual(latest["classification"]["supersedes_event_version"], 1)
         self.assertEqual(latest["timestamps"]["first_seen_at_utc"], "2026-11-10T00:30:00Z")
+        self.assertEqual(latest["timestamps"]["forecast_eligible_at_utc"], "2026-11-10T02:30:00Z")
 
     def test_run_writes_local_research_jsonl_only(self):
         with tempfile.TemporaryDirectory() as directory:
