@@ -27,8 +27,8 @@ REGIME_LABELS = {
     "high": "高波動",
     "extreme": "極高波動",
 }
-# Initial research boundaries, applied to absolute cumulative close-to-close
-# returns for each horizon. The 7.5% extreme threshold is user-specified.
+# Initial research boundaries applied to the maximum absolute one-session
+# close-to-close move within each forecast horizon. The 7.5% threshold is user-specified.
 LOW_MAX_RETURN = 0.005
 NORMAL_MAX_RETURN = 0.01
 EXTREME_MIN_RETURN = 0.075
@@ -162,6 +162,20 @@ def _apply_probability_calibrator(calibrator, raw_probabilities):
         calibrated[:, int(class_id)] = raw_calibrated[:, column]
     totals = calibrated.sum(axis=1, keepdims=True)
     return np.divide(calibrated, totals, out=np.zeros_like(calibrated), where=totals > 0)
+
+
+
+
+def _purged_training_indices(feature_index, candidate_train_idx, first_test_date, horizon):
+    """Keep only training origins whose full forward label ends by test origin.
+
+    Use positions in the complete trading-session index, not positions in the
+    filtered valid-sample array: missing feature rows must not weaken the purge.
+    """
+    candidate_train_idx = pd.Index(candidate_train_idx)
+    positions = feature_index.get_indexer(candidate_train_idx)
+    test_position = feature_index.get_loc(first_test_date)
+    return candidate_train_idx[positions <= int(test_position) - int(horizon)]
 
 
 def _eligible_calibration_records(records, current_position, horizon):
@@ -479,9 +493,13 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         # Refit every 60 sessions to keep scheduled refresh cost bounded.
         oos_start = max(first_test, len(train_idx) - 2000)
         for start in range(oos_start, len(train_idx), 60):
-            fit_idx = train_idx[:start - horizon + 1]
             test_idx = train_idx[start:start + 60]
-            if len(fit_idx) < MIN_TRAIN_SAMPLES or not len(test_idx):
+            if not len(test_idx):
+                continue
+            fit_idx = _purged_training_indices(
+                X.index, train_idx[:start], test_idx[0], horizon
+            )
+            if len(fit_idx) < MIN_TRAIN_SAMPLES:
                 continue
             fit_regimes = classify_regimes(future_max_daily_move.loc[fit_idx]).astype(int)
             router = _fit_router(X.loc[fit_idx], fit_regimes)
