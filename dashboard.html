@@ -103,6 +103,7 @@ details[open]>summary{margin-bottom:12px}
 
   <div id="tab-daily">
   <div class="live" id="live" hidden></div>
+  <section id="taiexRealtime" aria-live="polite"><h2>加權指數即時行情</h2><div class="forecast-grid"><div class="mc"><b>發行量加權股價指數</b><div class="big" id="taiexRealtimeValue">載入中…</div><p class="note" id="taiexRealtimeMeta">正在向 Fugle 取得盤中指數快照</p></div></div><p class="note">資料來源 Fugle WebSocket｜僅在收到新鮮盤中資料時標示即時；休市、連線失敗或資料過期時會明確標示。</p></section>
   <p class="meta" id="meta">正在連線至資料伺服器…</p>
   <p class="note" id="fresh"><button class="btn sm" id="reload">↻ 更新</button> <span id="freshTxt"></span></p>
   <div class="banner" id="demo" hidden>目前顯示的是合成示範資料，不是真實行情。自動更新完成後會換成真實資料。</div>
@@ -800,6 +801,25 @@ function renderNews() {
 
 /* ---- 載入（可重複執行）與自動更新 ---- */
 let dailyLoadFailed = false, retryTimer = null;
+let taiexRealtimeTimer = null;
+async function loadTaiexRealtime() {
+  const value = $("taiexRealtimeValue"), meta = $("taiexRealtimeMeta");
+  if (!value || !meta) return;
+  try {
+    const r = await fetch("/api/taiex-realtime", {cache:"no-store", headers:{"Accept":"application/json"}});
+    const d = await r.json();
+    if (!r.ok || !d.available || typeof d.index !== "number") {
+      value.textContent = "暫不可用";
+      meta.textContent = d.status === "NO_API_KEY" ? "Fugle API Key 尚未設定" : "目前沒有可驗證的即時指數快照（" + (d.status || "資料來源異常") + "）";
+      return;
+    }
+    value.textContent = d.index.toLocaleString("zh-TW", {minimumFractionDigits:2, maximumFractionDigits:2});
+    meta.textContent = (d.realtime ? "即時資料" : "資料已過期，非即時") + "｜更新 " + (d.timestamp || "時間未知") + "｜來源 " + (d.source || "Fugle");
+  } catch (_) {
+    value.textContent = "暫不可用";
+    meta.textContent = "目前無法連接即時指數服務；請稍後重試。";
+  }
+}
 const loadDaily = () => getJSON("signals.json").then(d => {
   dailyLoadFailed = false;
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
@@ -994,6 +1014,7 @@ const loadNews = () => Promise.all([
 ]).then(renderNews);
 let lastSig = null, busy = false;
 function loadAll() {
+  loadTaiexRealtime();
   if (busy) return Promise.resolve();
   busy = true;
   return Promise.all([loadDaily(), loadWeekly(), loadMultiMarketResearch(), loadMultiHorizonResearch(), loadModelImprovementResearch(), loadStrategyResearch(), loadNews()]).then(() => {
@@ -1008,6 +1029,7 @@ $("reload").onclick = loadAll;
 if (SNAP) $("reload").hidden = true;
 else {
   setInterval(() => { if (!document.hidden) loadAll(); }, 60000);
+  taiexRealtimeTimer = setInterval(() => { if (!document.hidden) loadTaiexRealtime(); }, 30000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) loadAll(); });
 }
 
