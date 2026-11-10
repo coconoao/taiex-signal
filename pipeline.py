@@ -12,6 +12,7 @@ FAST_STARTUP = "--skip-backfill" in sys.argv
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
+from regime_router import build_regime_router_forecasts
 
 TICKERS = {"TAIEX": "^TWII", "SOX": "^SOX", "TSM": "TSM", "VIX": "^VIX", "US10Y": "^TNX",
            "N225": "^N225", "KOSPI": "^KS11", "USDTWD": "TWD=X"}
@@ -1811,6 +1812,30 @@ if __name__ == "__main__":
         write_taiwan_data_status(df, chips, margin, futures)
     X, y, fwd = build(df, chips, margin, futures=futures)
     three_day_forecast, forecast_history = three_day_point_forecast(df, chips, margin, futures=futures)
+    try:
+        router_inputs = {}
+        target_meta = {}
+        for horizon in (1, 2, 3):
+            X_router, _, fwd_router = build(df, chips, margin, h=horizon, futures=futures)
+            router_inputs[horizon] = (X_router, fwd_router)
+        for session in three_day_forecast.get("sessions", []):
+            horizon = int(session.get("horizon_sessions", 0))
+            if horizon in (1, 2, 3):
+                target_meta[horizon] = {
+                    "target_date": session.get("target_date"),
+                    "trading_calendar_source": session.get("trading_calendar_source"),
+                }
+        three_day_forecast["regime_router"] = build_regime_router_forecasts(
+            router_inputs, df["TAIEX"], target_meta=target_meta
+        )
+    except Exception as exc:
+        # Router research must never block the production forecast refresh.
+        print(f"四級波動分流器研究暫不可用：{type(exc).__name__}: {exc}", flush=True)
+        three_day_forecast["regime_router"] = {
+            "status": "unavailable", "model_version": "four-regime-router-moE-research-v1",
+            "routing_priority": "router_first", "sessions": [],
+            "reason": f"{type(exc).__name__}: {exc}", "production_replacement": False,
+        }
     try:
         three_day_forecast["research_candidates"] = build_ridge_trial_forecasts(
             df, chips, margin, futures=futures
