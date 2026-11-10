@@ -12,6 +12,7 @@ from regime_router import (
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
+    _routing_reason,
     _select_risk_thresholds,
 )
 
@@ -54,6 +55,14 @@ class RegimeRouterTests(unittest.TestCase):
         probabilities = [0.52, 0.20, 0.23, 0.05]
         thresholds = {"high_extreme": 0.25, "extreme": 0.15}
         self.assertEqual(_route_regime(probabilities, thresholds), 2)
+
+    def test_router_explains_risk_threshold_decision(self):
+        reason = _routing_reason(
+            [0.52, 0.20, 0.23, 0.05],
+            {"high_extreme": 0.25, "extreme": 0.15},
+            2,
+        )
+        self.assertIn("達到升級門檻", reason)
 
     def test_extreme_probability_escalates_directly_to_extreme(self):
         probabilities = [0.40, 0.20, 0.10, 0.30]
@@ -124,6 +133,7 @@ class RegimeRouterTests(unittest.TestCase):
             self.assertEqual(item["status"], "research")
             self.assertGreaterEqual(item["predicted_max_daily_move_pct"], 0.0)
             self.assertEqual(set(item["regime_probabilities"]), set(REGIME_NAMES))
+            self.assertTrue(item["routing_reason"])
             self.assertIn("high_extreme", item["router_decision_thresholds"])
             self.assertIn("extreme", item["router_decision_thresholds"])
             self.assertAlmostEqual(sum(item["regime_probabilities"].values()), 1.0, places=4)
