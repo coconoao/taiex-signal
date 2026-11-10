@@ -667,7 +667,19 @@ def _gate_policy_sensitivity(rows, horizon, early_fraction=0.70):
         "note": "僅為門檻敏感度研究；不改變主回測輸出，也不自動選擇正式模型。",
     }
 
-def _router_metrics(actual_classes, predicted_classes, probabilities):
+def _prior_regime_probabilities(training_regimes, smoothing=1.0):
+    """Return a smoothed class-frequency baseline from matured training labels only."""
+    values = np.asarray(training_regimes, dtype=int)
+    counts = np.bincount(values, minlength=len(CLASS_IDS)).astype(float)
+    alpha = max(0.0, float(smoothing))
+    probabilities = counts + alpha
+    total = float(probabilities.sum())
+    if total <= 0:
+        return np.full(len(CLASS_IDS), 1.0 / len(CLASS_IDS), dtype=float)
+    return probabilities / total
+
+
+def _router_metrics(actual_classes, predicted_classes, probabilities, prior_probabilities=None):
     if not actual_classes:
         return {"status": "insufficient", "oos_samples": 0}
     actual = np.asarray(actual_classes, dtype=int)
@@ -689,9 +701,11 @@ def _router_metrics(actual_classes, predicted_classes, probabilities):
     high_missed = high_mask & ~high_predicted
     high_true_positive = int(np.sum(high_mask & high_predicted))
     high_precision = high_true_positive / int(high_predicted.sum()) if high_predicted.any() else None
-    one_hot = np.eye(4, dtype=float)[actual]
+    extreme_mask = actual == 3
+    extreme_predicted = predicted == 3
+    one_hot = np.eye(len(CLASS_IDS), dtype=float)[actual]
     clipped = np.clip(probs, 1e-8, 1.0)
-    return {
+    result = {
         "status": "available",
         "oos_samples": int(len(actual)),
         "accuracy": round(float(accuracy_score(actual, predicted)), 4),
@@ -705,10 +719,42 @@ def _router_metrics(actual_classes, predicted_classes, probabilities):
         "high_extreme_actual_rate": round(float(high_mask.mean()), 4),
         "high_extreme_missed": int(high_missed.sum()),
         "high_extreme_missed_rate": round(float(high_missed.sum() / high_mask.sum()), 4) if high_mask.any() else None,
+        "extreme_recall": round(float(np.sum(extreme_mask & extreme_predicted) / extreme_mask.sum()), 4) if extreme_mask.any() else None,
+        "extreme_precision": round(float(np.sum(extreme_mask & extreme_predicted) / extreme_predicted.sum()), 4) if extreme_predicted.any() else None,
+        "extreme_predicted_rate": round(float(extreme_predicted.mean()), 4),
+        "extreme_actual_rate": round(float(extreme_mask.mean()), 4),
         "multiclass_brier": round(float(np.mean(np.sum((probs - one_hot) ** 2, axis=1))), 5),
         "log_loss": round(float(log_loss(actual, clipped, labels=list(CLASS_IDS))), 5),
         "probabilities_calibrated": False,
     }
+    if prior_probabilities is not None and len(prior_probabilities) == len(actual):
+        prior_probs = np.asarray(prior_probabilities, dtype=float)
+        prior_probs = np.clip(prior_probs, 1e-8, 1.0)
+        prior_probs = prior_probs / prior_probs.sum(axis=1, keepdims=True)
+        prior_predicted = np.argmax(prior_probs, axis=1)
+        prior_matrix = confusion_matrix(actual, prior_predicted, labels=CLASS_IDS)
+        prior_per_class = {}
+        for class_id, name in enumerate(REGIME_NAMES):
+            tp = int(prior_matrix[class_id, class_id])
+            support = int(prior_matrix[class_id].sum())
+            predicted_count = int(prior_matrix[:, class_id].sum())
+            prior_per_class[name] = {
+                "precision": round(tp / predicted_count, 4) if predicted_count else None,
+                "recall": round(tp / support, 4) if support else None,
+                "support": support,
+            }
+        result["prequential_prior_frequency_baseline"] = {
+            "source": "blockwise_expanding_matured_training_class_frequency_laplace_smoothing",
+            "oos_samples": int(len(actual)),
+            "accuracy": round(float(accuracy_score(actual, prior_predicted)), 4),
+            "balanced_accuracy": round(float(balanced_accuracy_score(actual, prior_predicted)), 4),
+            "macro_f1": round(float(f1_score(actual, prior_predicted, labels=CLASS_IDS, average="macro", zero_division=0)), 4),
+            "per_class": prior_per_class,
+            "confusion_matrix": prior_matrix.tolist(),
+            "multiclass_brier": round(float(np.mean(np.sum((prior_probs - one_hot) ** 2, axis=1))), 5),
+            "log_loss": round(float(log_loss(actual, prior_probs, labels=list(CLASS_IDS))), 5),
+        }
+    return result
 
 
 def _forecast_metrics(rows):
@@ -845,7 +891,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             })
             continue
 
-        oos_actual, oos_predicted, oos_probabilities, oos_forecasts = [], [], [], []
+        oos_actual, oos_predicted, oos_probabilities, oos_prior_probabilities, oos_forecasts = [], [], [], [], []
         calibration_records = []
         calibrated_oos_samples = 0
         first_test = min(max(300, horizon + 30), max(horizon + 30, len(train_idx) // 2))
@@ -863,6 +909,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             if len(fit_idx) < MIN_TRAIN_SAMPLES:
                 continue
             fit_regimes = classify_regimes(future_max_daily_move.loc[fit_idx]).astype(int)
+            prior_regime_probs = _prior_regime_probabilities(fit_regimes, smoothing=1.0)
             router = _fit_router(X.loc[fit_idx], fit_regimes)
             fallback_class = int(pd.Series(fit_regimes).mode().iloc[0])
             raw_probs = _router_probabilities(router, X.loc[test_idx], fallback_class=fallback_class)
@@ -953,6 +1000,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 oos_actual.append(actual_class)
                 oos_predicted.append(requested)
                 oos_probabilities.append(probs[offset].tolist())
+                oos_prior_probabilities.append(prior_regime_probs.tolist())
                 batch_calibration_records.append((
                     X.index.get_loc(asof_date), raw_probs[offset].tolist(),
                     probs[offset].tolist(), actual_class, calibrator is not None,
@@ -1122,7 +1170,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 for class_id, name in enumerate(REGIME_NAMES)
             },
             "router_validation": {
-                **_router_metrics(oos_actual, oos_predicted, oos_probabilities),
+                **_router_metrics(oos_actual, oos_predicted, oos_probabilities, oos_prior_probabilities),
                 "prequential_calibrated_oos_samples": int(calibrated_oos_samples),
                 "probabilities_calibrated": bool(oos_actual and calibrated_oos_samples == len(oos_actual)),
                 "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
