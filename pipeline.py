@@ -20,6 +20,120 @@ REGION = ["N225", "KOSPI", "USDTWD"]         # 區域層（亞洲鄰近市場、
 BUY, SELL, COST = 0.55, 0.45, 0.002          # 買進/賣出門檻、單次換倉成本
 
 
+FORECAST_ERROR_TOLERANCE = 0.007  # 預測點位誤差容許值：±0.7%
+_TWSE_CLOSED_DATES_CACHE = {}
+
+
+def _parse_twse_calendar_date(value):
+    """Parse TWSE holiday dates in ISO, Gregorian YYYYMMDD, or ROC YYYMMDD form."""
+    import re
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    iso = re.match(r"^(20\d{2})[-/](\d{1,2})[-/](\d{1,2})$", raw)
+    if iso:
+        try:
+            return dt.date(*(int(part) for part in iso.groups()))
+        except ValueError:
+            return None
+    digits = re.sub(r"\D", "", raw)
+    try:
+        if len(digits) == 8:
+            year, month, day = int(digits[:4]), int(digits[4:6]), int(digits[6:8])
+        elif len(digits) == 7:
+            year, month, day = int(digits[:3]) + 1911, int(digits[3:5]), int(digits[5:7])
+        else:
+            return None
+        return dt.date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _fetch_twse_closed_dates(year):
+    """Fetch official TWSE annual closure dates; return None when unavailable."""
+    year = int(year)
+    if year in _TWSE_CLOSED_DATES_CACHE:
+        return _TWSE_CLOSED_DATES_CACHE[year]
+    url = (
+        "https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?"
+        + urllib.parse.urlencode({"date": year, "response": "json"})
+    )
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; TAIEXForecastCalendar/1.0)",
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": "https://www.twse.com.tw/",
+    })
+    try:
+        payload = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8-sig"))
+        fields = payload.get("fields") or []
+        rows = payload.get("data") or []
+        if not rows:
+            for table in payload.get("tables") or []:
+                if table.get("data"):
+                    fields, rows = table.get("fields") or fields, table["data"]
+                    break
+        if not rows:
+            return None
+        closed = set()
+        for row in rows:
+            if isinstance(row, dict):
+                record = row
+            elif fields and len(row) == len(fields):
+                record = dict(zip(fields, row))
+            else:
+                continue
+            day = _parse_twse_calendar_date(
+                record.get("日期") or record.get("Date") or record.get("date")
+            )
+            if day is None or day.year != year or day.weekday() >= 5:
+                continue
+            name = str(record.get("名稱") or record.get("Name") or "").strip()
+            description = str(record.get("說明") or record.get("Description") or "").strip()
+            detail = name + description
+            if any(term in detail for term in ("最後交易日", "開始交易日", "交易開始日")):
+                continue
+            if any(term in detail for term in (
+                "市場無交易", "休市", "放假", "補假", "國定假日",
+                "紀念日", "僅辦理結算交割",
+            )):
+                closed.add(day)
+        result = frozenset(closed)
+        _TWSE_CLOSED_DATES_CACHE[year] = result
+        return result
+    except Exception as exc:
+        print(
+            f"[forecast-calendar] TWSE annual calendar unavailable year={year} "
+            f"error_class={type(exc).__name__}; weekday-only fallback will be labelled",
+            flush=True,
+        )
+        return None
+
+
+def _future_taiwan_trading_dates(asof, count=3):
+    """Return the next Taiwan cash-market dates and disclose calendar quality."""
+    base = pd.Timestamp(asof).date()
+    end = base + dt.timedelta(days=35)
+    years = range(base.year, end.year + 1)
+    closures = set()
+    complete = True
+    for year in years:
+        year_closures = _fetch_twse_closed_dates(year)
+        if year_closures is None:
+            complete = False
+        else:
+            closures.update(year_closures)
+    dates = []
+    day = base + dt.timedelta(days=1)
+    while day <= end and len(dates) < count:
+        if day.weekday() < 5 and day not in closures:
+            dates.append(day.isoformat())
+        day += dt.timedelta(days=1)
+    source = "twse_official" if complete else (
+        "twse_partial_weekday_fallback" if closures else "weekdays_only_fallback"
+    )
+    return dates, source
+
+
 def _parse_market_number(value):
     text = str(value or "").strip().replace(",", "").replace(" ", "")
     if text in ("", "--", "---", "X", "N/A"):
@@ -998,12 +1112,15 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             horizons[str(h)] = {"status": "insufficient", "reason": "沒有完整的最新特徵資料"}
             continue
         latest = latest_candidates[-1]
+        target_dates, calendar_source = _future_taiwan_trading_dates(latest, 3)
+        target_date = target_dates[h - 1] if len(target_dates) >= h else None
         if forecast_asof is None:
             forecast_asof = latest
         train_idx = Xh.index[valid_features & fwd.notna() & (Xh.index < latest)]
         if len(train_idx) < 120:
             horizons[str(h)] = {
                 "status": "insufficient", "asof": str(latest.date()),
+                "target_date": target_date, "trading_calendar_source": calendar_source,
                 "training_samples": int(len(train_idx)),
                 "minimum_samples": 120,
                 "reason": "有效訓練樣本不足"
@@ -1047,7 +1164,7 @@ def three_day_point_forecast(df, chips, margin, futures=None):
                     "actual_close": round(float(actual), 2),
                     "absolute_error_points": round(abs_error, 2),
                     "absolute_error_pct": round(relative_error * 100, 5),
-                    "within_0_2_pct": bool(relative_error <= 0.002),
+                    "within_0_7_pct": bool(relative_error <= FORECAST_ERROR_TOLERANCE),
                     "model": "Ridge direct-horizon",
                     "model_version": "ridge-direct-3session-v2",
                     "evaluation": "purged_expanding_window_oos",
@@ -1066,7 +1183,7 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             "oos_samples": int(len(oos_pred)),
             "mae_points": None,
             "flat_baseline_mae_points": None,
-            "within_0_2_pct_pct": None,
+            "within_0_7_pct_pct": None,
         }
         if oos_pred:
             errors = np.abs(np.asarray(oos_pred) - np.asarray(oos_actual))
@@ -1075,11 +1192,13 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             metrics.update({
                 "mae_points": round(float(errors.mean()), 2),
                 "flat_baseline_mae_points": round(float(baseline_errors.mean()), 2),
-                "within_0_2_pct_pct": round(float((relative_errors <= 0.002).mean() * 100), 2),
+                "within_0_7_pct_pct": round(float((relative_errors <= FORECAST_ERROR_TOLERANCE).mean() * 100), 2),
             })
         horizons[str(h)] = {
             "status": "research",
             "asof": str(latest.date()),
+            "target_date": target_date,
+            "trading_calendar_source": calendar_source,
             "base_close": round(base_close, 2),
             "forecast_close": round(float(forecast_close), 2),
             "predicted_return_pct": round(predicted_return * 100, 4),
@@ -1100,6 +1219,7 @@ def three_day_point_forecast(df, chips, margin, futures=None):
             "horizon_sessions": h,
             "label": "D+" + str(h),
             "target_date": item.get("target_date"),
+            "trading_calendar_source": item.get("trading_calendar_source"),
             "status": item.get("status", "insufficient"),
             "training_samples": int(item.get("training_samples", 0)),
             "forecast_close": item.get("forecast_close"),
@@ -1136,11 +1256,14 @@ def three_day_point_forecast(df, chips, margin, futures=None):
         "asof": latest_asof,
         "base_close": base_close,
         "horizon_unit": "trading_sessions",
+        "trading_calendar_source": next((x.get("trading_calendar_source") for x in horizons.values()
+                                         if x.get("trading_calendar_source")), "unknown"),
+        "forecast_error_tolerance_pct": FORECAST_ERROR_TOLERANCE * 100,
         "method": "direct_horizon_ridge",
         "model_version": "ridge-direct-3session-v2",
         "status": "research" if any(x.get("status") == "research" for x in sessions) else "insufficient",
         "sessions": sessions,
-        "note": "D+1/D+2/D+3 為獨立直接點位估計；歷史誤差來自逐時點樣本外測試，不代表未來保證。",
+        "note": "每個預測以最近完整收盤資料為基準，D+1/D+2/D+3 對應下一個台股交易日的明確日期；命中率採預測點位相對誤差 ±0.7% 判定。歷史樣本外結果不代表未來保證。",
     }
     return forecast, history_records
 
@@ -1163,12 +1286,15 @@ def build_ridge_trial_forecasts(df, chips, margin, futures=None, alphas=(10.0, 1
             continue
 
         latest = latest_candidates[-1]
+        target_dates, calendar_source = _future_taiwan_trading_dates(latest, 3)
+        target_date = target_dates[h - 1] if len(target_dates) >= h else None
         latest_by_horizon[h] = latest
         train_idx = Xh.index[valid_features & fwd.notna() & (Xh.index < latest)]
         if len(train_idx) < 120:
             for alpha in results:
                 results[alpha][str(h)] = {
                     "status": "insufficient", "asof": str(latest.date()),
+                    "target_date": target_date, "trading_calendar_source": calendar_source,
                     "training_samples": int(len(train_idx)),
                     "minimum_samples": 120, "reason": "有效訓練樣本不足"
                 }
@@ -1206,7 +1332,7 @@ def build_ridge_trial_forecasts(df, chips, margin, futures=None, alphas=(10.0, 1
                 "oos_samples": len(sample["pred"]),
                 "mae_points": None,
                 "flat_baseline_mae_points": None,
-                "within_0_2_pct_pct": None,
+                "within_0_7_pct_pct": None,
             }
             if sample["pred"]:
                 errors = np.abs(np.asarray(sample["pred"]) - np.asarray(sample["actual"]))
@@ -1215,11 +1341,13 @@ def build_ridge_trial_forecasts(df, chips, margin, futures=None, alphas=(10.0, 1
                 metrics.update({
                     "mae_points": round(float(errors.mean()), 2),
                     "flat_baseline_mae_points": round(float(baseline_errors.mean()), 2),
-                    "within_0_2_pct_pct": round(float((relative_errors <= 0.002).mean() * 100), 2),
+                    "within_0_7_pct_pct": round(float((relative_errors <= FORECAST_ERROR_TOLERANCE).mean() * 100), 2),
                 })
             results[alpha][str(h)] = {
                 "status": "research",
                 "asof": str(latest.date()),
+                "target_date": target_date,
+                "trading_calendar_source": calendar_source,
                 "base_close": round(base_close, 2),
                 "forecast_close": round(float(predicted_close), 2),
                 "predicted_return_pct": round(predicted_return * 100, 4),
@@ -1247,6 +1375,8 @@ def build_ridge_trial_forecasts(df, chips, margin, futures=None, alphas=(10.0, 1
             session = {
                 "horizon_sessions": h,
                 "label": "D+" + str(h),
+                "target_date": item.get("target_date"),
+                "trading_calendar_source": item.get("trading_calendar_source"),
                 "status": item.get("status", "insufficient"),
                 "training_samples": int(item.get("training_samples", 0)),
                 "forecast_close": item.get("forecast_close"),
