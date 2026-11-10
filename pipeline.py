@@ -110,6 +110,29 @@ def _fetch_twse_closed_dates(year):
         return None
 
 
+def _expected_twse_trading_days(start, end):
+    """Build an independent Taiwan-session index from TWSE annual closure calendars.
+
+    Return an empty index when any requested year cannot be verified; never
+    silently substitute observed TAIEX dates as the expected-session denominator.
+    """
+    start_day = pd.Timestamp(start).tz_localize(None).normalize()
+    end_day = pd.Timestamp(end).tz_localize(None).normalize()
+    if end_day < start_day:
+        return pd.DatetimeIndex([]), "twse_official_holiday_schedule"
+    closures = set()
+    for year in range(start_day.year, end_day.year + 1):
+        year_closures = _fetch_twse_closed_dates(year)
+        if year_closures is None:
+            return pd.DatetimeIndex([]), "unavailable"
+        closures.update(year_closures)
+    weekdays = pd.bdate_range(start_day, end_day)
+    expected = weekdays[~weekdays.date.astype(object).__array__().astype(object).astype(str).isin(
+        {day.isoformat() for day in closures}
+    )]
+    return pd.DatetimeIndex(expected), "twse_official_holiday_schedule"
+
+
 def _future_taiwan_trading_dates(asof, count=3):
     """Return the next Taiwan cash-market dates and disclose calendar quality."""
     base = pd.Timestamp(asof).date()
@@ -1555,8 +1578,12 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     """Persist Taiwan-only source coverage before any international/model validation."""
     now = pd.Timestamp.now(tz="Asia/Taipei")
     taiex = df["TAIEX"].dropna() if isinstance(df, pd.DataFrame) and "TAIEX" in df else pd.Series(dtype=float)
-    expected = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
-    expected = expected.tz_localize(None).normalize().unique().sort_values() if len(expected) else pd.DatetimeIndex([])
+    observed_taiex = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
+    observed_taiex = observed_taiex.tz_localize(None).normalize().unique().sort_values() if len(observed_taiex) else pd.DatetimeIndex([])
+    expected, calendar_source = (
+        _expected_twse_trading_days(observed_taiex.min(), observed_taiex.max())
+        if len(observed_taiex) else (pd.DatetimeIndex([]), "unavailable")
+    )
 
     def coverage(frame, columns, source, source_window_years=None, source_window_start=None):
         recent_start = now.normalize().tz_localize(None) - pd.Timedelta(days=365)
@@ -1630,26 +1657,30 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
 
     market_status = df.attrs.get("data_status", {}) if isinstance(df, pd.DataFrame) else {}
     latest_taiex = pd.Timestamp(taiex.index[-1]) if len(taiex) else None
-    taiex_index = pd.DatetimeIndex(pd.to_datetime(taiex.index, errors="coerce")).dropna()
-    taiex_index = taiex_index.tz_localize(None).normalize().unique().sort_values()
-    taiex_missing = expected.difference(taiex_index)
+    taiex_index = observed_taiex
+    taiex_missing = expected.difference(taiex_index) if len(expected) else pd.DatetimeIndex([])
+    taiex_unexpected = taiex_index.difference(expected) if len(expected) else pd.DatetimeIndex([])
     layers = {
         "TAIEX": {
             "source": market_status.get("taiwan_index_source", "來源未確認"),
             "latest_date": str(latest_taiex.date()) if latest_taiex is not None else None,
             "valid_rows": int(len(taiex)),
             "start_date": str(taiex_index.min().date()) if len(taiex_index) else None,
-            "expected_rows": int(len(expected)),
-            "coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) else None,
-            "full_history_coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) else None,
+            "expected_rows": int(len(expected)) if calendar_source != "unavailable" else None,
+            "coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) and calendar_source != "unavailable" else None,
+            "full_history_coverage_pct": round(len(taiex_index.intersection(expected)) / len(expected) * 100, 1) if len(expected) and calendar_source != "unavailable" else None,
+            "calendar_source": calendar_source,
             "recent_1y_expected_rows": int(len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)])),
             "recent_1y_valid_rows": int(len(taiex_index.intersection(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]))),
             "recent_1y_coverage_pct": round(
                 len(taiex_index.intersection(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)])) /
                 len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]) * 100, 1
             ) if len(expected[expected >= now.normalize().tz_localize(None) - pd.Timedelta(days=365)]) else None,
-            "missing_rows": int(len(taiex_missing)),
+            "missing_rows": int(len(taiex_missing)) if calendar_source != "unavailable" else None,
             "missing_dates": [str(x.date()) for x in taiex_missing[:20]],
+            "unexpected_rows": int(len(taiex_unexpected)) if calendar_source != "unavailable" else None,
+            "unexpected_dates": [str(x.date()) for x in taiex_unexpected[:20]],
+            "calendar_verified": calendar_source != "unavailable",
             "age_calendar_days": max(0, int((now.normalize().tz_localize(None) -
                                              latest_taiex.normalize()).days))
                                   if latest_taiex is not None else None
@@ -1664,7 +1695,18 @@ def write_taiwan_data_status(df, chips=None, margin=None, futures=None):
     payload = {
         "updated_at": now.isoformat(),
         "demo": False,
-        "note": "籌碼／信用／期貨覆蓋率以加權指數實際有收盤資料的台股交易日為分母；期貨另列自來源可用起始日 2018-06-05 起的覆蓋率。此報表不代表即時報價。",
+        "calendar_validation": {
+            "source": calendar_source,
+            "status": "verified" if calendar_source != "unavailable" else "unavailable",
+            "scope_start": str(observed_taiex.min().date()) if len(observed_taiex) else None,
+            "scope_end": str(observed_taiex.max().date()) if len(observed_taiex) else None,
+            "expected_trading_sessions": int(len(expected)) if calendar_source != "unavailable" else None,
+            "observed_taiex_sessions": int(len(observed_taiex)),
+            "missing_expected_sessions": int(len(taiex_missing)) if calendar_source != "unavailable" else None,
+            "unexpected_observed_sessions": int(len(taiex_unexpected)) if calendar_source != "unavailable" else None,
+            "note": "範圍以實際觀測到的首末 TAIEX 日期為界；不代表首末日期以外的歷史完整性。"
+        },
+        "note": "籌碼／信用／期貨覆蓋率以 TWSE 年度官方休市日曆推導的預期交易日為分母；若日曆無法取得，覆蓋率標示未知，不以實際 TAIEX 日期冒充獨立分母。期貨另列來源可用起始日 2018-06-05 起的覆蓋率。此報表不代表即時報價。",
         "layers": layers
     }
     tmp = "taiwan_data_status.json.tmp"
