@@ -6,7 +6,7 @@ This module is a first executable step after the design/schema PR. It deliberate
 
 \`\`\`bash
 python event_monitor.py
-python -m unittest tests.test_event_monitor -v
+python -m unittest discover -s tests -p 'test_event_monitor.py' -v
 \`\`\`
 
 The script reuses \`news.headlines()\`, so it uses the RSS/search discovery already implemented in \`news.py\`. It writes only to the local \`research_data/event_monitor_history.jsonl\` file by default. No GitHub Actions workflow invokes it.
