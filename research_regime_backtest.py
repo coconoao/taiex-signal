@@ -172,8 +172,8 @@ def main() -> int:
             )
         alignment[f"D+{horizon}"] = next(iter(signatures.values()))
 
-    result = group_results["chips_margin_futures"]
-    features_by_horizon = feature_groups["chips_margin_futures"]
+    result = group_results["price_only"]
+    features_by_horizon = feature_groups["price_only"]
 
     def summarize_group(group_result):
         summary = {}
@@ -250,6 +250,13 @@ def main() -> int:
               if str(column).startswith(("籌碼:", "信用:", "期貨:"))],
         ],
         "cache_source": "Supabase site_data (read-only)" if cache_status["enabled"] else "unavailable",
+        "selected_feature_group": "price_only",
+        "feature_selection_decision": "同期間消融顯示法人／融資融券／期貨特徵未改善點位 MAE，且高／極高召回率下降；選用價格層。",
+        "optional_layers_available": {
+            "institutional_flows": bool(_coverage(chips_raw)["available"]),
+            "margin_short_selling": bool(_coverage(margin_raw)["available"]),
+            "futures_open_interest": bool(_coverage(futures_raw)["available"]),
+        },
         "optional_layers": {
             "institutional_flows": bool(features_by_horizon[1][0].columns.astype(str).str.startswith("籌碼:").any()),
             "margin_short_selling": bool(features_by_horizon[1][0].columns.astype(str).str.startswith("信用:").any()),
@@ -262,8 +269,8 @@ def main() -> int:
         },
         "timing_policy": result.get("feature_timing_policy"),
         "note": (
-            "使用 Supabase 唯讀歷史快取；法人、融資融券及期貨原始資料先依完整台灣交易日曆延後一個交易日，"
-            "再進行特徵工程。跨市場收盤特徵亦延後一個台灣交易日。若資料來源不可用則明確標示，不以未公布資料回填。"
+            "正式候選特徵組選用價格層；法人、融資融券及期貨資料僅作同期間消融研究，原始資料先依完整台灣交易日曆延後一個交易日。"
+            "跨市場收盤特徵亦延後一個台灣交易日；不以未公布資料回填。專家權重只根據成熟的先前 OOS MAE 決定。"
         ),
     }
 
