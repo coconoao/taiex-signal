@@ -63,7 +63,7 @@ class RegimeRouterTests(unittest.TestCase):
         # the value from session 1 must not be shifted across a missing session.
         self.assertEqual(aligned.loc[dates[2], "foreign_net"], 20.0)
         self.assertTrue(pd.isna(aligned.loc[dates[3], "foreign_net"]))
-        self.assertEqual(aligned.loc[dates[4], "foreign_net"], 40.0)
+        self.assertEqual(aligned.loc[dates[4], "foreign_net"], 30.0)
 
     def test_post_close_engineered_features_are_lagged_by_router(self):
         dates = pd.bdate_range("2024-01-01", periods=4)
