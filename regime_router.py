@@ -64,6 +64,24 @@ def _future_max_daily_move(close, horizon):
     return future_moves.max(axis=1)
 
 
+def _lag_base_cross_market_features(X):
+    """Shift pre-existing international/regional returns to Taiwan-close availability.
+
+    pipeline.build() is shared with an overnight forecast path where same-date
+    US closes are valid for the next Taiwan session. The router's forecast
+    origin is instead the Taiwan cash close, so those same-date values are not
+    yet observable and must be lagged here.
+    """
+    features = X.copy()
+    columns = [
+        column for column in features.columns
+        if str(column).startswith(("國際:", "區域:"))
+    ]
+    if columns:
+        features.loc[:, columns] = features.loc[:, columns].shift(1)
+    return features
+
+
 def _augment_router_features(X, market_data):
     """Add point-in-time volatility and cross-market level/momentum features."""
     if market_data is None:
@@ -497,6 +515,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             })
             continue
         X, forward_returns = features_by_horizon[horizon]
+        X = _lag_base_cross_market_features(X)
         X = _augment_router_features(X, market_data)
         forward_returns = pd.to_numeric(forward_returns, errors="coerce").reindex(X.index)
         numeric_features = X.apply(pd.to_numeric, errors="coerce")
