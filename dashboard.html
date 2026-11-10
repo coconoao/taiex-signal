@@ -395,7 +395,7 @@ function renderTrialPointForecasts(forecast) {
     const sessions = Array.isArray(candidate.sessions) ? candidate.sessions : [];
     const cards = [1,2,3].map(h => {
       const item = sessions.find(x => Number(x.horizon_sessions) === h) || {};
-      const label = item.target_date ? item.target_date + "（D+" + h + "）" : "交易日期待確認（D+" + h + "）";
+      const label = item.target_date ? item.target_date + (item.trading_calendar_source === "twse_official" ? "" : "（暫估）") + "（D+" + h + "）" : "交易日期待確認（D+" + h + "）";
       const pointValid = item.forecast_close != null && Number.isFinite(Number(item.forecast_close));
       if (item.status !== "research" || !pointValid) {
         return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '／至少 120</p></article>';
