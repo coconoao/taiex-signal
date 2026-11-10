@@ -5,3 +5,4 @@ yfinance
 lxml
 tzdata
 curl_cffi>=0.17.0
+websocket-client>=1.8.0

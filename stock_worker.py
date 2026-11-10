@@ -13,6 +13,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from tw_market_data import MarketDataError
+from taiex_realtime import IndexQuoteError, load_taiex_realtime
 
 TOKEN = os.environ.get("STOCK_WORKER_TOKEN", "")
 MAX_BODY = 4096
@@ -275,6 +276,18 @@ document.getElementById("run").addEventListener("click",async()=>{
             return
         if self.path == "/healthz":
             return self._json({"ok": True, "service": "stock-worker"})
+        if self.path == "/api/taiex":
+            supplied = self.headers.get("Authorization", "")
+            if not TOKEN or supplied != "Bearer " + TOKEN:
+                return self._json({"error": "unauthorized"}, 401)
+            try:
+                return self._json(load_taiex_realtime())
+            except IndexQuoteError:
+                return self._json({
+                    "available": False, "realtime": False,
+                    "status": "UPSTREAM_ERROR", "symbol": "IX0001",
+                    "name": "發行量加權股價指數", "source": "Fugle WebSocket",
+                }, 503)
         if self.path.startswith("/analysis-jobs/"):
             supplied = self.headers.get("Authorization", "")
             if not TOKEN or supplied != "Bearer " + TOKEN:
