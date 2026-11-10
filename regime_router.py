@@ -197,6 +197,36 @@ def _safe_mae(predicted, actual):
     return round(float(np.mean(np.abs(np.asarray(predicted) - np.asarray(actual)))), 2)
 
 
+def _historical_magnitude_profile(returns, base_close):
+    """Summarize only past, labelled returns from the expert actually selected."""
+    values = np.asarray(returns, dtype=float)
+    values = values[np.isfinite(values)]
+    if len(values) < 20:
+        return {"status": "insufficient", "samples": int(len(values))}
+    absolute = np.abs(values)
+    quantiles = {
+        "p10_return_pct": round(float(np.percentile(values, 10) * 100), 3),
+        "p50_return_pct": round(float(np.percentile(values, 50) * 100), 3),
+        "p90_return_pct": round(float(np.percentile(values, 90) * 100), 3),
+        "median_abs_move_pct": round(float(np.percentile(absolute, 50) * 100), 3),
+        "p90_abs_move_pct": round(float(np.percentile(absolute, 90) * 100), 3),
+    }
+    exceedance = {
+        str(threshold): round(float(np.mean(absolute >= threshold / 100.0) * 100), 2)
+        for threshold in (1.0, 2.0, 3.0, 5.0, 7.5)
+    }
+    return {
+        "status": "available",
+        "samples": int(len(values)),
+        **quantiles,
+        "historical_abs_move_exceedance_pct": exceedance,
+        "scenario_p10_close": round(float(base_close * (1.0 + np.percentile(values, 10) / 100.0)), 2),
+        "scenario_p50_close": round(float(base_close * (1.0 + np.percentile(values, 50) / 100.0)), 2),
+        "scenario_p90_close": round(float(base_close * (1.0 + np.percentile(values, 90) / 100.0)), 2),
+        "note": "僅為所選專家訓練樣本的歷史條件分布，不是未來機率或保證區間。",
+    }
+
+
 def _router_metrics(actual_classes, predicted_classes, probabilities):
     if not actual_classes:
         return {"status": "insufficient", "oos_samples": 0}
@@ -406,6 +436,13 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         predicted_return = float(expert.predict(X.loc[[latest]])[0])
         base_close = float(close.loc[latest])
         forecast_close = base_close * (1.0 + predicted_return)
+        if expert_used in REGIME_NAMES:
+            selected_class = REGIME_NAMES.index(expert_used)
+            selected_mask = final_regimes.to_numpy(dtype=int) == selected_class
+            selected_returns = forward_returns.loc[train_idx].to_numpy(dtype=float)[selected_mask]
+        else:
+            selected_returns = forward_returns.loc[train_idx].to_numpy(dtype=float)
+        magnitude_profile = _historical_magnitude_profile(selected_returns, base_close)
         meta = target_meta.get(horizon, {})
         sessions.append({
             "horizon_sessions": horizon,
@@ -448,6 +485,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
+            "historical_magnitude_profile": magnitude_profile,
             "note": (
                 "此為研究候選；D+N 報酬為基準收盤至第 N 個交易日收盤的累積報酬。"
                 "分流機率使用先前可得的樣本外預測逐段校準；校準樣本不足時保留原始分流分數。"
