@@ -182,6 +182,7 @@ def main() -> int:
         alignment[f"D+{horizon}"] = next(iter(signatures.values()))
 
     result = group_results["chips_margin_futures"]
+    features_by_horizon = feature_groups["chips_margin_futures"]
 
     def summarize_group(group_result):
         summary = {}
