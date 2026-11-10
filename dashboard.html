@@ -440,6 +440,9 @@ function renderRegimeRouter(router) {
     ).join("｜");
     const probabilityLabel = item.probabilities_calibrated ? "校準後狀態機率：" : "未校準分流分數：";
     const selected = names[item.regime] || item.regime_label || "未分類";
+    const decisionThresholds = item.router_decision_thresholds || {};
+    const thresholdText = "風險升級門檻：高／極高 " + (Number(decisionThresholds.high_extreme || 0.25) * 100).toFixed(1) +
+      "%｜極高 " + (Number(decisionThresholds.extreme || 0.15) * 100).toFixed(1) + "%";
     const expert = item.expert_used === "global_fallback" ? "全域備援模型" : (names[item.expert_used] || item.expert_used);
     const validation = item.router_validation || {};
     const metrics = validation.status === "available"
@@ -464,6 +467,7 @@ function renderRegimeRouter(router) {
       '<p class="forecast-change">實際選用：' + expert + '｜專家訓練樣本 ' + Number(item.expert_training_samples || 0).toLocaleString("zh-TW") + '</p>' +
       '<p class="forecast-change">' + maxDailyMoveText + '</p>' +
       '<p class="forecast-meta">' + probabilityLabel + probabilityText + '</p>' +
+      '<p class="forecast-meta">' + thresholdText + '</p>' +
       '<p class="forecast-meta">' + metrics + fallback + '</p>' +
       '<p class="forecast-meta">' + profileText + '；僅為歷史條件分布參考</p></article>';
   }).join("");
