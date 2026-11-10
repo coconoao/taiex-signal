@@ -70,6 +70,22 @@ def _augment_router_features(X, market_data):
         return X
     market = market_data.reindex(X.index).apply(pd.to_numeric, errors="coerce")
     features = X.copy()
+    # Canonical forecast origin is the Taiwan cash close. Cross-market closes
+    # from the same calendar label may occur after that close (US session), so
+    # lag every non-Taiwan market input by one Taiwan trading session. This keeps
+    # historical OOS rows aligned with what production actually knew at 16:15.
+    cross_market = (
+        ("SOX", "國際:SOX"),
+        ("TSM", "國際:TSM"),
+        ("VIX", "國際:VIX"),
+        ("US10Y", "國際:US10Y"),
+        ("N225", "區域:N225"),
+        ("KOSPI", "區域:KOSPI"),
+        ("USDTWD", "區域:USDTWD"),
+    )
+    for ticker, feature_name in cross_market:
+        if ticker in market:
+            features[feature_name] = market[ticker].pct_change().shift(1)
     if "TAIEX" in market:
         close = market["TAIEX"]
         daily = close.pct_change()
@@ -80,13 +96,15 @@ def _augment_router_features(X, market_data):
         features["router:TAIEX_drawdown_20d"] = close / close.rolling(20, min_periods=15).max() - 1.0
     for ticker in ("SOX", "TSM", "N225", "KOSPI", "USDTWD"):
         if ticker in market:
-            features[f"router:{ticker}_momentum_5d"] = market[ticker].pct_change(5)
+            features[f"router:{ticker}_momentum_5d"] = market[ticker].pct_change(5).shift(1)
     if "VIX" in market:
         vix = market["VIX"]
-        features["router:VIX_level_vs_60d_mean"] = vix / vix.rolling(60, min_periods=20).mean() - 1.0
-        features["router:VIX_change_5d"] = vix.pct_change(5)
+        features["router:VIX_level_vs_60d_mean"] = (
+            vix / vix.rolling(60, min_periods=20).mean() - 1.0
+        ).shift(1)
+        features["router:VIX_change_5d"] = vix.pct_change(5).shift(1)
     if "US10Y" in market:
-        features["router:US10Y_change_5d"] = market["US10Y"].diff(5)
+        features["router:US10Y_change_5d"] = market["US10Y"].diff(5).shift(1)
     return features
 
 
@@ -689,5 +707,6 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         "sessions": sessions,
         "probability_note": "使用先前樣本外分流預測進行逐段時間序列校準；校準樣本不足時保留原始分流分數並明確標示。Brier 與 log-loss 以樣本外資料計算。",
         "validation_method": "purged_expanding_walk_forward_oos_recent_2000_sessions",
+        "feature_timing_policy": "Taiwan cash-close origin; all non-Taiwan market close features lagged one Taiwan trading session to prevent same-date post-close leakage",
         "production_replacement": False,
     }
