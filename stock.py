@@ -68,6 +68,27 @@ def analyze(code):
         code, exchange_hint, years=HISTORY_YEARS,
     )
 
+    # Intraday data is supplemental; historical research calculations continue
+    # to use the validated daily series, never an intraday quote.
+    intraday_quote = _timed_stage(
+        "intraday_quote", tw_market_data.load_intraday_quote, code
+    )
+    if intraday_quote.get("status") == "REALTIME":
+        quote_status_text = "Fugle 即時行情；更新時間在 5 分鐘內。"
+    elif intraday_quote.get("status") == "STALE":
+        quote_status_text = "已取得 Fugle 報價，但資料過期或非當日，不能視為即時行情。"
+    else:
+        quote_status_text = {
+            "NO_API_KEY": "尚未設定 Fugle API Key，僅提供歷史日線資料。",
+            "AUTH_FAILED": "Fugle API 驗證失敗，僅提供歷史日線資料。",
+            "RATE_LIMITED": "Fugle API 已達請求限制，僅提供歷史日線資料。",
+            "TIMEOUT": "Fugle API 連線逾時，僅提供歷史日線資料。",
+            "INVALID_SYMBOL": "股票代號格式不正確，無法取得即時報價。",
+            "INVALID_DATA": "Fugle 回傳資料與查詢代號不符，已拒絕使用。",
+            "INVALID_TIMESTAMP": "Fugle 報價缺少有效時間戳記，已拒絕標示為即時。",
+            "NO_TRADE_DATA": "Fugle 尚未提供可用成交價格。",
+        }.get(intraday_quote.get("status"), "Fugle 行情暫時無法取得，僅提供歷史日線資料。")
+
     import os
     if os.path.exists("signals.json"):
         try:
@@ -132,16 +153,22 @@ def analyze(code):
         "adjusted_last": round(float(px.iloc[-1]), 4),
         "asof": str(raw_px.index[-1].date()),
         "history_asof": str(raw_px.index[-1].date()),
-        "quote_time": None,
-        "quote_source": stock_data.attrs.get("source", "TWSE/TPEx official"),
-        "market_state": "CLOSED",
+        "quote_time": intraday_quote.get("trade_time"),
+        "quote_updated_at": intraday_quote.get("updated_at"),
+        "quote_last": intraday_quote.get("price"),
+        "quote_change": intraday_quote.get("change"),
+        "quote_change_percent": intraday_quote.get("change_percent"),
+        "quote_age_seconds": intraday_quote.get("age_seconds"),
+        "quote_source": "Fugle" if intraday_quote.get("available") else stock_data.attrs.get("source", "TWSE/TPEx official"),
+        "market_state": "REALTIME" if intraday_quote.get("realtime") else "CLOSED_OR_STALE",
         "history_start": str(px.index[0].date()),
         "history_sessions": int(len(px)),
         "history_years_requested": HISTORY_YEARS,
         "market_data_source": stock_data.attrs.get("source", "TWSE/TPEx official"),
         "price_basis": "official_reference_price_chained_adjusted",
-        "quote_realtime": False,
-        "quote_status": "目前顯示交易所最近一個完整收盤日線價格；尚未接入獲授權的盤中行情來源。",
+        "quote_realtime": bool(intraday_quote.get("realtime")),
+        "quote_status": quote_status_text,
+        "intraday_quote": intraday_quote,
         "beta": beta,
         "stock_expected": stock_expected,
         "historical_horizons": historical_horizons,
