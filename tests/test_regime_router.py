@@ -55,12 +55,21 @@ class RegimeRouterTests(unittest.TestCase):
     def test_regime_accuracy_gate_requires_strictly_more_than_70_percent(self):
         def metrics_for(correct):
             actual = [0] * 10
-            predicted = [0] * correct + [1] * (10 - correct)
-            probabilities = np.full((10, 4), 0.25, dtype=float)
-            return _router_metrics(actual, predicted, probabilities)
+            # Deliberately make the risk-first action disagree with the
+            # conventional probability argmax to verify the gate's metric.
+            risk_first_predicted = [1] * 10
+            probabilities = np.full((10, 4), 0.025, dtype=float)
+            probabilities[:correct, 0] = 0.925
+            probabilities[correct:, 1] = 0.925
+            return _router_metrics(actual, risk_first_predicted, probabilities)
 
-        exactly_70 = metrics_for(7)["accuracy_threshold_gate"]
-        above_70 = metrics_for(8)["accuracy_threshold_gate"]
+        exactly_70_metrics = metrics_for(7)
+        above_70_metrics = metrics_for(8)
+        exactly_70 = exactly_70_metrics["accuracy_threshold_gate"]
+        above_70 = above_70_metrics["accuracy_threshold_gate"]
+        self.assertEqual(exactly_70_metrics["risk_first_accuracy"], 0.0)
+        self.assertEqual(exactly_70_metrics["argmax_accuracy"], 0.7)
+        self.assertEqual(above_70_metrics["argmax_accuracy"], 0.8)
         self.assertFalse(exactly_70["eligible_by_accuracy_only"])
         self.assertEqual(exactly_70["status"], "not_eligible")
         self.assertTrue(above_70["eligible_by_accuracy_only"])
