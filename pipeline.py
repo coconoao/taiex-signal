@@ -1826,7 +1826,7 @@ if __name__ == "__main__":
                     "trading_calendar_source": session.get("trading_calendar_source"),
                 }
         three_day_forecast["regime_router"] = build_regime_router_forecasts(
-            router_inputs, df["TAIEX"], target_meta=target_meta
+            router_inputs, df["TAIEX"], target_meta=target_meta, market_data=df
         )
     except Exception as exc:
         # Router research must never block the production forecast refresh.
