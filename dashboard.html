@@ -395,7 +395,7 @@ function renderTrialPointForecasts(forecast) {
     const sessions = Array.isArray(candidate.sessions) ? candidate.sessions : [];
     const cards = [1,2,3].map(h => {
       const item = sessions.find(x => Number(x.horizon_sessions) === h) || {};
-      const label = "第 " + h + " 個交易日（D+" + h + "）";
+      const label = item.target_date ? item.target_date + "（D+" + h + "）" : "交易日期待確認（D+" + h + "）";
       const pointValid = item.forecast_close != null && Number.isFinite(Number(item.forecast_close));
       if (item.status !== "research" || !pointValid) {
         return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '／至少 120</p></article>';
@@ -411,8 +411,8 @@ function renderTrialPointForecasts(forecast) {
       const validation = item.validation || {};
       const mae = validation.mae_points == null ? "樣本不足" : Number(validation.mae_points).toLocaleString("zh-TW") + " 點";
       const baselineMae = validation.flat_baseline_mae_points == null ? "—" : Number(validation.flat_baseline_mae_points).toLocaleString("zh-TW") + " 點";
-      const hit = validation.within_0_2_pct_pct == null ? "樣本不足" : Number(validation.within_0_2_pct_pct).toFixed(1) + "%";
-      return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + changeText + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.2% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
+      const hit = validation.within_0_7_pct_pct == null ? "待更新樣本" : Number(validation.within_0_7_pct_pct).toFixed(1) + "%";
+      return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + changeText + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.7% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
     }).join("");
     const state = candidate.status === "research" ? "研究候選・尚未核准取代正式模型" : "資料不足";
     return '<section class="trial-model-block"><h3>' + esc(title) + '</h3><p class="note">版本 ' + esc(candidate.model_version || "—") + '｜' + state + '</p><div class="forecast-grid">' + cards + '</div></section>';
@@ -433,7 +433,7 @@ function renderDaily(d) {
   }
   const cards = [1,2,3].map(h => {
     const item = sessions.find(x => Number(x.horizon_sessions) === h) || {};
-    const label = item.target_date ? "第 " + h + " 個交易日（" + item.target_date + "）" : "第 " + h + " 個交易日（D+" + h + "）";
+    const label = item.target_date ? item.target_date + "（D+" + h + "）" : "交易日期待確認（D+" + h + "）";
     if (item.status !== "research" || !Number.isFinite(Number(item.forecast_close))) {
       return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value">資料累積中</div><p class="forecast-meta">有效訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '／至少 120</p></article>';
     }
@@ -447,12 +447,12 @@ function renderDaily(d) {
     const change = comparison ? changeText + " " + sign + Number(comparison.points).toFixed(0) + " 點（" + sign + Number(comparison.pct).toFixed(2) + "%）" : changeText;
     const validation = item.validation || {};
     const mae = validation.mae_points == null ? "樣本不足" : Number(validation.mae_points).toLocaleString("zh-TW") + " 點";
-    const hit = validation.within_0_2_pct_pct == null ? "樣本不足" : Number(validation.within_0_2_pct_pct).toFixed(1) + "%";
+    const hit = validation.within_0_7_pct_pct == null ? "樣本不足" : Number(validation.within_0_7_pct_pct).toFixed(1) + "%";
     const baselineMae = validation.flat_baseline_mae_points == null ? "—" : Number(validation.flat_baseline_mae_points).toLocaleString("zh-TW") + " 點";
-    return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + change + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.2% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
+    return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + change + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.7% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
   }).join("");
   $("threeDayForecast").innerHTML = cards || '<p class="note">目前沒有可用的三日預測資料。</p>';
-  $("threeDayMeta").textContent = "基準收盤 " + Number(forecast.base_close).toLocaleString("zh-TW") + " 點｜資料日期 " + (forecast.asof || d.asof) + "｜模型：" + (forecast.model_version || "direct-horizon") + "（研究中）";
+  $("threeDayMeta").textContent = "基準收盤 " + Number(forecast.base_close).toLocaleString("zh-TW") + " 點｜收盤資料日期 " + (forecast.asof || d.asof) + "｜預測誤差容許值 ±0.7%｜模型：" + (forecast.model_version || "direct-horizon") + "（研究中）";
 }
 function renderWeekly(w) {
   const hh = w.horizon_history || {};
