@@ -484,7 +484,7 @@ function renderDaily(d) {
   const forecast = d.forecast || {};
   renderTrialPointForecasts(forecast);
   renderRegimeRouter(forecast.regime_router);
-  $("regimeRouterSummary").hidden = true;
+  $("regimeRouterSummary").hidden = false;
   const router = forecast.regime_router || {};
   const routerSessions = Array.isArray(router.sessions) ? router.sessions : [];
   const baseClose = Number(forecast.base_close);
