@@ -720,10 +720,17 @@ def _router_metrics(actual_classes, predicted_classes, probabilities, prior_prob
     extreme_predicted = predicted == 3
     one_hot = np.eye(len(CLASS_IDS), dtype=float)[actual]
     clipped = np.clip(probs, 1e-8, 1.0)
+    # The operational router is deliberately risk-first and may override argmax.
+    # Report conventional four-class classification separately so its accuracy
+    # is not conflated with the risk-escalation decision policy.
+    argmax_predicted = np.argmax(probs, axis=1)
+    argmax_accuracy = round(float(accuracy_score(actual, argmax_predicted)), 4)
     result = {
         "status": "available",
         "oos_samples": int(len(actual)),
         "accuracy": round(float(accuracy_score(actual, predicted)), 4),
+        "risk_first_accuracy": round(float(accuracy_score(actual, predicted)), 4),
+        "argmax_accuracy": argmax_accuracy,
         "balanced_accuracy": round(float(balanced_accuracy_score(actual, predicted)), 4),
         "macro_f1": round(float(f1_score(actual, predicted, labels=CLASS_IDS, average="macro", zero_division=0)), 4),
         "per_class": per_class,
@@ -775,22 +782,23 @@ def _router_metrics(actual_classes, predicted_classes, probabilities, prior_prob
     threshold = 0.70
     baseline = result.get("prequential_prior_frequency_baseline", {})
     result["accuracy_threshold_gate"] = {
-        "metric": "four_class_regime_oos_accuracy",
+        "metric": "four_class_regime_argmax_oos_accuracy",
         "threshold_exclusive": threshold,
-        "observed_accuracy": accuracy,
-        "eligible_by_accuracy_only": bool(accuracy is not None and accuracy > threshold),
+        "observed_accuracy": result.get("argmax_accuracy"),
+        "eligible_by_accuracy_only": bool(result.get("argmax_accuracy") is not None and result["argmax_accuracy"] > threshold),
         "status": (
             "eligible_by_accuracy_only"
-            if accuracy is not None and accuracy > threshold
+            if result.get("argmax_accuracy") is not None and result["argmax_accuracy"] > threshold
             else "not_eligible"
         ),
         "baseline_accuracy": baseline.get("accuracy"),
         "accuracy_above_prior_baseline": (
-            bool(accuracy > baseline["accuracy"])
-            if accuracy is not None and baseline.get("accuracy") is not None
+            bool(result["argmax_accuracy"] > baseline["accuracy"])
+            if result.get("argmax_accuracy") is not None and baseline.get("accuracy") is not None
             else None
         ),
-        "scope": "pooled chronological walk-forward OOS; not an untouched prospective holdout",
+        "scope": "argmax of OOS class probabilities; pooled chronological walk-forward OOS, not an untouched prospective holdout",
+        "risk_first_accuracy_reported_separately": True,
         "production_enabled": False,
     }
     return result
