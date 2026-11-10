@@ -586,7 +586,7 @@ def main():
                 "next_week": result["next_week"],
             }},
             "analysis_mode": "rules_only",
-        }, ensure_ascii=False) + "\\n")
+        }, ensure_ascii=False) + "\n")
 
     print(
         f"新聞更新成功：{len(hl)} 則標題，"
