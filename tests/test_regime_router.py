@@ -14,6 +14,7 @@ from regime_router import (
     _lag_base_cross_market_features,
     _lag_post_close_source_frame,
     _lag_post_close_features,
+    _forecast_metrics,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
@@ -23,6 +24,30 @@ from regime_router import (
 
 
 class RegimeRouterTests(unittest.TestCase):
+    def test_forecast_metrics_reports_exact_oos_date_window(self):
+        rows = [
+            {
+                "forecast_asof": "2024-01-02",
+                "predicted_close": 101.0, "actual_close": 100.0,
+                "actual_return": 0.0, "predicted_return": 0.01,
+                "actual_max_daily_move": 0.004, "predicted_max_daily_move": 0.003,
+                "global_predicted_close": 100.5, "global_predicted_max_daily_move": 0.002,
+                "actual_regime": 0, "expert_used": "low",
+            },
+            {
+                "forecast_asof": "2024-01-03",
+                "predicted_close": 102.0, "actual_close": 100.0,
+                "actual_return": 0.0, "predicted_return": 0.02,
+                "actual_max_daily_move": 0.02, "predicted_max_daily_move": 0.015,
+                "global_predicted_close": 101.0, "global_predicted_max_daily_move": 0.01,
+                "actual_regime": 2, "expert_used": "high",
+            },
+        ]
+        metrics = _forecast_metrics(rows)
+        self.assertEqual(metrics["oos_start_date"], "2024-01-02")
+        self.assertEqual(metrics["oos_end_date"], "2024-01-03")
+        self.assertEqual(metrics["oos_samples"], 2)
+
     def test_router_target_uses_max_daily_move_not_cumulative_return(self):
         prices = pd.Series([100.0, 102.0, 100.0, 101.0], index=pd.bdate_range("2024-01-01", periods=4))
         target = _future_max_daily_move(prices, 2)
