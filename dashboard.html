@@ -826,9 +826,10 @@ async function loadTaiexRealtime() {
       : "加權指數最近收盤（非即時）";
     value.textContent = Number(q.last).toLocaleString("zh-TW", {minimumFractionDigits:2, maximumFractionDigits:2});
     if (Number.isFinite(Number(q.change)) && Number.isFinite(Number(q.pct))) {
-      const sign = Number(q.change) > 0 ? "+" : "";
-      change.textContent = (Number(q.change) >= 0 ? "▲ " : "▼ ") +
-        sign + Number(q.change).toFixed(2) + " 點（" + sign + Number(q.pct).toFixed(2) + "%）";
+      const changeNum = Number(q.change), pctNum = Number(q.pct);
+      const arrow = changeNum > 0 ? "▲ " : changeNum < 0 ? "▼ " : "";
+      change.textContent = arrow + Math.abs(changeNum).toFixed(2) +
+        " 點（" + Math.abs(pctNum).toFixed(2) + "%）";
     } else {
       change.textContent = "漲跌資料不足";
     }
