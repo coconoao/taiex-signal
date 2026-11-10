@@ -2,7 +2,7 @@
 資料來源：國際市場新聞、中央社台灣新聞 RSS，以及台灣／美國政府政策與國際局勢的近 7 日公開資訊。
 用法：python news.py
 """
-import os, json, re, html, hashlib, csv, datetime as dt, time, socket, urllib.error, urllib.request, urllib.parse
+import os, json, re, html, hashlib, csv, datetime as dt, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
