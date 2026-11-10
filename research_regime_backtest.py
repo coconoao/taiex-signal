@@ -70,6 +70,42 @@ def _coverage(frame):
     }
 
 
+def _validate_taiwan_calendar(observed_index, start, end) -> dict:
+    """Compare observed TAIEX sessions with the independent official TWSE calendar."""
+    expected, source = pipeline._expected_twse_trading_days(start, end)
+    observed = pd.DatetimeIndex(pd.to_datetime(observed_index))
+    observed = observed.tz_localize(None).normalize().unique().sort_values()
+    if source != "twse_official_holiday_schedule" or len(expected) == 0:
+        return {
+            "status": "unavailable",
+            "passed": False,
+            "source": source,
+            "expected_sessions": int(len(expected)),
+            "observed_sessions": int(len(observed)),
+            "missing_count": None,
+            "unexpected_count": None,
+            "missing_dates": [],
+            "unexpected_dates": [],
+            "note": "官方交易日曆未能完整取得；不以觀測資料反推預期交易日。",
+        }
+    expected = pd.DatetimeIndex(expected).tz_localize(None).normalize().unique().sort_values()
+    missing = expected.difference(observed)
+    unexpected = observed.difference(expected)
+    passed = len(missing) == 0 and len(unexpected) == 0
+    return {
+        "status": "available",
+        "passed": bool(passed),
+        "source": source,
+        "expected_sessions": int(len(expected)),
+        "observed_sessions": int(len(observed)),
+        "missing_count": int(len(missing)),
+        "unexpected_count": int(len(unexpected)),
+        "missing_dates": [str(day.date()) for day in missing[:50]],
+        "unexpected_dates": [str(day.date()) for day in unexpected[:50]],
+        "note": "以 TWSE 官方年度休市日曆建立獨立交易日分母，再比對 TAIEX 實際收盤日期。",
+    }
+
+
 def main() -> int:
     cache_dir = Path("/tmp/taiex-regime-router-cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +120,13 @@ def main() -> int:
         raise RuntimeError(
             f"真實台股歷史資料不足：{len(close)} 個交易日，至少需要 800 日"
         )
+    calendar_validation = _validate_taiwan_calendar(
+        close.index, close.index.min(), close.index.max()
+    )
+    print(
+        "CALENDAR_VALIDATION " + json.dumps(calendar_validation, ensure_ascii=False),
+        flush=True,
+    )
 
     chips_raw = _read_optional_frame(cache_dir, "chips.csv")
     margin_raw = _read_optional_frame(cache_dir, "margin.csv")
@@ -245,6 +288,7 @@ def main() -> int:
         "start_date": str(close.index.min().date()),
         "end_date": str(close.index.max().date()),
         "taiwan_sessions": int(len(close)),
+        "calendar_validation": calendar_validation,
         "features": [
             "TAIEX", "SOX", "TSM", "VIX", "US10Y", "N225", "KOSPI", "USDTWD",
             *[str(column) for column in features_by_horizon[1][0].columns
@@ -303,6 +347,11 @@ def main() -> int:
         json.dumps(result, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
+    if not calendar_validation.get("passed"):
+        raise RuntimeError(
+            "官方交易日曆完整性驗證未通過；診斷已寫入 artifact，不能宣稱資料完整："
+            + json.dumps(calendar_validation, ensure_ascii=False)
+        )
     if len(result.get("sessions", [])) != 3:
         raise RuntimeError("真實資料回測未產生完整 D+1、D+2、D+3 結果")
     if any(
