@@ -218,6 +218,25 @@ def _select_risk_thresholds(probability_history, actual_history):
     }
 
 
+def _routing_reason(probabilities, thresholds, selected_class):
+    probabilities = np.asarray(probabilities, dtype=float)
+    high_risk = float(probabilities[2] + probabilities[3])
+    if int(selected_class) == 3:
+        return (
+            f"極高波動分數 {probabilities[3] * 100:.1f}% 達到升級門檻 "
+            f"{float(thresholds['extreme']) * 100:.1f}%"
+        )
+    if int(selected_class) == 2:
+        return (
+            f"高／極高合計分數 {high_risk * 100:.1f}% 達到升級門檻 "
+            f"{float(thresholds['high_extreme']) * 100:.1f}%"
+        )
+    return (
+        f"高／極高合計分數 {high_risk * 100:.1f}% 未達升級門檻 "
+        f"{float(thresholds['high_extreme']) * 100:.1f}%，由低／正常波動分數決定"
+    )
+
+
 def _route_regime(probabilities, thresholds):
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities[3] >= float(thresholds["extreme"]):
@@ -589,6 +608,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 for class_id, name in enumerate(REGIME_NAMES)
             },
             "router_decision_thresholds": final_decision_thresholds,
+            "routing_reason": _routing_reason(latest_probs, final_decision_thresholds, requested),
             "probabilities_calibrated": final_calibrator is not None,
             "probability_calibration": {
                 "method": "prequential_multinomial_logistic" if final_calibrator is not None else "not_available",
