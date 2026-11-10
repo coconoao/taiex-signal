@@ -5,10 +5,7 @@ on:
     branches:
       - main
     paths:
-      - ".github/workflows/refresh-data.yml"
       - "pipeline.py"
-  schedule:
-    - cron: "30 8 * * 1-5"
   workflow_dispatch:
 
 permissions:
