@@ -5,6 +5,65 @@ from unittest.mock import patch
 import tw_market_data
 
 
+class TestFugleIntradayQuote(unittest.TestCase):
+    def test_returns_fresh_quote_without_exposing_api_key(self):
+        import json
+        from types import SimpleNamespace
+        now_us = int(dt.datetime.now(dt.timezone.utc).timestamp() * 1_000_000)
+        payload = {
+            "symbol": "2330", "name": "台積電", "date":
+                dt.datetime.now(dt.timezone.utc).astimezone(
+                    __import__("zoneinfo").ZoneInfo("Asia/Taipei")
+                ).date().isoformat(),
+            "lastPrice": 1500, "change": 10, "changePercent": 0.67,
+            "lastUpdated": now_us, "lastTrade": {"time": now_us, "price": 1500},
+            "total": {"tradeVolume": 12345}, "exchange": "TWSE", "market": "TSE",
+        }
+        response = SimpleNamespace(status_code=200, content=json.dumps(payload).encode())
+        with patch.dict("os.environ", {"FUGLE_API_KEY": "test-secret"}), patch.object(
+            tw_market_data.curl_requests, "get", return_value=response
+        ) as get:
+            quote = tw_market_data.load_intraday_quote("2330")
+        self.assertTrue(quote["available"])
+        self.assertTrue(quote["realtime"])
+        self.assertEqual(quote["price"], 1500)
+        self.assertEqual(quote["status"], "REALTIME")
+        self.assertEqual(get.call_args.kwargs["headers"]["X-API-KEY"], "test-secret")
+        self.assertNotIn("test-secret", str(quote))
+
+    def test_missing_key_fails_closed(self):
+        with patch.dict("os.environ", {}, clear=True), patch.object(
+            tw_market_data.curl_requests, "get"
+        ) as get:
+            quote = tw_market_data.load_intraday_quote("2330")
+        self.assertEqual(quote["status"], "NO_API_KEY")
+        self.assertFalse(quote["realtime"])
+        get.assert_not_called()
+
+    def test_auth_failure_is_reported_without_response_body(self):
+        from types import SimpleNamespace
+        response = SimpleNamespace(status_code=401, content=b"secret response")
+        with patch.dict("os.environ", {"FUGLE_API_KEY": "test-secret"}), patch.object(
+            tw_market_data.curl_requests, "get", return_value=response
+        ):
+            quote = tw_market_data.load_intraday_quote("2330")
+        self.assertEqual(quote["status"], "AUTH_FAILED")
+        self.assertNotIn("secret", str(quote))
+
+    def test_mismatched_symbol_is_rejected(self):
+        import json
+        from types import SimpleNamespace
+        response = SimpleNamespace(
+            status_code=200,
+            content=json.dumps({"symbol": "2317", "lastPrice": 100}).encode(),
+        )
+        with patch.dict("os.environ", {"FUGLE_API_KEY": "test-secret"}), patch.object(
+            tw_market_data.curl_requests, "get", return_value=response
+        ):
+            quote = tw_market_data.load_intraday_quote("2330")
+        self.assertEqual(quote["status"], "INVALID_DATA")
+
+
 class TestTaiwanMarketData(unittest.TestCase):
     def test_request_json_logs_safe_network_diagnostic(self):
         error = OSError(101, "Network is unreachable")
