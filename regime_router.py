@@ -839,9 +839,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             sessions.append({
                 "horizon_sessions": horizon, "status": "insufficient",
                 "asof": str(latest.date()),
-                "training_samples": int(len(final_train_idx)),
-            "candidate_training_samples": int(len(train_idx)),
-            "unmatured_training_samples_excluded": int(len(train_idx) - len(final_train_idx)),
+                "training_samples": int(len(train_idx)),
                 "minimum_samples": MIN_TRAIN_SAMPLES,
                 "reason": "分流器有效訓練樣本不足",
             })
@@ -1087,7 +1085,12 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "forecast_close": round(float(forecast_close), 2),
             "predicted_return_pct": round(predicted_return * 100, 4),
             "predicted_max_daily_move_pct": round(predicted_max_move * 100, 4),
-            "training_samples": int(len(train_idx)),
+            "training_samples": int(len(final_train_idx)),
+            "candidate_training_samples": int(len(train_idx)),
+            "unmatured_training_samples_excluded": int(len(train_idx) - len(final_train_idx)),
+            "training_label_cutoff_date": str(
+                X.index[max(0, latest_position - horizon)].date()
+            ),
             "regime": REGIME_NAMES[requested],
             "regime_label": REGIME_LABELS[REGIME_NAMES[requested]],
             "regime_probabilities": {
