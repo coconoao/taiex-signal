@@ -23,10 +23,35 @@ from regime_router import (
     _route_regime,
     _routing_reason,
     _select_risk_thresholds,
+    _prior_regime_probabilities,
+    _router_metrics,
 )
 
 
 class RegimeRouterTests(unittest.TestCase):
+    def test_prior_regime_probabilities_use_smoothed_training_frequencies(self):
+        probabilities = _prior_regime_probabilities([0, 0, 1, 2], smoothing=1.0)
+        np.testing.assert_allclose(probabilities, [3 / 8, 2 / 8, 2 / 8, 1 / 8])
+        self.assertAlmostEqual(float(probabilities.sum()), 1.0)
+
+    def test_router_metrics_reports_extreme_class_and_prequential_prior_baseline(self):
+        actual = [0, 1, 1, 2, 3]
+        predicted = [0, 0, 1, 2, 2]
+        model_probs = np.full((5, 4), 0.25, dtype=float)
+        prior = _prior_regime_probabilities([0, 0, 1, 2], smoothing=1.0)
+        prior_probs = np.tile(prior, (len(actual), 1))
+        metrics = _router_metrics(actual, predicted, model_probs, prior_probs)
+        self.assertEqual(metrics["extreme_recall"], 0.0)
+        self.assertEqual(metrics["per_class"]["extreme"]["support"], 1)
+        baseline = metrics["prequential_prior_frequency_baseline"]
+        self.assertEqual(baseline["oos_samples"], len(actual))
+        self.assertEqual(
+            baseline["source"],
+            "blockwise_expanding_matured_training_class_frequency_laplace_smoothing",
+        )
+        self.assertIn("multiclass_brier", baseline)
+        self.assertIn("log_loss", baseline)
+
     def test_expert_performance_gate_uses_only_matured_prior_oos_records(self):
         records = []
         for position in range(100):
