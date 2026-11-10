@@ -138,7 +138,7 @@ class TaiwanNewsRelevanceTests(unittest.TestCase):
                         "missing_layers": ["chips"],
                     }, stream)
                 with open("news_research_history.jsonl", "w", encoding="utf-8") as stream:
-                    stream.write(json.dumps(original, ensure_ascii=False) + "\\n")
+                    stream.write(json.dumps(original, ensure_ascii=False) + "\n")
                 with patch.object(news, "latest_market_asof", return_value="2026-11-09"):
                     news.save_research_snapshot([{"kind": "market", "title": "new title"}])
                 with open("news_research_history.jsonl", encoding="utf-8") as stream:
