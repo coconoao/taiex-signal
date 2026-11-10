@@ -12,6 +12,7 @@ from regime_router import (
     _purged_training_indices,
     _augment_router_features,
     _lag_base_cross_market_features,
+    _lag_post_close_source_frame,
     _historical_magnitude_profile,
     _future_max_daily_move,
     _route_regime,
@@ -48,6 +49,20 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertEqual(aligned.loc[dates[3], "區域:N225"], -0.13)
         self.assertEqual(aligned.loc[dates[3], "本地:當日漲跌"], 0.004)
         self.assertEqual(aligned.loc[dates[3], "籌碼:外資買賣超"], 4)
+
+    def test_post_close_source_frames_are_lagged_on_full_taiwan_calendar(self):
+        dates = pd.bdate_range("2024-01-01", periods=6)
+        source = pd.DataFrame({
+            "foreign_net": [10.0, 20.0, 30.0, 40.0, 50.0],
+        }, index=dates[[0, 1, 3, 4, 5]])
+        aligned = _lag_post_close_source_frame(source, dates)
+        self.assertTrue(pd.isna(aligned.loc[dates[0], "foreign_net"]))
+        self.assertEqual(aligned.loc[dates[1], "foreign_net"], 10.0)
+        # Missing source data on session 2 stays missing on session 3 after lag;
+        # the value from session 1 must not be shifted across a missing session.
+        self.assertTrue(pd.isna(aligned.loc[dates[2], "foreign_net"]))
+        self.assertTrue(pd.isna(aligned.loc[dates[3], "foreign_net"]))
+        self.assertEqual(aligned.loc[dates[4], "foreign_net"], 40.0)
 
     def test_cross_market_features_are_lagged_to_taiwan_cash_close(self):
         dates = pd.bdate_range("2024-01-01", periods=70)
