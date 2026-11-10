@@ -48,8 +48,8 @@ def classify_regimes(future_max_daily_moves):
     labels[valid & (magnitude > LOW_MAX_RETURN) & (magnitude <= NORMAL_MAX_RETURN)] = 1
     labels[valid & (magnitude > NORMAL_MAX_RETURN) & (magnitude < EXTREME_MIN_RETURN)] = 2
     labels[valid & (magnitude >= EXTREME_MIN_RETURN)] = 3
-    if isinstance(forward_returns, pd.Series):
-        return pd.Series(labels, index=forward_returns.index, name="regime")
+    if isinstance(future_max_daily_moves, pd.Series):
+        return pd.Series(labels, index=future_max_daily_moves.index, name="regime")
     return labels
 
 
