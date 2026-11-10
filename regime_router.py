@@ -100,9 +100,9 @@ def _fit_router(X, y):
     sample_weights = np.asarray([class_weights[int(label)] for label in labels], dtype=float)
     boosted = HistGradientBoostingClassifier(
         learning_rate=0.06,
-        max_iter=70,
-        max_leaf_nodes=9,
-        min_samples_leaf=25,
+        max_iter=35,
+        max_leaf_nodes=7,
+        min_samples_leaf=30,
         l2_regularization=8.0,
         early_stopping=False,
         random_state=23,
@@ -323,9 +323,11 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         calibration_records = []
         calibrated_oos_samples = 0
         first_test = min(max(300, horizon + 30), max(horizon + 30, len(train_idx) // 2))
-        for start in range(first_test, len(train_idx), 30):
+        # Refit every 60 sessions: enough OOS checkpoints while keeping the
+        # nonlinear router's repeated expanding-window fits operationally bounded.
+        for start in range(first_test, len(train_idx), 60):
             fit_idx = train_idx[:start - horizon + 1]
-            test_idx = train_idx[start:start + 30]
+            test_idx = train_idx[start:start + 60]
             if len(fit_idx) < MIN_TRAIN_SAMPLES or not len(test_idx):
                 continue
             fit_regimes = classify_regimes(forward_returns.loc[fit_idx]).astype(int)
