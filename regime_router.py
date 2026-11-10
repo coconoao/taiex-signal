@@ -411,6 +411,78 @@ def _historical_magnitude_profile(cumulative_returns, max_daily_moves, base_clos
     }
 
 
+def _expert_performance_blend_weight(
+    records,
+    expert_name,
+    current_position,
+    horizon,
+    expert_prediction_key,
+    global_prediction_key,
+    actual_key,
+    min_samples=60,
+    max_history=500,
+    full_weight_improvement=0.05,
+):
+    """Use only matured prior OOS errors to decide expert-vs-global shrinkage."""
+    if expert_name == "global_fallback":
+        return {
+            "weight": 0.0, "samples": 0, "expert_mae": None,
+            "global_mae": None, "relative_improvement": None,
+            "reason": "expert_fell_back_to_global_for_training_sample_sufficiency",
+        }
+    eligible = []
+    for row in records:
+        if row.get("requested_expert") != expert_name:
+            continue
+        position = row.get("forecast_position")
+        if position is None or int(position) + int(horizon) > int(current_position):
+            continue
+        values = (
+            row.get(expert_prediction_key),
+            row.get(global_prediction_key),
+            row.get(actual_key),
+        )
+        if not all(value is not None and np.isfinite(float(value)) for value in values):
+            continue
+        eligible.append(row)
+    eligible.sort(key=lambda row: int(row["forecast_position"]))
+    eligible = eligible[-int(max_history):]
+    samples = len(eligible)
+    if samples < int(min_samples):
+        return {
+            "weight": 0.0, "samples": samples, "expert_mae": None,
+            "global_mae": None, "relative_improvement": None,
+            "reason": "matured_prior_oos_samples_insufficient",
+        }
+    expert_mae = float(np.mean([
+        abs(float(row[expert_prediction_key]) - float(row[actual_key]))
+        for row in eligible
+    ]))
+    global_mae = float(np.mean([
+        abs(float(row[global_prediction_key]) - float(row[actual_key]))
+        for row in eligible
+    ]))
+    relative_improvement = (
+        (global_mae - expert_mae) / max(global_mae, 1e-12)
+    )
+    weight = float(np.clip(
+        relative_improvement / max(float(full_weight_improvement), 1e-12),
+        0.0,
+        1.0,
+    ))
+    return {
+        "weight": round(weight, 4),
+        "samples": int(samples),
+        "expert_mae": round(expert_mae, 4),
+        "global_mae": round(global_mae, 4),
+        "relative_improvement": round(relative_improvement, 4),
+        "reason": (
+            "expert_beats_global_on_matured_prior_oos"
+            if weight > 0 else "global_ridge_not_worse_on_matured_prior_oos"
+        ),
+    }
+
+
 def _router_metrics(actual_classes, predicted_classes, probabilities):
     if not actual_classes:
         return {"status": "insufficient", "oos_samples": 0}
@@ -523,6 +595,14 @@ def _forecast_metrics(rows):
         "by_actual_regime": by_actual,
         "by_selected_expert": by_expert,
         "expert_usage": used,
+        "point_model_usage": {
+            name: sum(row.get("point_model_used") == name for row in rows)
+            for name in sorted({row.get("point_model_used", "unknown") for row in rows})
+        },
+        "magnitude_model_usage": {
+            name: sum(row.get("magnitude_model_used") == name for row in rows)
+            for name in sorted({row.get("magnitude_model_used", "unknown") for row in rows})
+        },
     }
 
 
@@ -630,6 +710,23 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             )
             global_returns = global_model.predict(X.loc[test_idx])
             global_max_moves = np.maximum(0.0, global_magnitude_model.predict(X.loc[test_idx]))
+            batch_position = X.index.get_loc(test_idx[0])
+            point_blend_by_expert = {
+                name: _expert_performance_blend_weight(
+                    oos_forecasts, name, batch_position, horizon,
+                    "raw_expert_predicted_close", "global_predicted_close", "actual_close",
+                )
+                for name in (*REGIME_NAMES, "global_fallback")
+            }
+            magnitude_blend_by_expert = {
+                name: _expert_performance_blend_weight(
+                    oos_forecasts, name, batch_position, horizon,
+                    "raw_expert_predicted_max_daily_move",
+                    "global_predicted_max_daily_move",
+                    "actual_max_daily_move",
+                )
+                for name in (*REGIME_NAMES, "global_fallback")
+            }
             base_points = close.reindex(test_idx).to_numpy(dtype=float)
             actual_points = close.shift(-horizon).reindex(test_idx).to_numpy(dtype=float)
             actual_returns = forward_returns.reindex(test_idx).to_numpy(dtype=float)
@@ -639,11 +736,30 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 expert, expert_used, expert_samples, fallback_reason = _select_expert(
                     requested, global_model, experts, expert_counts
                 )
-                magnitude_expert, _, _, _ = _select_expert(
+                magnitude_expert, magnitude_expert_used, _, _ = _select_expert(
                     requested, global_magnitude_model, magnitude_experts, expert_counts
                 )
-                predicted_return = float(expert.predict(X.loc[[asof_date]])[0])
-                predicted_max_move = max(0.0, float(magnitude_expert.predict(X.loc[[asof_date]])[0]))
+                raw_expert_return = float(expert.predict(X.loc[[asof_date]])[0])
+                raw_expert_max_move = max(
+                    0.0, float(magnitude_expert.predict(X.loc[[asof_date]])[0])
+                )
+                global_return = float(global_returns[offset])
+                global_max_move = float(global_max_moves[offset])
+                point_gate = point_blend_by_expert.get(expert_used, {"weight": 0.0})
+                magnitude_gate = magnitude_blend_by_expert.get(
+                    magnitude_expert_used, {"weight": 0.0}
+                )
+                point_weight = float(point_gate.get("weight", 0.0))
+                magnitude_weight = float(magnitude_gate.get("weight", 0.0))
+                predicted_return = (
+                    point_weight * raw_expert_return
+                    + (1.0 - point_weight) * global_return
+                )
+                predicted_max_move = max(
+                    0.0,
+                    magnitude_weight * raw_expert_max_move
+                    + (1.0 - magnitude_weight) * global_max_move,
+                )
                 base_point = float(base_points[offset])
                 actual_point = float(actual_points[offset])
                 actual_return = float(actual_returns[offset])
@@ -660,15 +776,23 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 ))
                 oos_forecasts.append({
                     "forecast_asof": str(asof_date.date()),
+                    "forecast_position": int(X.index.get_loc(asof_date)),
+                    "requested_expert": expert_used,
+                    "point_model_used": "expert_blend" if point_weight > 0 else "global_ridge",
+                    "point_expert_blend_weight": point_weight,
+                    "magnitude_model_used": "expert_blend" if magnitude_weight > 0 else "global_ridge_magnitude",
+                    "magnitude_expert_blend_weight": magnitude_weight,
+                    "raw_expert_predicted_close": base_point * (1.0 + raw_expert_return),
+                    "raw_expert_predicted_max_daily_move": raw_expert_max_move,
                     "predicted_close": base_point * (1.0 + predicted_return),
                     "actual_close": actual_point,
                     "base_close": base_point,
                     "predicted_return": predicted_return,
                     "actual_return": actual_return,
-                    "global_predicted_close": base_point * (1.0 + float(global_returns[offset])),
+                    "global_predicted_close": base_point * (1.0 + global_return),
                     "predicted_max_daily_move": predicted_max_move,
                     "actual_max_daily_move": actual_max_move,
-                    "global_predicted_max_daily_move": float(global_max_moves[offset]),
+                    "global_predicted_max_daily_move": global_max_move,
                     "actual_regime": actual_class,
                     "requested_regime": REGIME_NAMES[requested],
                     "expert_used": expert_used,
@@ -705,13 +829,48 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         expert, expert_used, expert_samples, fallback_reason = _select_expert(
             requested, global_model, experts, expert_counts
         )
-        magnitude_expert, _, _, _ = _select_expert(
+        magnitude_expert, magnitude_expert_used, _, _ = _select_expert(
             requested, global_magnitude_model, magnitude_experts, expert_counts
         )
-        predicted_return = float(expert.predict(X.loc[[latest]])[0])
-        predicted_max_move = max(0.0, float(magnitude_expert.predict(X.loc[[latest]])[0]))
+        raw_expert_return = float(expert.predict(X.loc[[latest]])[0])
+        raw_expert_max_move = max(0.0, float(magnitude_expert.predict(X.loc[[latest]])[0]))
+        global_return = float(global_model.predict(X.loc[[latest]])[0])
+        global_max_move = max(0.0, float(global_magnitude_model.predict(X.loc[[latest]])[0]))
+        point_gate = _expert_performance_blend_weight(
+            oos_forecasts, expert_used, latest_position, horizon,
+            "raw_expert_predicted_close", "global_predicted_close", "actual_close",
+        )
+        magnitude_gate = _expert_performance_blend_weight(
+            oos_forecasts, magnitude_expert_used, latest_position, horizon,
+            "raw_expert_predicted_max_daily_move",
+            "global_predicted_max_daily_move",
+            "actual_max_daily_move",
+        )
+        point_weight = float(point_gate.get("weight", 0.0))
+        magnitude_weight = float(magnitude_gate.get("weight", 0.0))
+        predicted_return = point_weight * raw_expert_return + (1.0 - point_weight) * global_return
+        predicted_max_move = max(
+            0.0,
+            magnitude_weight * raw_expert_max_move + (1.0 - magnitude_weight) * global_max_move,
+        )
         base_close = float(close.loc[latest])
         forecast_close = base_close * (1.0 + predicted_return)
+        if point_weight <= 0:
+            fallback_reason = (
+                str(fallback_reason) + "；成熟 OOS 誤差未證明專家優於全域 Ridge，點位採全域 Ridge"
+            )
+        elif point_weight < 1:
+            fallback_reason = (
+                str(fallback_reason) + f"；點位依成熟 OOS MAE 收縮，專家權重 {point_weight:.2f}"
+            )
+        if magnitude_weight <= 0:
+            fallback_reason = (
+                str(fallback_reason) + "；幅度專家未優於全域基準，幅度採全域模型"
+            )
+        elif magnitude_weight < 1:
+            fallback_reason = (
+                str(fallback_reason) + f"；幅度依成熟 OOS MAE 收縮，專家權重 {magnitude_weight:.2f}"
+            )
         if expert_used in REGIME_NAMES:
             selected_class = REGIME_NAMES.index(expert_used)
             selected_mask = final_regimes.to_numpy(dtype=int) == selected_class
@@ -751,6 +910,12 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "oos_validation_calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "expert_used": expert_used,
+            "point_model_used": "expert_blend" if point_weight > 0 else "global_ridge",
+            "point_expert_blend_weight": round(point_weight, 4),
+            "point_expert_performance": point_gate,
+            "magnitude_model_used": "expert_blend" if magnitude_weight > 0 else "global_ridge_magnitude",
+            "magnitude_expert_blend_weight": round(magnitude_weight, 4),
+            "magnitude_expert_performance": magnitude_gate,
             "expert_training_samples": int(expert_samples),
             "requested_expert_training_samples": int(expert_counts.get(requested, 0)),
             "fallback_reason": fallback_reason,
@@ -768,7 +933,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
             "historical_magnitude_profile": magnitude_profile,
             "note": (
-                "此為研究候選；分流依未來區間最大單日絕對漲跌幅，點位預測另為基準至 D+N 收盤的累積報酬。"
+                "此為研究候選；分流依未來區間最大單日絕對漲跌幅，點位預測另為基準至 D+N 收盤的累積報酬。專家僅在成熟先前 OOS MAE 優於全域 Ridge 時參與點位與幅度輸出，否則自動回退或收縮至全域模型。"
                 "分流機率使用先前可得的樣本外預測逐段校準；校準樣本不足時保留原始分流分數。"
                 "極端專家樣本不足時會退回高波動或全域模型。"
             ),
@@ -776,7 +941,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
 
     return {
         "status": "research" if any(x.get("status") == "research" for x in sessions) else "insufficient",
-        "model_version": "four-regime-router-moE-research-v1",
+        "model_version": "four-regime-router-moE-performance-gated-research-v2",
         "routing_priority": "router_first",
         "regime_definitions": {
             "low": {"max_future_max_daily_move_pct": 0.5},
