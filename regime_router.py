@@ -34,7 +34,7 @@ NORMAL_MAX_RETURN = 0.01
 EXTREME_MIN_RETURN = 0.075
 MIN_TRAIN_SAMPLES = 180
 MIN_EXPERT_SAMPLES = {0: 60, 1: 60, 2: 45, 3: 40}
-EXPERT_ALPHA = {0: 25.0, 1: 15.0, 2: 1.0, 3: 0.1}
+EXPERT_ALPHA = {0: 25.0, 1: 25.0, 2: 25.0, 3: 25.0}
 CLASS_IDS = (0, 1, 2, 3)
 
 
@@ -431,10 +431,33 @@ def _forecast_metrics(rows):
                 [x["predicted_close"] for x in subset],
                 [x["actual_close"] for x in subset],
             ),
+            "global_ridge_mae_points": _safe_mae(
+                [x["global_predicted_close"] for x in subset],
+                [x["actual_close"] for x in subset],
+            ),
         }
     used = {}
+    by_expert = {}
     for row in rows:
-        used[row["expert_used"]] = used.get(row["expert_used"], 0) + 1
+        expert_name = row["expert_used"]
+        used[expert_name] = used.get(expert_name, 0) + 1
+    for expert_name in sorted(used):
+        subset = [row for row in rows if row["expert_used"] == expert_name]
+        by_expert[expert_name] = {
+            "samples": len(subset),
+            "routed_mae_points": _safe_mae(
+                [x["predicted_close"] for x in subset],
+                [x["actual_close"] for x in subset],
+            ),
+            "global_ridge_mae_points": _safe_mae(
+                [x["global_predicted_close"] for x in subset],
+                [x["actual_close"] for x in subset],
+            ),
+            "routed_direction_accuracy": round(float(np.mean([
+                np.sign(x["predicted_return"]) == np.sign(x["actual_return"])
+                for x in subset
+            ])), 4) if subset else None,
+        }
     return {
         "status": "available",
         "oos_samples": int(len(rows)),
@@ -450,6 +473,7 @@ def _forecast_metrics(rows):
         "extreme_move_samples": int(extreme.sum()),
         "extreme_move_routed_mae_points": _safe_mae(predicted[extreme], actual[extreme]),
         "by_actual_regime": by_actual,
+        "by_selected_expert": by_expert,
         "expert_usage": used,
     }
 
@@ -589,6 +613,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                     "actual_max_daily_move": actual_max_move,
                     "global_predicted_max_daily_move": float(global_max_moves[offset]),
                     "actual_regime": actual_class,
+                    "requested_regime": REGIME_NAMES[requested],
                     "expert_used": expert_used,
                 })
             # Outcomes from this block are retained with target timing; later
