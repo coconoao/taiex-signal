@@ -438,6 +438,7 @@ function renderRegimeRouter(router) {
     const probabilityText = ["low","normal","high","extreme"].map(key =>
       names[key] + " " + (Number(probabilities[key] || 0) * 100).toFixed(1) + "%"
     ).join("｜");
+    const probabilityLabel = item.probabilities_calibrated ? "校準後狀態機率：" : "未校準分流分數：";
     const selected = names[item.regime] || item.regime_label || "未分類";
     const expert = item.expert_used === "global_fallback" ? "全域備援模型" : (names[item.expert_used] || item.expert_used);
     const validation = item.router_validation || {};
@@ -451,11 +452,11 @@ function renderRegimeRouter(router) {
     return '<article class="forecast-card"><b>' + label + '｜分流器選定 ' + selected + '</b>' +
       '<div class="forecast-value">' + returnText + Number(item.predicted_return_pct).toFixed(2) + '%</div>' +
       '<p class="forecast-change">實際選用：' + expert + '｜專家訓練樣本 ' + Number(item.expert_training_samples || 0).toLocaleString("zh-TW") + '</p>' +
-      '<p class="forecast-meta">四類分流分數：' + probabilityText + '</p>' +
+      '<p class="forecast-meta">' + probabilityLabel + probabilityText + '</p>' +
       '<p class="forecast-meta">' + metrics + fallback + '</p></article>';
   }).join("");
   root.innerHTML = '<h3>核心分流器：先判斷波動，再選專家模型</h3>' +
-    '<p class="note">各期限獨立分流。下列百分比為尚未校準的模型分流分數，不是已驗證的真實發生機率；D+N 報酬以基準收盤至第 N 個交易日收盤計算。研究結果不取代正式點位模型。</p>' +
+    '<p class="note">各期限獨立分流。若先前樣本外資料足夠，會進行逐段時間序列機率校準；不足時明確標示為未校準分流分數。D+N 報酬以基準收盤至第 N 個交易日收盤計算。研究結果不取代正式點位模型。</p>' +
     '<div class="forecast-grid">' + cards + '</div>';
 }
 
