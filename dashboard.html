@@ -441,8 +441,8 @@ function renderRegimeRouter(router) {
     const probabilityLabel = item.probabilities_calibrated ? "校準後狀態機率：" : "未校準分流分數：";
     const selected = names[item.regime] || item.regime_label || "未分類";
     const decisionThresholds = item.router_decision_thresholds || {};
-    const thresholdText = "風險升級門檻：高／極高 " + (Number(decisionThresholds.high_extreme || 0.25) * 100).toFixed(1) +
-      "%｜極高 " + (Number(decisionThresholds.extreme || 0.15) * 100).toFixed(1) + "%";
+    const thresholdText = "風險升級門檻：高／極高 " + (Number(decisionThresholds.high_extreme || 0.40) * 100).toFixed(1) +
+      "%｜極高 " + (Number(decisionThresholds.extreme || 0.20) * 100).toFixed(1) + "%";
     const expert = item.expert_used === "global_fallback" ? "全域備援模型" : (names[item.expert_used] || item.expert_used);
     const validation = item.router_validation || {};
     const metrics = validation.status === "available"
