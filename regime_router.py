@@ -98,6 +98,18 @@ def _lag_post_close_source_frame(frame, trading_index):
     return aligned.reindex(calendar).shift(1)
 
 
+def _lag_post_close_features(X):
+    """Lag post-close Taiwan institutional, credit, and futures features one session."""
+    features = X.copy()
+    columns = [
+        column for column in features.columns
+        if str(column).startswith(("籌碼:", "信用:", "期貨:"))
+    ]
+    if columns:
+        features.loc[:, columns] = features.loc[:, columns].shift(1)
+    return features
+
+
 def _augment_router_features(X, market_data):
     """Add point-in-time volatility and cross-market level/momentum features."""
     if market_data is None:
@@ -512,7 +524,7 @@ def _forecast_metrics(rows):
     }
 
 
-def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None):
+def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False):
     """Train and evaluate an independent router + four specialists per horizon.
 
     features_by_horizon maps horizon -> (feature_frame, cumulative forward-return series).
@@ -532,6 +544,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             continue
         X, forward_returns = features_by_horizon[horizon]
         X = _lag_base_cross_market_features(X)
+        if not post_close_features_lagged:
+            X = _lag_post_close_features(X)
         X = _augment_router_features(X, market_data)
         forward_returns = pd.to_numeric(forward_returns, errors="coerce").reindex(X.index)
         numeric_features = X.apply(pd.to_numeric, errors="coerce")
@@ -767,6 +781,6 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         "sessions": sessions,
         "probability_note": "使用先前樣本外分流預測進行逐段時間序列校準；校準樣本不足時保留原始分流分數並明確標示。Brier 與 log-loss 以樣本外資料計算。",
         "validation_method": "purged_expanding_walk_forward_oos_recent_2000_sessions",
-        "feature_timing_policy": "Taiwan cash-close origin; all non-Taiwan market close features lagged one Taiwan trading session to prevent same-date post-close leakage",
+        "feature_timing_policy": "Taiwan cash-close origin; non-Taiwan closes and Taiwan institutional, margin, and futures features lagged one Taiwan session; source frames are reindexed before lagging to prevent missing-date compression",
         "production_replacement": False,
     }
