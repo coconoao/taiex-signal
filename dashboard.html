@@ -802,9 +802,11 @@ function renderNews() {
 /* ---- 載入（可重複執行）與自動更新 ---- */
 let dailyLoadFailed = false, retryTimer = null;
 let taiexRealtimeTimer = null;
+let taiexRealtimeLoading = false;
 async function loadTaiexRealtime() {
   const value = $("taiexRealtimeValue"), meta = $("taiexRealtimeMeta");
-  if (!value || !meta) return;
+  if (!value || !meta || taiexRealtimeLoading) return;
+  taiexRealtimeLoading = true;
   try {
     const r = await fetch("/api/taiex-realtime", {cache:"no-store", headers:{"Accept":"application/json"}});
     const d = await r.json();
@@ -818,6 +820,8 @@ async function loadTaiexRealtime() {
   } catch (_) {
     value.textContent = "暫不可用";
     meta.textContent = "目前無法連接即時指數服務；請稍後重試。";
+  } finally {
+    taiexRealtimeLoading = false;
   }
 }
 const loadDaily = () => getJSON("signals.json").then(d => {
