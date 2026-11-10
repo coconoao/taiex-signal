@@ -308,7 +308,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             fallback_class = int(pd.Series(fit_regimes).mode().iloc[0])
             raw_probs = _router_probabilities(router, X.loc[test_idx], fallback_class=fallback_class)
             eligible_records = _eligible_calibration_records(
-                calibration_records, start, horizon
+                calibration_records, X.index.get_loc(test_idx[0]), horizon
             )
             calibrator = _fit_probability_calibrator(
                 [record[1] for record in eligible_records],
@@ -341,7 +341,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 oos_actual.append(actual_class)
                 oos_predicted.append(requested)
                 oos_probabilities.append(probs[offset].tolist())
-                batch_calibration_records.append((start + offset, raw_probs[offset].tolist(), actual_class))
+                batch_calibration_records.append((X.index.get_loc(asof_date), raw_probs[offset].tolist(), actual_class))
                 oos_forecasts.append({
                     "predicted_close": base_point * (1.0 + predicted_return),
                     "actual_close": actual_point,
@@ -402,8 +402,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "method": "prequential_multinomial_logistic" if final_calibrator is not None else "not_available",
                 "training_oos_samples": int(len(eligible_records)),
                 "prequential_calibrated_oos_samples": int(calibrated_oos_samples),
-                "probabilities_calibrated": bool(oos_actual and calibrated_oos_samples == len(oos_actual)),
-                "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
+                "oos_validation_fully_calibrated": bool(oos_actual and calibrated_oos_samples == len(oos_actual)),
+                "oos_validation_calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "expert_used": expert_used,
             "expert_training_samples": int(expert_samples),
@@ -417,11 +417,14 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "router_validation": {
                 **_router_metrics(oos_actual, oos_predicted, oos_probabilities),
                 "prequential_calibrated_oos_samples": int(calibrated_oos_samples),
+                "probabilities_calibrated": bool(oos_actual and calibrated_oos_samples == len(oos_actual)),
+                "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
             "note": (
                 "此為研究候選；D+N 報酬為基準收盤至第 N 個交易日收盤的累積報酬。"
-                "分流機率尚未校準，極端專家樣本不足時會退回高波動或全域模型。"
+                "分流機率使用先前可得的樣本外預測逐段校準；校準樣本不足時保留原始分流分數。"
+                "極端專家樣本不足時會退回高波動或全域模型。"
             ),
         })
 
