@@ -468,6 +468,7 @@ function renderRegimeRouter(router) {
       '<p class="forecast-change">' + maxDailyMoveText + '</p>' +
       '<p class="forecast-meta">' + probabilityLabel + probabilityText + '</p>' +
       '<p class="forecast-meta">' + thresholdText + '</p>' +
+      '<p class="forecast-meta">分流理由：' + esc(item.routing_reason || "依分流器風險門檻決策") + '</p>' +
       '<p class="forecast-meta">' + metrics + fallback + '</p>' +
       '<p class="forecast-meta">' + profileText + '；僅為歷史條件分布參考</p></article>';
   }).join("");
