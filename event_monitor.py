@@ -284,11 +284,14 @@ def merge_history(existing: list[dict[str, Any]], incoming: list[dict[str, Any]]
                 # cutoff forward to the latest poll time. Keep the later of the
                 # prior cutoff and any newly supplied publication timestamp.
                 old_eligible = old_times.get("forecast_eligible_at_utc")
-                new_eligible = event["timestamps"].get("forecast_eligible_at_utc")
-                if old_eligible and new_eligible:
-                    event["timestamps"]["forecast_eligible_at_utc"] = max(old_eligible, new_eligible)
-                elif old_eligible:
-                    event["timestamps"]["forecast_eligible_at_utc"] = old_eligible
+                published_at = event["timestamps"].get("published_at_utc")
+                if old_eligible:
+                    # Retrieval time is not a new information timestamp for
+                    # unchanged content. Only a later source publication time
+                    # may move the existing eligibility cutoff forward.
+                    event["timestamps"]["forecast_eligible_at_utc"] = max(
+                        old_eligible, published_at or old_eligible
+                    )
                 by_version[(event["event_id"], old_version)] = event
         else:
             event["version"] = 1
