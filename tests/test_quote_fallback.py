@@ -50,3 +50,47 @@ class QuoteFallbackTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class USMarketCacheConcurrencyTests(unittest.TestCase):
+    def setUp(self):
+        app.US_MARKET_CACHE.update(t=0, v=None)
+        app.US_MARKET_FAILURE.update(t=0, error=None)
+
+    def tearDown(self):
+        app.US_MARKET_CACHE.update(t=0, v=None)
+        app.US_MARKET_FAILURE.update(t=0, error=None)
+
+    def test_concurrent_cache_misses_share_one_refresh(self):
+        import threading
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        expected = {"items": [{"symbol": "^GSPC"}]}
+        calls = []
+        barrier = threading.Barrier(5)
+
+        def fake_fetch():
+            calls.append(1)
+            time.sleep(0.05)
+            app.US_MARKET_CACHE.update(t=app.time.time(), v=expected)
+            return expected
+
+        def request():
+            barrier.wait()
+            return app.us_market_quote()
+
+        with patch.object(app, "_fetch_us_market_quote", side_effect=fake_fetch):
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                results = list(pool.map(lambda _: request(), range(5)))
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(all(result is expected for result in results))
+
+    def test_failed_refresh_enters_short_cooldown(self):
+        with patch.object(app, "_fetch_us_market_quote", side_effect=RuntimeError("upstream unavailable")) as fetch:
+            with self.assertRaisesRegex(RuntimeError, "upstream unavailable"):
+                app.us_market_quote()
+            with self.assertRaisesRegex(RuntimeError, "短暫冷卻中"):
+                app.us_market_quote()
+        fetch.assert_called_once()
