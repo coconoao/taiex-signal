@@ -37,6 +37,32 @@ class OfficialCalendarGateTests(unittest.TestCase):
         self.assertEqual(result["source"], "unavailable")
         self.assertEqual(result["expected_sessions"], 0)
 
+    def test_official_openapi_bare_list_with_roc_dates_is_parsed(self):
+        payload = [
+            {"Name": "中華民國開國紀念日", "Date": "1150101",
+             "Weekday": "四", "Description": "依規定放假1日。"},
+            {"Name": "國曆新年開始交易日", "Date": "1150102",
+             "Weekday": "五", "Description": "國曆新年開始交易。"},
+        ]
+        with patch.object(backtest.pipeline, "_read_with_backoff",
+                          return_value=__import__("json").dumps(payload).encode("utf-8")):
+            with patch.object(backtest.pipeline.pd.Timestamp, "now",
+                              return_value=pd.Timestamp("2026-11-11", tz="Asia/Taipei")):
+                backtest.pipeline._TWSE_CLOSED_DATES_CACHE.clear()
+                result = backtest.pipeline._fetch_twse_closed_dates(2026)
+        self.assertEqual(result, frozenset({pd.Timestamp("2026-01-01").date()}))
+
+    def test_latest_year_response_is_not_accepted_for_historical_year(self):
+        payload = [
+            {"Name": "中華民國開國紀念日", "Date": "1150101",
+             "Weekday": "四", "Description": "依規定放假1日。"},
+        ]
+        with patch.object(backtest.pipeline, "_read_with_backoff",
+                          return_value=__import__("json").dumps(payload).encode("utf-8")):
+            backtest.pipeline._TWSE_CLOSED_DATES_CACHE.clear()
+            result = backtest.pipeline._fetch_twse_closed_dates(2025)
+        self.assertIsNone(result)
+
 
 if __name__ == "__main__":
     unittest.main()
