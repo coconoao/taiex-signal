@@ -51,6 +51,24 @@ class DynamicRegimeIntervalTests(unittest.TestCase):
         self.assertEqual(metrics["50"]["empirical_coverage"], 1.0)
         self.assertEqual(metrics["50"]["mean_width"], 2.0)
 
+
+    def test_signed_residual_intervals_are_asymmetric_when_errors_are_skewed(self):
+        predictions = np.zeros(6)
+        actuals = [1, 1, 1, 1, 10, np.nan]
+        result = rolling_conformal_intervals(
+            predictions, actuals, horizon=1, min_calibration_samples=1,
+            coverages=(0.5,), method="signed_residual",
+        )
+        interval = result["rows"][5]["intervals"]["50"]
+        self.assertEqual(result["method"], "signed_residual")
+        self.assertGreater(interval["lower"], 0.0)
+        self.assertEqual(interval["upper"], 10.0)
+        self.assertNotIn("radius", interval)
+
+    def test_invalid_conformal_method_fails_closed(self):
+        with self.assertRaises(ValueError):
+            rolling_conformal_intervals([0, 0], [1, 1], horizon=1, method="guess")
+
     def test_invalid_inputs_fail_closed(self):
         with self.assertRaises(ValueError):
             rolling_conformal_intervals([1, 2], [1], horizon=1)

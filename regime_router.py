@@ -1193,7 +1193,15 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             interval_result = rolling_conformal_intervals(
                 interval_predictions, interval_actuals, horizon=horizon,
                 origin_positions=interval_positions, min_calibration_samples=60,
+                method="absolute_residual",
             )
+            signed_interval_result = rolling_conformal_intervals(
+                interval_predictions, interval_actuals, horizon=horizon,
+                origin_positions=interval_positions, min_calibration_samples=60,
+                method="signed_residual",
+            )
+            absolute_interval_metrics = interval_metrics(interval_result, interval_actuals)
+            signed_interval_metrics = interval_metrics(signed_interval_result, interval_actuals)
             dynamic_interval_research = {
                 "dynamic_regime_labels": {
                     "status": "available" if int(dynamic_valid.sum()) else "insufficient",
@@ -1211,12 +1219,29 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "close_prediction_intervals": {
                     "status": "available" if interval_result["rows"][-1]["intervals"] else "insufficient",
                     "nominal_levels_pct": [50, 80, 90],
-                    "oos_metrics": interval_metrics(interval_result, interval_actuals),
+                    "calibration_method": "symmetric_absolute_residual_conformal",
+                    "oos_metrics": absolute_interval_metrics,
                     "latest_forecast": {
                         **interval_result["rows"][-1],
                         "target_close_point": round(float(forecast_close), 2),
                     },
-                    "note": "區間由已成熟的同期限 OOS 收盤點位殘差校準；樣本不足時不產生區間。",
+                    "variants": {
+                        "symmetric_absolute_residual": {
+                            "oos_metrics": absolute_interval_metrics,
+                            "latest_forecast": {
+                                **interval_result["rows"][-1],
+                                "target_close_point": round(float(forecast_close), 2),
+                            },
+                        },
+                        "asymmetric_signed_residual": {
+                            "oos_metrics": signed_interval_metrics,
+                            "latest_forecast": {
+                                **signed_interval_result["rows"][-1],
+                                "target_close_point": round(float(forecast_close), 2),
+                            },
+                        },
+                    },
+                    "note": "比較對稱絕對殘差與非對稱有符號殘差兩種區間；兩者只使用已成熟的同期限 OOS 殘差，須依覆蓋率、寬度及 interval score 決定是否採用。",
                 },
             }
         sessions.append({

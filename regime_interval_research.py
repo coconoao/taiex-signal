@@ -63,8 +63,14 @@ def rolling_conformal_intervals(predictions: Iterable[float], actuals: Iterable[
                                 coverages: tuple[float, ...] = (0.50, 0.80, 0.90),
                                 min_calibration_samples: int = 60,
                                 regime_labels: Iterable[int] | None = None,
-                                min_regime_samples: int = 80) -> dict:
-    """Create intervals from matured prior OOS residuals, separately per horizon."""
+                                min_regime_samples: int = 80,
+                                method: str = "absolute_residual") -> dict:
+    """Create intervals from matured prior OOS residuals, separately per horizon.
+
+    absolute_residual creates symmetric intervals from absolute errors.
+    signed_residual creates asymmetric intervals from lower/upper residual
+    quantiles. Both variants use only matured prior OOS forecasts.
+    """
     pred = np.asarray(list(predictions), dtype=float)
     actual = np.asarray(list(actuals), dtype=float)
     if pred.shape != actual.shape:
@@ -73,6 +79,8 @@ def rolling_conformal_intervals(predictions: Iterable[float], actuals: Iterable[
         raise ValueError("horizon must be positive")
     if min_calibration_samples < 1 or min_regime_samples < 1:
         raise ValueError("minimum calibration sample counts must be positive")
+    if method not in ("absolute_residual", "signed_residual"):
+        raise ValueError("method must be absolute_residual or signed_residual")
     if not coverages or any(not 0 < c < 1 for c in coverages):
         raise ValueError("coverages must be values in (0, 1)")
     n = len(pred)
@@ -82,7 +90,8 @@ def rolling_conformal_intervals(predictions: Iterable[float], actuals: Iterable[
     regimes = None if regime_labels is None else np.asarray(list(regime_labels), dtype=int)
     if regimes is not None and regimes.shape != pred.shape:
         raise ValueError("regime_labels must match predictions")
-    residuals = np.abs(actual - pred)
+    residuals = actual - pred
+    absolute_residuals = np.abs(residuals)
     rows = []
     for i in range(n):
         eligible = np.flatnonzero(np.isfinite(residuals) & (np.arange(n) < i)
@@ -101,18 +110,37 @@ def rolling_conformal_intervals(predictions: Iterable[float], actuals: Iterable[
                "calibration_samples": count, "calibration_source": source, "intervals": {}}
         if count >= min_calibration_samples and np.isfinite(pred[i]):
             for coverage in coverages:
-                radius = _finite_sample_quantile(residuals[selected], float(coverage))
                 key = str(int(round(float(coverage) * 100)))
-                row["intervals"][key] = {
-                    "coverage": float(coverage), "lower": float(pred[i] - radius),
-                    "upper": float(pred[i] + radius), "radius": float(radius),
-                }
+                if method == "absolute_residual":
+                    radius = _finite_sample_quantile(
+                        absolute_residuals[selected], float(coverage)
+                    )
+                    row["intervals"][key] = {
+                        "coverage": float(coverage), "lower": float(pred[i] - radius),
+                        "upper": float(pred[i] + radius), "radius": float(radius),
+                    }
+                else:
+                    tail_coverage = 1.0 - (1.0 - float(coverage)) / 2.0
+                    lower_offset = -_finite_sample_quantile(
+                        -residuals[selected], tail_coverage
+                    )
+                    upper_offset = _finite_sample_quantile(
+                        residuals[selected], tail_coverage
+                    )
+                    row["intervals"][key] = {
+                        "coverage": float(coverage),
+                        "lower": float(pred[i] + lower_offset),
+                        "upper": float(pred[i] + upper_offset),
+                        "lower_offset": float(lower_offset),
+                        "upper_offset": float(upper_offset),
+                    }
         rows.append(row)
     return {
         "horizon_sessions": int(horizon), "nominal_coverages": [float(c) for c in coverages],
         "min_calibration_samples": int(min_calibration_samples),
         "min_regime_samples": int(min_regime_samples), "rows": rows,
-        "calibration_policy": "rolling_abs_residual_conformal_matured_oos_only",
+        "method": method,
+        "calibration_policy": f"rolling_{method}_conformal_matured_oos_only",
     }
 
 
