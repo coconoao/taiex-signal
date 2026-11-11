@@ -51,63 +51,107 @@ def _parse_twse_calendar_date(value):
 
 
 def _fetch_twse_closed_dates(year):
-    """Fetch official TWSE annual closure dates; return None when unavailable."""
+    """Fetch official TWSE annual closure dates; return None when unavailable.
+
+    The legacy RWD endpoint is queried with an explicit year. The published
+    TWSE OpenAPI endpoint is a second official source for the current annual
+    schedule; it returns a bare list of records using ROC-calendar dates.
+    Never accept a current-year response as evidence for a different year.
+    """
     year = int(year)
     if year in _TWSE_CLOSED_DATES_CACHE:
         return _TWSE_CLOSED_DATES_CACHE[year]
-    url = (
-        "https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?"
-        + urllib.parse.urlencode({"date": year, "response": "json"})
-    )
-    req = urllib.request.Request(url, headers={
+
+    headers = {
         "User-Agent": "Mozilla/5.0 (compatible; TAIEXForecastCalendar/1.0)",
         "Accept": "application/json,text/plain,*/*",
         "Referer": "https://www.twse.com.tw/",
-    })
-    try:
-        payload = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8-sig"))
-        fields = payload.get("fields") or []
-        rows = payload.get("data") or []
-        if not rows:
-            for table in payload.get("tables") or []:
-                if table.get("data"):
-                    fields, rows = table.get("fields") or fields, table["data"]
-                    break
-        if not rows:
-            return None
-        closed = set()
-        for row in rows:
-            if isinstance(row, dict):
-                record = row
-            elif fields and len(row) == len(fields):
-                record = dict(zip(fields, row))
+    }
+    legacy_url = (
+        "https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?"
+        + urllib.parse.urlencode({"date": year, "response": "json"})
+    )
+    urls = [legacy_url]
+    current_year = pd.Timestamp.now(tz="Asia/Taipei").year
+    if year == current_year:
+        urls.append("https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule")
+
+    last_error = None
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            payload = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8-sig"))
+
+            # The official OpenAPI returns a bare list of objects. The older
+            # RWD response may instead use fields/data or tables/fields/data.
+            if isinstance(payload, list):
+                rows, fields = payload, []
+            elif isinstance(payload, dict):
+                fields = payload.get("fields") or []
+                rows = payload.get("data") or []
+                if not rows:
+                    for table in payload.get("tables") or []:
+                        if table.get("data"):
+                            fields, rows = table.get("fields") or fields, table["data"]
+                            break
             else:
                 continue
-            day = _parse_twse_calendar_date(
-                record.get("日期") or record.get("Date") or record.get("date")
-            )
-            if day is None or day.year != year or day.weekday() >= 5:
+
+            records = []
+            for row in rows:
+                if isinstance(row, dict):
+                    records.append(row)
+                elif fields and isinstance(row, (list, tuple)) and len(row) == len(fields):
+                    records.append(dict(zip(fields, row)))
+
+            dated_records = []
+            for record in records:
+                day = _parse_twse_calendar_date(
+                    record.get("日期") or record.get("Date") or record.get("date")
+                    or record.get("Date")
+                )
+                if day is not None and day.year == year:
+                    dated_records.append((day, record))
+
+            # Some endpoints ignore the requested year and return the latest
+            # schedule. A non-matching response is unavailable, not an empty
+            # holiday calendar.
+            if not dated_records:
                 continue
-            name = str(record.get("名稱") or record.get("Name") or "").strip()
-            description = str(record.get("說明") or record.get("Description") or "").strip()
-            detail = name + description
-            if any(term in detail for term in ("最後交易日", "開始交易日", "交易開始日")):
-                continue
-            if any(term in detail for term in (
-                "市場無交易", "休市", "放假", "補假", "國定假日",
-                "紀念日", "僅辦理結算交割",
-            )):
-                closed.add(day)
-        result = frozenset(closed)
-        _TWSE_CLOSED_DATES_CACHE[year] = result
-        return result
-    except Exception as exc:
-        print(
-            f"[forecast-calendar] TWSE annual calendar unavailable year={year} "
-            f"error_class={type(exc).__name__}; weekday-only fallback will be labelled",
-            flush=True,
-        )
-        return None
+
+            closed = set()
+            for day, record in dated_records:
+                if day.weekday() >= 5:
+                    continue
+                name = str(
+                    record.get("名稱") or record.get("Name") or record.get("name") or ""
+                ).strip()
+                description = str(
+                    record.get("說明") or record.get("Description")
+                    or record.get("description") or ""
+                ).strip()
+                detail = name + description
+                if any(term in detail for term in ("最後交易日", "開始交易日", "交易開始日")):
+                    continue
+                if any(term in detail for term in (
+                    "市場無交易", "休市", "放假", "補假", "國定假日",
+                    "紀念日", "僅辦理結算交割",
+                )):
+                    closed.add(day)
+
+            result = frozenset(closed)
+            _TWSE_CLOSED_DATES_CACHE[year] = result
+            return result
+        except Exception as exc:
+            last_error = exc
+
+    print(
+        f"[forecast-calendar] TWSE annual calendar unavailable year={year} "
+        f"error_class={type(last_error).__name__ if last_error else 'NoMatchingYearData'}; "
+        "weekday-only fallback will be labelled",
+        flush=True,
+    )
+    return None
 
 
 def _expected_twse_trading_days(start, end):
