@@ -91,6 +91,7 @@ class OfficialCalendarGateTests(unittest.TestCase):
             "data": [
                 ["2025-01-01", "中華民國開國紀念日", "依規定放假1日。"],
                 ["2025-01-02", "國曆新年開始交易日", "國曆新年開始交易。"],
+                ["2025-01-24", "農曆春節前最後交易日", "農曆春節前最後交易。1月27日市場無交易，僅辦理結算交割作業。"],
                 ["2025-02-03", "農曆春節後開始交易日", "農曆春節後開始交易。"],
                 ["2025-02-28", "和平紀念日", "依規定放假1日。"],
                 ["2025-04-04", "兒童節及民族掃墓節", "依規定放假1日。"],
@@ -103,7 +104,7 @@ class OfficialCalendarGateTests(unittest.TestCase):
                 ["2025-12-26", "年末交易日", "市場交易。"],
             ],
             "queryYear": 2025,
-            "total": 12,
+            "total": 13,
         }
         requested = []
         def fake_read(req, timeout=15):
@@ -194,6 +195,18 @@ class OfficialCalendarGateTests(unittest.TestCase):
             result = backtest.pipeline._fetch_twse_closed_dates(2025)
         self.assertIsNone(result)
 
+
+    def test_exceptional_typhoon_closures_are_removed_from_expected_sessions(self):
+        with patch.object(backtest.pipeline, "_fetch_twse_closed_dates",
+                          return_value=frozenset()):
+            expected, source = backtest.pipeline._expected_twse_trading_days(
+                "2024-07-23", "2024-07-26"
+            )
+        self.assertEqual(source, "twse_official_holiday_schedule")
+        self.assertEqual(
+            [str(x.date()) for x in expected],
+            ["2024-07-23", "2024-07-26"],
+        )
 
 if __name__ == "__main__":
     unittest.main()
