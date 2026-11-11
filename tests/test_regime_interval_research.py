@@ -39,7 +39,7 @@ def test_conformal_excludes_unmatured_prior_forecasts():
 def test_regime_calibration_falls_back_to_global_when_sparse():
     result = rolling_conformal_intervals(np.zeros(10), np.arange(1, 11, dtype=float),
                                          horizon=1, min_calibration_samples=2,
-                                         min_regime_samples=5, regime_labels=np.zeros(10, dtype=int))
+                                         min_regime_samples=6, regime_labels=np.zeros(10, dtype=int))
     row = result["rows"][5]
     assert row["calibration_source"] == "same_horizon_global_fallback_insufficient_regime_samples"
     assert row["calibration_samples"] == 5
