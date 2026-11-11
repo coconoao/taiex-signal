@@ -48,9 +48,6 @@ class QuoteFallbackTests(unittest.TestCase):
             yahoo.assert_not_called()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class USMarketCacheConcurrencyTests(unittest.TestCase):
     def setUp(self):
@@ -94,3 +91,6 @@ class USMarketCacheConcurrencyTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "短暫冷卻中"):
                 app.us_market_quote()
         fetch.assert_called_once()
+
+if __name__ == "__main__":
+    unittest.main()
