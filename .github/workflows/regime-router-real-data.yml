@@ -21,9 +21,9 @@ concurrency:
 
 jobs:
   real-market-backtest:
-    # Supabase service credentials are used only for a read-only historical-cache GET.
-    # Do not expose repository secrets to pull requests from forks.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Manual dispatch only: every run must pass the independent official TWSE
+    # calendar gate before any model metrics are accepted.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
