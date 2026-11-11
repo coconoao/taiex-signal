@@ -52,6 +52,29 @@ class OfficialCalendarGateTests(unittest.TestCase):
                 result = backtest.pipeline._fetch_twse_closed_dates(2026)
         self.assertEqual(result, frozenset({pd.Timestamp("2026-01-01").date()}))
 
+    def test_rwd_uses_full_date_parameter_and_returns_historical_year(self):
+        payload = {
+            "stat": "ok",
+            "date": "20250101",
+            "title": "114 年市場開休市日期",
+            "fields": ["日期", "名稱", "說明"],
+            "data": [
+                ["2025-01-01", "中華民國開國紀念日", "依規定放假1日。"],
+                ["2025-01-02", "國曆新年開始交易日", "國曆新年開始交易。"],
+            ],
+            "queryYear": 2025,
+            "total": 2,
+        }
+        requested = []
+        def fake_read(req, timeout=15):
+            requested.append(req.full_url)
+            return __import__("json").dumps(payload, ensure_ascii=False).encode("utf-8")
+        with patch.object(backtest.pipeline, "_read_with_backoff", side_effect=fake_read):
+            backtest.pipeline._TWSE_CLOSED_DATES_CACHE.clear()
+            result = backtest.pipeline._fetch_twse_closed_dates(2025)
+        self.assertIn("date=20250101", requested[0])
+        self.assertEqual(result, frozenset({pd.Timestamp("2025-01-01").date()}))
+
     def test_latest_year_response_is_not_accepted_for_historical_year(self):
         payload = [
             {"Name": "中華民國開國紀念日", "Date": "1150101",
