@@ -233,5 +233,22 @@ class OfficialCalendarGateTests(unittest.TestCase):
         self.assertEqual(audit["status"], "gap_limit_exceeded")
         self.assertEqual(repaired["TAIEX"].isna().sum(), 2)
 
+    def test_last_trading_day_notes_apply_only_to_their_own_date(self):
+        self.assertFalse(backtest.pipeline._twse_calendar_row_is_closed(
+            pd.Timestamp("2023-01-17").date(),
+            "農曆春節前最後交易日",
+            "農曆春節前最後交易。1月18日及1月19日市場無交易，僅辦理結算交割作業。",
+        ))
+        self.assertTrue(backtest.pipeline._twse_calendar_row_is_closed(
+            pd.Timestamp("2021-02-08").date(),
+            "農曆春節前最後交易日",
+            "2月8日市場無交易，僅辦理結算交割作業。",
+        ))
+        self.assertTrue(backtest.pipeline._twse_calendar_row_is_closed(
+            pd.Timestamp("2022-01-27").date(),
+            "農曆春節前最後交易日",
+            "1月27日市場無交易，僅辦理結算交割作業。",
+        ))
+
 if __name__ == "__main__":
     unittest.main()
