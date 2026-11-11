@@ -57,7 +57,9 @@ def _fetch_twse_closed_dates(year):
     responses can otherwise be mistaken for a complete holiday schedule.
     Require an explicit year identity (or current-year OpenAPI list), a
     self-consistent row count, unique parseable dates spanning all quarters,
-    multiple weekday closures, and post-holiday reopening rows.
+    multiple weekday closures in the year's key holiday periods, and
+    post-holiday reopening rows. Q3 may legitimately contain no market closure
+    in years when the Mid-Autumn holiday falls in Q4.
     """
     year = int(year)
     if year in _TWSE_CLOSED_DATES_CACHE:
@@ -139,7 +141,8 @@ def _fetch_twse_closed_dates(year):
             dates = [day for day, _ in dated_records]
             if len(set(dates)) != len(dates):
                 continue
-            if {((day.month - 1) // 3) + 1 for day in dates} != {1, 2, 3, 4}:
+            record_quarters = {((day.month - 1) // 3) + 1 for day in dates}
+            if not {1, 2, 4}.issubset(record_quarters) or len(record_quarters) < 3:
                 continue
 
             closed = set()
@@ -173,7 +176,7 @@ def _fetch_twse_closed_dates(year):
             if (
                 explicit_weekend_trading
                 or len(closed) < 8
-                or closure_quarters != {1, 2, 3, 4}
+                or not {1, 2, 4}.issubset(closure_quarters)
                 or reopening_rows < 2
             ):
                 continue

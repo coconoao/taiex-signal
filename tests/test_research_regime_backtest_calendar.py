@@ -125,6 +125,35 @@ class OfficialCalendarGateTests(unittest.TestCase):
         }))
 
 
+
+    def test_valid_annual_schedule_may_have_no_q3_closure(self):
+        payload = {
+            "stat": "ok",
+            "queryYear": 2025,
+            "total": 12,
+            "fields": ["日期", "名稱", "說明"],
+            "data": [
+                ["2025-01-01", "中華民國開國紀念日", "依規定放假1日。"],
+                ["2025-01-02", "國曆新年開始交易日", "國曆新年開始交易。"],
+                ["2025-02-03", "農曆春節後開始交易日", "農曆春節後開始交易。"],
+                ["2025-02-27", "和平紀念日", "依規定放假1日。"],
+                ["2025-02-28", "和平紀念日", "依規定放假1日。"],
+                ["2025-04-04", "兒童節", "依規定放假1日。"],
+                ["2025-05-01", "勞動節", "依規定放假1日。"],
+                ["2025-05-30", "端午節", "依規定放假1日。"],
+                ["2025-06-03", "端午節後開始交易日", "端午節後開始交易。"],
+                ["2025-10-10", "國慶日", "依規定放假1日。"],
+                ["2025-10-13", "國慶日後開始交易日", "國慶日後開始交易。"],
+                ["2025-12-25", "行憲紀念日", "依規定放假1日。"],
+            ],
+        }
+        with patch.object(backtest.pipeline, "_read_with_backoff",
+                          return_value=__import__("json").dumps(payload).encode("utf-8")):
+            backtest.pipeline._TWSE_CLOSED_DATES_CACHE.clear()
+            result = backtest.pipeline._fetch_twse_closed_dates(2025)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 8)
+
     def test_incomplete_official_schedule_is_rejected(self):
         payload = {
             "stat": "ok",
