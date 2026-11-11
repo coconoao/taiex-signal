@@ -26,6 +26,15 @@ class DynamicRegimeIntervalTests(unittest.TestCase):
         self.assertGreaterEqual(result["labels"][4], 0)
         self.assertTrue(np.isnan(result["thresholds"][2]).all())
 
+    def test_latest_matured_history_thresholds_exist_before_future_outcome(self):
+        values = np.concatenate([np.linspace(0.001, 0.3, 300), [np.nan]])
+        result = expanding_quantile_regimes(
+            values, min_history=252, origin_positions=np.arange(len(values)), horizon=1
+        )
+        self.assertTrue(np.isfinite(result["thresholds"][-1]).all())
+        self.assertEqual(result["labels"][-1], -1)
+        self.assertEqual(result["history_counts"][-1], 300)
+
     def test_conformal_excludes_unmatured_prior_forecasts(self):
         result = rolling_conformal_intervals(np.zeros(6), [1, 2, 3, 4, 5, 6],
                                              horizon=2, min_calibration_samples=1,
