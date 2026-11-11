@@ -489,12 +489,12 @@ class ForecastTradingCalendarTests(unittest.TestCase):
         self.assertEqual(dates, ["2026-11-12", "2026-11-13", "2026-11-16"])
         self.assertEqual(source, "twse_official")
 
-    def test_marks_weekday_only_fallback_when_official_calendar_fails(self):
+    def test_marks_partial_fallback_when_official_calendar_fails_but_exceptions_are_known(self):
         from pipeline import _future_taiwan_trading_dates
         with patch("pipeline._fetch_twse_closed_dates", return_value=None):
             dates, source = _future_taiwan_trading_dates("2026-11-10", 3)
         self.assertEqual(dates, ["2026-11-11", "2026-11-12", "2026-11-13"])
-        self.assertEqual(source, "weekdays_only_fallback")
+        self.assertEqual(source, "twse_partial_weekday_fallback")
 
     def test_expected_calendar_excludes_weekends_and_official_closures(self):
         from pipeline import _expected_twse_trading_days
