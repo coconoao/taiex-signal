@@ -67,9 +67,12 @@ def _fetch_twse_closed_dates(year):
         "Accept": "application/json,text/plain,*/*",
         "Referer": "https://www.twse.com.tw/",
     }
+    # The RWD endpoint expects a full YYYYMMDD date, not a bare year.
+    # January 1 anchors the requested calendar year; the response includes
+    # the complete annual holiday schedule and reports queryYear=YYYY.
     legacy_url = (
         "https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?"
-        + urllib.parse.urlencode({"date": year, "response": "json"})
+        + urllib.parse.urlencode({"date": f"{year}0101", "response": "json"})
     )
     urls = [legacy_url]
     current_year = pd.Timestamp.now(tz="Asia/Taipei").year
@@ -108,7 +111,6 @@ def _fetch_twse_closed_dates(year):
             for record in records:
                 day = _parse_twse_calendar_date(
                     record.get("日期") or record.get("Date") or record.get("date")
-                    or record.get("Date")
                 )
                 if day is not None and day.year == year:
                     dated_records.append((day, record))
