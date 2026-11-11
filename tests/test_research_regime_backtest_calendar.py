@@ -113,7 +113,16 @@ class OfficialCalendarGateTests(unittest.TestCase):
             backtest.pipeline._TWSE_CLOSED_DATES_CACHE.clear()
             result = backtest.pipeline._fetch_twse_closed_dates(2025)
         self.assertIn("date=20250101", requested[0])
-        self.assertEqual(result, frozenset({pd.Timestamp("2025-01-01").date()}))
+        self.assertEqual(result, frozenset({
+            pd.Timestamp("2025-01-01").date(),
+            pd.Timestamp("2025-02-28").date(),
+            pd.Timestamp("2025-04-04").date(),
+            pd.Timestamp("2025-05-01").date(),
+            pd.Timestamp("2025-05-30").date(),
+            pd.Timestamp("2025-09-29").date(),
+            pd.Timestamp("2025-10-10").date(),
+            pd.Timestamp("2025-12-25").date(),
+        }))
 
 
     def test_incomplete_official_schedule_is_rejected(self):
