@@ -143,6 +143,7 @@ def main() -> int:
             post_close_features_lagged=True,
             allowed_sample_index_by_horizon=allowed_sample_index_by_horizon,
             include_gate_sensitivity=(group_name == "price_only"),
+            include_dynamic_interval_research=(group_name == "price_only"),
         )
 
     # Assert identical OOS windows for every feature group and horizon before
