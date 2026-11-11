@@ -24,6 +24,18 @@ BUY, SELL, COST = 0.55, 0.45, 0.002          # 買進/賣出門檻、單次換�
 FORECAST_ERROR_TOLERANCE = 0.007  # 預測點位誤差容許值：±0.7%
 _TWSE_CLOSED_DATES_CACHE = {}
 
+# Official ad-hoc full-market closures not included in the annual holiday schedule.
+# Sources: TWSE press releases for 2023-08-03, 2024-07-24/25, 2024-10-02/03/31;
+# TWSE/CNA announcements for 2026-07-10 and 2026-10-23.
+_TWSE_EXCEPTIONAL_CLOSED_DATES = {
+    2023: {dt.date(2023, 8, 3)},
+    2024: {
+        dt.date(2024, 7, 24), dt.date(2024, 7, 25),
+        dt.date(2024, 10, 2), dt.date(2024, 10, 3), dt.date(2024, 10, 31),
+    },
+    2026: {dt.date(2026, 7, 10), dt.date(2026, 10, 23)},
+}
+
 
 def _parse_twse_calendar_date(value):
     """Parse TWSE holiday dates in ISO, Gregorian YYYYMMDD, or ROC YYYMMDD form."""
@@ -163,7 +175,13 @@ def _fetch_twse_closed_dates(year):
                     explicit_weekend_trading = True
                 if day.weekday() >= 5:
                     continue
-                if any(term in detail for term in (
+                # A row's description may mention other dates (for example,
+                # the final trading day may describe the following settlement-only
+                # dates). Never apply those future-date notes to the row date itself.
+                terminal_trading_marker = any(
+                    term in name for term in ("最後交易日", "開始交易日", "交易開始日")
+                )
+                if not terminal_trading_marker and any(term in detail for term in (
                     "市場無交易", "休市", "放假", "補假", "國定假日",
                     "紀念日", "僅辦理結算交割", "不交易",
                 )):
@@ -211,6 +229,7 @@ def _expected_twse_trading_days(start, end):
         if year_closures is None:
             return pd.DatetimeIndex([]), "unavailable"
         closures.update(year_closures)
+        closures.update(_TWSE_EXCEPTIONAL_CLOSED_DATES.get(year, set()))
     weekdays = pd.bdate_range(start_day, end_day)
     expected = weekdays[~pd.Index(weekdays.date).isin(closures)]
     return pd.DatetimeIndex(expected), "twse_official_holiday_schedule"
@@ -229,6 +248,7 @@ def _future_taiwan_trading_dates(asof, count=3):
             complete = False
         else:
             closures.update(year_closures)
+        closures.update(_TWSE_EXCEPTIONAL_CLOSED_DATES.get(year, set()))
     dates = []
     day = base + dt.timedelta(days=1)
     while day <= end and len(dates) < count:
