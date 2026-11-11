@@ -62,6 +62,48 @@ def _parse_twse_calendar_date(value):
         return None
 
 
+def _twse_calendar_row_is_closed(day, name, description):
+    """Classify only the row's own date, not other dates mentioned in its notes."""
+    name = str(name or "").strip()
+    description = str(description or "").strip()
+    terminal_trading_marker = any(
+        term in name for term in ("最後交易日", "開始交易日", "交易開始日")
+    )
+    closure_terms = (
+        "市場無交易", "休市", "放假", "補假", "國定假日",
+        "紀念日", "僅辦理結算交割", "不交易",
+    )
+    if terminal_trading_marker:
+        # Some TWSE rows are labelled "最後交易日" but explicitly state that
+        # the same date is settlement-only. Require an explicit same-day date
+        # reference before overriding the label.
+        same_day_tokens = (
+            f"{day.month}月{day.day}日",
+            f"{day.month}/{day.day}",
+            f"{day.month:02d}/{day.day:02d}",
+        )
+        return (
+            any(token in description for token in same_day_tokens)
+            and any(term in description for term in closure_terms)
+        )
+    direct_name_terms = closure_terms + (
+        "除夕", "春節", "兒童節", "民族掃墓節", "勞動節",
+        "端午節", "中秋節", "國慶日", "行憲紀念日", "教師節",
+        "開國紀念日",
+    )
+    if any(term in name for term in direct_name_terms):
+        return True
+    same_day_tokens = (
+        f"{day.month}月{day.day}日",
+        f"{day.month}/{day.day}",
+        f"{day.month:02d}/{day.day:02d}",
+    )
+    return (
+        any(token in description for token in same_day_tokens)
+        and any(term in description for term in closure_terms)
+    )
+
+
 def _fetch_twse_closed_dates(year):
     """Fetch a complete official TWSE annual calendar or fail closed.
 
@@ -175,16 +217,7 @@ def _fetch_twse_closed_dates(year):
                     explicit_weekend_trading = True
                 if day.weekday() >= 5:
                     continue
-                # A row's description may mention other dates (for example,
-                # the final trading day may describe the following settlement-only
-                # dates). Never apply those future-date notes to the row date itself.
-                terminal_trading_marker = any(
-                    term in name for term in ("最後交易日", "開始交易日", "交易開始日")
-                )
-                if not terminal_trading_marker and any(term in detail for term in (
-                    "市場無交易", "休市", "放假", "補假", "國定假日",
-                    "紀念日", "僅辦理結算交割", "不交易",
-                )):
+                if _twse_calendar_row_is_closed(day, name, description):
                     closed.add(day)
 
             # This builder models ordinary Monday-Friday sessions. If TWSE
