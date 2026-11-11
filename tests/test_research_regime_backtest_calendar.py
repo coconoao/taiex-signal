@@ -208,5 +208,30 @@ class OfficialCalendarGateTests(unittest.TestCase):
             ["2024-07-23", "2024-07-26"],
         )
 
+    def test_missing_taiex_session_is_backfilled_from_official_daily_index(self):
+        dates = pd.date_range("2021-04-05", periods=3, freq="B")
+        market = pd.DataFrame({"TAIEX": [16700.0, float("nan"), 16800.0]}, index=dates)
+        with patch.object(backtest.pipeline, "_expected_twse_trading_days",
+                          return_value=(dates, "twse_official_holiday_schedule")):
+            with patch.object(backtest.pipeline, "_fetch_twse_taiex_day", return_value=16739.87):
+                repaired, audit = backtest._backfill_missing_official_taiex_closes(market)
+        self.assertEqual(repaired.loc[dates[1], "TAIEX"], 16739.87)
+        self.assertEqual(audit["status"], "complete")
+        self.assertEqual(audit["filled"], [str(dates[1].date())])
+        self.assertEqual(audit["unfilled"], [])
+
+    def test_taiex_backfill_does_not_guess_when_gap_is_too_large(self):
+        dates = pd.date_range("2021-04-05", periods=4, freq="B")
+        market = pd.DataFrame({"TAIEX": [16700.0, float("nan"), float("nan"), 16800.0]}, index=dates)
+        with patch.object(backtest.pipeline, "_expected_twse_trading_days",
+                          return_value=(dates, "twse_official_holiday_schedule")):
+            with patch.object(backtest.pipeline, "_fetch_twse_taiex_day") as fetch:
+                repaired, audit = backtest._backfill_missing_official_taiex_closes(
+                    market, max_backfill=1
+                )
+        fetch.assert_not_called()
+        self.assertEqual(audit["status"], "gap_limit_exceeded")
+        self.assertEqual(repaired["TAIEX"].isna().sum(), 2)
+
 if __name__ == "__main__":
     unittest.main()
