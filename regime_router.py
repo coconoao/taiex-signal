@@ -1172,13 +1172,16 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         dynamic_interval_research = None
         if include_dynamic_interval_research and oos_forecasts:
             oos_positions = [row["forecast_position"] for row in oos_forecasts]
+            # Use the full historical target series, not just the OOS subset,
+            # while the helper enforces that every threshold sees only prior
+            # outcomes whose horizon has fully matured at the current origin.
             dynamic_labels = expanding_quantile_regimes(
-                [row["actual_max_daily_move"] for row in oos_forecasts] + [np.nan],
+                future_max_daily_move.to_numpy(dtype=float),
                 min_history=252,
-                origin_positions=oos_positions + [latest_position],
+                origin_positions=np.arange(len(future_max_daily_move), dtype=int),
                 horizon=horizon,
             )
-            oos_dynamic_classes = dynamic_labels["labels"][:-1]
+            oos_dynamic_classes = dynamic_labels["labels"][np.asarray(oos_positions, dtype=int)]
             dynamic_valid = oos_dynamic_classes >= 0
             dynamic_counts = {
                 name: int(np.sum(oos_dynamic_classes == class_id))
@@ -1200,8 +1203,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                     "class_counts": dynamic_counts,
                     "unlabelled_warmup_or_unmatured": int((~dynamic_valid).sum()),
                     "latest_thresholds_pct": (
-                        [round(float(x) * 100, 4) for x in dynamic_labels["thresholds"][-1]]
-                        if np.isfinite(dynamic_labels["thresholds"][-1]).all() else None
+                        [round(float(x) * 100, 4) for x in dynamic_labels["thresholds"][latest_position]]
+                        if np.isfinite(dynamic_labels["thresholds"][latest_position]).all() else None
                     ),
                     "note": "動態分級為逐時點歷史分位數標籤研究；尚未替換現行分類器。",
                 },
