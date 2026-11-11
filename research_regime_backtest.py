@@ -104,8 +104,19 @@ def main() -> int:
     cache_path = str(cache_dir / "market_history.csv")
     market = pipeline.load_live(years=10, cache_path=cache_path)
     market = market.sort_index()
+    requested_start = os.environ.get("REGIME_ROUTER_START_DATE", "").strip()
+    if requested_start:
+        start = pd.Timestamp(requested_start).tz_localize(None).normalize()
+        market = market.loc[market.index >= start].copy()
+        if market.empty:
+            raise RuntimeError(
+                f"REGIME_ROUTER_START_DATE={requested_start} leaves no market history"
+            )
     close = market["TAIEX"].dropna()
     calendar_validation = _validate_taiwan_calendar(close.index)
+    calendar_validation["requested_start_date"] = (
+        str(pd.Timestamp(requested_start).date()) if requested_start else None
+    )
     if not calendar_validation["passed"]:
         failure_artifact = {
             "status": "failed",
