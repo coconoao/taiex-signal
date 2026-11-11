@@ -32,6 +32,9 @@ AUTO = "--no-auto" not in sys.argv and not DEMO and not os.environ.get("K_SERVIC
 TZ = ZoneInfo("Asia/Taipei")
 JOB, LOCK, QUOTE = {"running": None, "log": ""}, threading.Lock(), {"t": 0, "v": None}
 US_MARKET_CACHE = {"t": 0, "v": None}
+US_MARKET_LOCK = threading.Lock()
+US_MARKET_FAILURE = {"t": 0, "error": None}
+US_MARKET_FAILURE_TTL = 60
 AUTH_USER = os.environ.get("TAIEX_USER", "")
 AUTH_PASSWORD = os.environ.get("TAIEX_PASSWORD", "")
 
@@ -728,9 +731,27 @@ def quote():
     raise RuntimeError("Yahoo 即時行情、TWSE 官方日收盤與 Yahoo 日收盤備援目前都無法取得資料")
 
 def us_market_quote():
+    """美股行情採 single-flight 更新，避免同一個快取過期時重複下載。"""
+    cached = US_MARKET_CACHE["v"]
+    if cached and time.time() - US_MARKET_CACHE["t"] < 60:
+        return cached
+    with US_MARKET_LOCK:
+        cached = US_MARKET_CACHE["v"]
+        if cached and time.time() - US_MARKET_CACHE["t"] < 60:
+            return cached
+        if US_MARKET_FAILURE["error"] and time.time() - US_MARKET_FAILURE["t"] < US_MARKET_FAILURE_TTL:
+            raise RuntimeError("美股行情來源暫時無法更新（短暫冷卻中）")
+        try:
+            result = _fetch_us_market_quote()
+        except Exception as exc:
+            US_MARKET_FAILURE.update(t=time.time(), error=type(exc).__name__)
+            raise
+        US_MARKET_FAILURE.update(t=0, error=None)
+        return result
+
+
+def _fetch_us_market_quote():
     """美股最新可取得的 5 分鐘行情；Yahoo 非官方資料，可能延遲或缺漏，快取 60 秒。"""
-    if US_MARKET_CACHE["v"] and time.time() - US_MARKET_CACHE["t"] < 60:
-        return US_MARKET_CACHE["v"]
     import pandas as pd
     import yfinance as yf
 
@@ -744,7 +765,7 @@ def us_market_quote():
     }
     raw = yf.download(
         list(tickers), period="5d", interval="5m", auto_adjust=True,
-        progress=False, threads=4, timeout=15, prepost=False
+        progress=False, threads=2, timeout=15, prepost=False
     )
     if raw is None or raw.empty:
         raise RuntimeError("目前無法取得美股盤中資料")
@@ -759,7 +780,7 @@ def us_market_quote():
         close = raw[["Close"]].rename(columns={"Close": "^GSPC"})
     daily = yf.download(
         list(tickers), period="5d", interval="1d", auto_adjust=True,
-        progress=False, threads=4, timeout=15
+        progress=False, threads=2, timeout=15
     )
     if isinstance(daily.columns, pd.MultiIndex):
         if "Close" in daily.columns.get_level_values(0):
