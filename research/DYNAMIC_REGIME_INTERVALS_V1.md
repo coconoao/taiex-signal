@@ -41,5 +41,8 @@ fallback explicitly. It never borrows another horizon's residuals.
 6. Keep Ridge unchanged. Do not promote any regime expert unless mature OOS error beats Ridge under a predeclared gate.
 7. Treat coverage shortfall, unavailable calendar, or inadequate sample count as failed or inconclusive validation, not a pass.
 
-These are methodology utilities only; they are not yet wired to the real-market
-backtest or production dashboard.
+The research backtest now optionally emits these diagnostics for the primary
+price-only OOS run. They are not wired to the production dashboard or production
+forecast path. Real-market interpretation remains blocked until an independent
+official Taiwan trading-session calendar is available and passes completeness
+validation; observed-price dates must not be treated as a substitute calendar.
