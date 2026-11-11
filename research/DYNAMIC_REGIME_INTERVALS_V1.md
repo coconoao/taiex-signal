@@ -18,13 +18,27 @@ history exists, labels and thresholds remain unavailable. These quantiles are
 candidates, not approved production thresholds. Class counts and extreme-class
 support must be reported before interpretation.
 
+At this stage the dynamic labels are diagnostic targets only. They do not yet
+train or replace the production router. A dynamic-label classifier must be
+trained and evaluated walk-forward against both target definitions before any
+claim that dynamic regimes improve routing.
+
 ## Prediction intervals
 
-The module creates symmetric 50%, 80%, and 90% intervals around supplied
-point-in-time OOS predictions. Radius is a finite-sample conformal quantile of
-absolute residuals from earlier OOS forecasts only. A residual is eligible only
-after its target has matured (prior origin + horizon <= current origin).
-The caller must invoke the procedure separately for each horizon.
+The module compares two 50%, 80%, and 90% interval constructions around
+point-in-time OOS predictions:
+
+- Symmetric absolute-residual conformal intervals use a finite-sample quantile
+  of absolute errors from earlier OOS forecasts.
+- Asymmetric signed-residual intervals use separate finite-sample lower and
+  upper quantiles of signed errors, allowing forecast-error skew.
+
+Both variants use only prior OOS residuals whose targets have matured
+(prior origin + horizon <= current origin). The caller invokes the procedure
+separately for each horizon. The asymmetric variant is a research comparator,
+not an automatic replacement: compare coverage, mean width, and interval score
+on identical OOS origins. Do not select a method solely because its intervals
+are narrower.
 
 Regime-conditional calibration is optional. It is used only after the prior
 matured sample count in that regime reaches the configured minimum; otherwise
@@ -46,3 +60,8 @@ price-only OOS run. They are not wired to the production dashboard or production
 forecast path. Real-market interpretation remains blocked until an independent
 official Taiwan trading-session calendar is available and passes completeness
 validation; observed-price dates must not be treated as a substitute calendar.
+The calendar parser fails closed on a year mismatch, malformed or duplicate
+dates, inconsistent declared row counts, too few records or weekday closures,
+missing key annual holiday periods, and explicitly published weekend trading
+that the weekday-only session builder cannot represent. Q3 may legitimately
+have no closure in years when the Mid-Autumn holiday falls in Q4.
