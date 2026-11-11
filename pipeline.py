@@ -24,6 +24,18 @@ BUY, SELL, COST = 0.55, 0.45, 0.002          # 買進/賣出門檻、單次換�
 FORECAST_ERROR_TOLERANCE = 0.007  # 預測點位誤差容許值：±0.7%
 _TWSE_CLOSED_DATES_CACHE = {}
 
+# Official ad-hoc full-market closures not included in the annual holiday schedule.
+# Sources: TWSE press releases for 2023-08-03, 2024-07-24/25, 2024-10-02/03/31;
+# TWSE/CNA announcements for 2026-07-10 and 2026-10-23.
+_TWSE_EXCEPTIONAL_CLOSED_DATES = {
+    2023: {dt.date(2023, 8, 3)},
+    2024: {
+        dt.date(2024, 7, 24), dt.date(2024, 7, 25),
+        dt.date(2024, 10, 2), dt.date(2024, 10, 3), dt.date(2024, 10, 31),
+    },
+    2026: {dt.date(2026, 7, 10), dt.date(2026, 10, 23)},
+}
+
 
 def _parse_twse_calendar_date(value):
     """Parse TWSE holiday dates in ISO, Gregorian YYYYMMDD, or ROC YYYMMDD form."""
@@ -50,65 +62,189 @@ def _parse_twse_calendar_date(value):
         return None
 
 
+def _twse_calendar_row_is_closed(day, name, description):
+    """Classify only the row's own date, not other dates mentioned in its notes."""
+    name = str(name or "").strip()
+    description = str(description or "").strip()
+    terminal_trading_marker = any(
+        term in name for term in ("最後交易日", "開始交易日", "交易開始日")
+    )
+    closure_terms = (
+        "市場無交易", "休市", "放假", "補假", "國定假日",
+        "紀念日", "僅辦理結算交割", "不交易",
+    )
+    if terminal_trading_marker:
+        # Some TWSE rows are labelled "最後交易日" but explicitly state that
+        # the same date is settlement-only. Require an explicit same-day date
+        # reference before overriding the label.
+        same_day_tokens = (
+            f"{day.month}月{day.day}日",
+            f"{day.month}/{day.day}",
+            f"{day.month:02d}/{day.day:02d}",
+        )
+        return (
+            any(token in description for token in same_day_tokens)
+            and any(term in description for term in closure_terms)
+        )
+    direct_name_terms = closure_terms + (
+        "除夕", "春節", "兒童節", "民族掃墓節", "勞動節",
+        "端午節", "中秋節", "國慶日", "行憲紀念日", "教師節",
+        "開國紀念日",
+    )
+    if any(term in name for term in direct_name_terms):
+        return True
+    same_day_tokens = (
+        f"{day.month}月{day.day}日",
+        f"{day.month}/{day.day}",
+        f"{day.month:02d}/{day.day:02d}",
+    )
+    return (
+        any(token in description for token in same_day_tokens)
+        and any(term in description for term in closure_terms)
+    )
+
+
 def _fetch_twse_closed_dates(year):
-    """Fetch official TWSE annual closure dates; return None when unavailable."""
+    """Fetch a complete official TWSE annual calendar or fail closed.
+
+    A matching year and a non-empty payload are not enough: truncated API
+    responses can otherwise be mistaken for a complete holiday schedule.
+    Require an explicit year identity (or current-year OpenAPI list), a
+    self-consistent row count, unique parseable dates spanning all quarters,
+    multiple weekday closures in the year's key holiday periods, and
+    post-holiday reopening rows. Q3 may legitimately contain no market closure
+    in years when the Mid-Autumn holiday falls in Q4.
+    """
     year = int(year)
     if year in _TWSE_CLOSED_DATES_CACHE:
         return _TWSE_CLOSED_DATES_CACHE[year]
-    url = (
-        "https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?"
-        + urllib.parse.urlencode({"date": year, "response": "json"})
-    )
-    req = urllib.request.Request(url, headers={
+
+    headers = {
         "User-Agent": "Mozilla/5.0 (compatible; TAIEXForecastCalendar/1.0)",
         "Accept": "application/json,text/plain,*/*",
         "Referer": "https://www.twse.com.tw/",
-    })
-    try:
-        payload = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8-sig"))
-        fields = payload.get("fields") or []
-        rows = payload.get("data") or []
-        if not rows:
-            for table in payload.get("tables") or []:
-                if table.get("data"):
-                    fields, rows = table.get("fields") or fields, table["data"]
-                    break
-        if not rows:
-            return None
-        closed = set()
-        for row in rows:
-            if isinstance(row, dict):
-                record = row
-            elif fields and len(row) == len(fields):
-                record = dict(zip(fields, row))
+    }
+    legacy_url = (
+        "https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?"
+        + urllib.parse.urlencode({"date": f"{year}0101", "response": "json"})
+    )
+    urls = [legacy_url]
+    current_year = pd.Timestamp.now(tz="Asia/Taipei").year
+    if year == current_year:
+        urls.append("https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule")
+
+    last_error = None
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            payload = json.loads(_read_with_backoff(req, timeout=15).decode("utf-8-sig"))
+
+            # The OpenAPI currently returns a bare list for the current year.
+            # The RWD response must identify the requested year explicitly.
+            if isinstance(payload, list):
+                if year != current_year or not payload:
+                    continue
+                rows, fields = payload, []
+            elif isinstance(payload, dict):
+                if str(payload.get("stat", "")).strip().lower() != "ok":
+                    continue
+                try:
+                    if int(payload.get("queryYear")) != year:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                fields = payload.get("fields") or []
+                rows = payload.get("data") or []
+                if not rows:
+                    for table in payload.get("tables") or []:
+                        if table.get("data"):
+                            fields, rows = table.get("fields") or fields, table["data"]
+                            break
+                if not rows:
+                    continue
+                declared_total = payload.get("total")
+                if declared_total is not None and int(declared_total) != len(rows):
+                    continue
             else:
                 continue
-            day = _parse_twse_calendar_date(
-                record.get("日期") or record.get("Date") or record.get("date")
-            )
-            if day is None or day.year != year or day.weekday() >= 5:
-                continue
-            name = str(record.get("名稱") or record.get("Name") or "").strip()
-            description = str(record.get("說明") or record.get("Description") or "").strip()
-            detail = name + description
-            if any(term in detail for term in ("最後交易日", "開始交易日", "交易開始日")):
-                continue
-            if any(term in detail for term in (
-                "市場無交易", "休市", "放假", "補假", "國定假日",
-                "紀念日", "僅辦理結算交割",
-            )):
-                closed.add(day)
-        result = frozenset(closed)
-        _TWSE_CLOSED_DATES_CACHE[year] = result
-        return result
-    except Exception as exc:
-        print(
-            f"[forecast-calendar] TWSE annual calendar unavailable year={year} "
-            f"error_class={type(exc).__name__}; weekday-only fallback will be labelled",
-            flush=True,
-        )
-        return None
 
+            records = []
+            for row in rows:
+                if isinstance(row, dict):
+                    records.append(row)
+                elif fields and isinstance(row, (list, tuple)) and len(row) == len(fields):
+                    records.append(dict(zip(fields, row)))
+                else:
+                    records = []
+                    break
+
+            # Reject partial, malformed, duplicate, or cross-year schedules.
+            if len(records) != len(rows) or len(records) < 12:
+                continue
+            dated_records = []
+            for record in records:
+                day = _parse_twse_calendar_date(
+                    record.get("日期") or record.get("Date") or record.get("date")
+                )
+                if day is None or day.year != year:
+                    dated_records = []
+                    break
+                dated_records.append((day, record))
+            if len(dated_records) != len(records):
+                continue
+            dates = [day for day, _ in dated_records]
+            if len(set(dates)) != len(dates):
+                continue
+            record_quarters = {((day.month - 1) // 3) + 1 for day in dates}
+            if not {1, 2, 4}.issubset(record_quarters) or len(record_quarters) < 3:
+                continue
+
+            closed = set()
+            reopening_rows = 0
+            explicit_weekend_trading = False
+            for day, record in dated_records:
+                name = str(
+                    record.get("名稱") or record.get("Name") or record.get("name") or ""
+                ).strip()
+                description = str(
+                    record.get("說明") or record.get("Description")
+                    or record.get("description") or ""
+                ).strip()
+                detail = name + description
+                if any(term in detail for term in ("開始交易日", "交易開始日", "開始交易")):
+                    reopening_rows += 1
+                if "補行交易" in detail and day.weekday() >= 5:
+                    explicit_weekend_trading = True
+                if day.weekday() >= 5:
+                    continue
+                if _twse_calendar_row_is_closed(day, name, description):
+                    closed.add(day)
+
+            # This builder models ordinary Monday-Friday sessions. If TWSE
+            # explicitly publishes weekend trading, extend the representation
+            # before using this schedule rather than silently omitting it.
+            closure_quarters = {((day.month - 1) // 3) + 1 for day in closed}
+            if (
+                explicit_weekend_trading
+                or len(closed) < 8
+                or not {1, 2, 4}.issubset(closure_quarters)
+                or reopening_rows < 2
+            ):
+                continue
+
+            result = frozenset(closed)
+            _TWSE_CLOSED_DATES_CACHE[year] = result
+            return result
+        except Exception as exc:
+            last_error = exc
+
+    print(
+        f"[forecast-calendar] TWSE annual calendar unavailable or incomplete year={year} "
+        f"error_class={type(last_error).__name__ if last_error else 'IncompleteOrMismatchedSchedule'}; "
+        "weekday-only fallback will be labelled",
+        flush=True,
+    )
+    return None
 
 def _expected_twse_trading_days(start, end):
     """Build an independent Taiwan-session index from TWSE annual closure calendars.
@@ -126,6 +262,7 @@ def _expected_twse_trading_days(start, end):
         if year_closures is None:
             return pd.DatetimeIndex([]), "unavailable"
         closures.update(year_closures)
+        closures.update(_TWSE_EXCEPTIONAL_CLOSED_DATES.get(year, set()))
     weekdays = pd.bdate_range(start_day, end_day)
     expected = weekdays[~pd.Index(weekdays.date).isin(closures)]
     return pd.DatetimeIndex(expected), "twse_official_holiday_schedule"
@@ -144,6 +281,7 @@ def _future_taiwan_trading_dates(asof, count=3):
             complete = False
         else:
             closures.update(year_closures)
+        closures.update(_TWSE_EXCEPTIONAL_CLOSED_DATES.get(year, set()))
     dates = []
     day = base + dt.timedelta(days=1)
     while day <= end and len(dates) < count:

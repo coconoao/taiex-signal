@@ -70,6 +70,77 @@ def _coverage(frame):
     }
 
 
+def _backfill_missing_official_taiex_closes(market: pd.DataFrame, *, max_backfill: int = 20):
+    """Fill a small number of missing expected TAIEX sessions from TWSE itself.
+
+    This repairs vendor gaps without treating observed prices as the calendar.
+    If the official calendar is unavailable or the gap is too large, no
+    inferred values are inserted and the later calendar gate remains closed.
+    """
+    if market.empty or "TAIEX" not in market:
+        return market, {"status": "unavailable", "requested": 0, "filled": [], "unfilled": []}
+    expected, source = pipeline._expected_twse_trading_days(
+        market.index.min(), market.index.max()
+    )
+    expected = pd.DatetimeIndex(expected).tz_localize(None).normalize()
+    if source != "twse_official_holiday_schedule" or not len(expected):
+        return market, {
+            "status": "calendar_unavailable", "source": source,
+            "requested": 0, "filled": [], "unfilled": [],
+        }
+    observed = pd.DatetimeIndex(market["TAIEX"].dropna().index).tz_localize(None).normalize()
+    missing = expected.difference(observed)
+    if len(missing) > max_backfill:
+        return market, {
+            "status": "gap_limit_exceeded", "source": source,
+            "requested": int(len(missing)), "filled": [],
+            "unfilled": [str(x.date()) for x in missing],
+        }
+    filled, unfilled = [], []
+    for day in missing:
+        try:
+            value = pipeline._fetch_twse_taiex_day(day)
+        except Exception:
+            value = None
+        if value is None:
+            unfilled.append(str(day.date()))
+            continue
+        market.loc[day, "TAIEX"] = float(value)
+        filled.append(str(day.date()))
+    return market.sort_index(), {
+        "status": "complete" if not unfilled else "partial",
+        "source": "TWSE official daily index endpoint",
+        "requested": int(len(missing)),
+        "filled": filled,
+        "unfilled": unfilled,
+    }
+
+
+def _validate_taiwan_calendar(observed_index):
+    observed = pd.DatetimeIndex(observed_index).tz_localize(None).normalize()
+    expected, source = pipeline._expected_twse_trading_days(observed.min(), observed.max())
+    expected = pd.DatetimeIndex(expected).tz_localize(None).normalize()
+    missing = expected.difference(observed)
+    unexpected = observed.difference(expected)
+    passed = bool(
+        source == "twse_official_holiday_schedule"
+        and len(expected) > 0
+        and len(missing) == 0
+        and len(unexpected) == 0
+    )
+    return {
+        "status": "passed" if passed else "failed_or_unavailable",
+        "passed": passed,
+        "source": source,
+        "expected_sessions": int(len(expected)),
+        "observed_sessions": int(len(observed)),
+        "missing_count": int(len(missing)),
+        "unexpected_count": int(len(unexpected)),
+        "missing_dates": [str(x.date()) for x in missing[:20]],
+        "unexpected_dates": [str(x.date()) for x in unexpected[:20]],
+    }
+
+
 def main() -> int:
     cache_dir = Path("/tmp/taiex-regime-router-cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -79,7 +150,36 @@ def main() -> int:
     cache_path = str(cache_dir / "market_history.csv")
     market = pipeline.load_live(years=10, cache_path=cache_path)
     market = market.sort_index()
+    requested_start = os.environ.get("REGIME_ROUTER_START_DATE", "").strip()
+    if requested_start:
+        start = pd.Timestamp(requested_start).tz_localize(None).normalize()
+        market = market.loc[market.index >= start].copy()
+        if market.empty:
+            raise RuntimeError(
+                f"REGIME_ROUTER_START_DATE={requested_start} leaves no market history"
+            )
+    market, official_price_backfill = _backfill_missing_official_taiex_closes(market)
     close = market["TAIEX"].dropna()
+    calendar_validation = _validate_taiwan_calendar(close.index)
+    calendar_validation["official_price_backfill"] = official_price_backfill
+    calendar_validation["requested_start_date"] = (
+        str(pd.Timestamp(requested_start).date()) if requested_start else None
+    )
+    if not calendar_validation["passed"]:
+        failure_artifact = {
+            "status": "failed",
+            "real_data_audit": {
+                "calendar_validation": calendar_validation,
+                "note": "官方台灣交易日曆未通過完整性驗證；停止模型回測，禁止以觀測行情日期代替官方交易日分母。",
+            },
+        }
+        Path("regime-router-real-data.json").write_text(
+            json.dumps(failure_artifact, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        raise RuntimeError(
+            "官方台灣交易日曆驗證未通過，已停止回測：" +
+            json.dumps(calendar_validation, ensure_ascii=False)
+        )
     if len(close) < 800:
         raise RuntimeError(
             f"真實台股歷史資料不足：{len(close)} 個交易日，至少需要 800 日"
@@ -143,6 +243,7 @@ def main() -> int:
             post_close_features_lagged=True,
             allowed_sample_index_by_horizon=allowed_sample_index_by_horizon,
             include_gate_sensitivity=(group_name == "price_only"),
+            include_dynamic_interval_research=(group_name == "price_only"),
         )
 
     # Assert identical OOS windows for every feature group and horizon before
@@ -242,6 +343,7 @@ def main() -> int:
 
     result["real_data_audit"] = {
         "source": "Yahoo Finance daily close with TWSE recent official TAIEX refresh",
+        "calendar_validation": calendar_validation,
         "start_date": str(close.index.min().date()),
         "end_date": str(close.index.max().date()),
         "taiwan_sessions": int(len(close)),

@@ -11,6 +11,16 @@ on:
       - "requirements.txt"
       - ".github/workflows/regime-router-real-data.yml"
   workflow_dispatch:
+  push:
+    branches:
+      - research/dynamic-regime-conformal-intervals-v1
+    paths:
+      - "pipeline.py"
+      - "regime_router.py"
+      - "regime_interval_research.py"
+      - "research_regime_backtest.py"
+      - "tests/test_research_regime_backtest_calendar.py"
+      - ".github/workflows/regime-router-real-data.yml"
 
 permissions:
   contents: read
@@ -21,9 +31,9 @@ concurrency:
 
 jobs:
   real-market-backtest:
-    # Supabase service credentials are used only for a read-only historical-cache GET.
-    # Do not expose repository secrets to pull requests from forks.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Manual runs and research-branch pushes only. The research run is scoped
+    # to 2021 onward, where the official TWSE annual schedule is available.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -39,6 +49,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           REGIME_ROUTER_REQUIRE_SUPABASE_CACHE: "1"
+          REGIME_ROUTER_START_DATE: "2021-01-01"
         run: python research_regime_backtest.py --skip-backfill
       - name: Upload real-market research metrics
         if: always()

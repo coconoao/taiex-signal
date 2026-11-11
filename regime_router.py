@@ -19,6 +19,7 @@ from sklearn.metrics import (
 )
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from regime_interval_research import expanding_quantile_regimes, rolling_conformal_intervals, interval_metrics
 
 REGIME_NAMES = ("low", "normal", "high", "extreme")
 REGIME_LABELS = {
@@ -883,7 +884,7 @@ def _forecast_metrics(rows):
     }
 
 
-def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True):
+def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True, include_dynamic_interval_research=False):
     """Train and evaluate an independent router + four specialists per horizon.
 
     features_by_horizon maps horizon -> (feature_frame, cumulative forward-return series).
@@ -1168,6 +1169,81 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             selected_moves = future_max_daily_move.loc[final_train_idx].to_numpy(dtype=float)
         magnitude_profile = _historical_magnitude_profile(selected_returns, selected_moves, base_close)
         meta = target_meta.get(horizon, {})
+        dynamic_interval_research = None
+        if include_dynamic_interval_research and oos_forecasts:
+            oos_positions = [row["forecast_position"] for row in oos_forecasts]
+            # Use the full historical target series, not just the OOS subset,
+            # while the helper enforces that every threshold sees only prior
+            # outcomes whose horizon has fully matured at the current origin.
+            dynamic_labels = expanding_quantile_regimes(
+                future_max_daily_move.to_numpy(dtype=float),
+                min_history=252,
+                origin_positions=np.arange(len(future_max_daily_move), dtype=int),
+                horizon=horizon,
+            )
+            oos_dynamic_classes = dynamic_labels["labels"][np.asarray(oos_positions, dtype=int)]
+            dynamic_valid = oos_dynamic_classes >= 0
+            dynamic_counts = {
+                name: int(np.sum(oos_dynamic_classes == class_id))
+                for class_id, name in enumerate(REGIME_NAMES)
+            }
+            interval_predictions = [row["predicted_close"] for row in oos_forecasts] + [forecast_close]
+            interval_actuals = [row["actual_close"] for row in oos_forecasts] + [np.nan]
+            interval_positions = oos_positions + [latest_position]
+            interval_result = rolling_conformal_intervals(
+                interval_predictions, interval_actuals, horizon=horizon,
+                origin_positions=interval_positions, min_calibration_samples=60,
+                method="absolute_residual",
+            )
+            signed_interval_result = rolling_conformal_intervals(
+                interval_predictions, interval_actuals, horizon=horizon,
+                origin_positions=interval_positions, min_calibration_samples=60,
+                method="signed_residual",
+            )
+            absolute_interval_metrics = interval_metrics(interval_result, interval_actuals)
+            signed_interval_metrics = interval_metrics(signed_interval_result, interval_actuals)
+            dynamic_interval_research = {
+                "dynamic_regime_labels": {
+                    "status": "available" if int(dynamic_valid.sum()) else "insufficient",
+                    "threshold_policy": "expanding_prior_matured_outcomes_only",
+                    "quantiles": [0.25, 0.75, 0.95], "min_history": 252,
+                    "valid_oos_samples": int(dynamic_valid.sum()),
+                    "class_counts": dynamic_counts,
+                    "unlabelled_warmup_or_unmatured": int((~dynamic_valid).sum()),
+                    "latest_thresholds_pct": (
+                        [round(float(x) * 100, 4) for x in dynamic_labels["thresholds"][latest_position]]
+                        if np.isfinite(dynamic_labels["thresholds"][latest_position]).all() else None
+                    ),
+                    "note": "動態分級為逐時點歷史分位數標籤研究；尚未替換現行分類器。",
+                },
+                "close_prediction_intervals": {
+                    "status": "available" if interval_result["rows"][-1]["intervals"] else "insufficient",
+                    "nominal_levels_pct": [50, 80, 90],
+                    "calibration_method": "symmetric_absolute_residual_conformal",
+                    "oos_metrics": absolute_interval_metrics,
+                    "latest_forecast": {
+                        **interval_result["rows"][-1],
+                        "target_close_point": round(float(forecast_close), 2),
+                    },
+                    "variants": {
+                        "symmetric_absolute_residual": {
+                            "oos_metrics": absolute_interval_metrics,
+                            "latest_forecast": {
+                                **interval_result["rows"][-1],
+                                "target_close_point": round(float(forecast_close), 2),
+                            },
+                        },
+                        "asymmetric_signed_residual": {
+                            "oos_metrics": signed_interval_metrics,
+                            "latest_forecast": {
+                                **signed_interval_result["rows"][-1],
+                                "target_close_point": round(float(forecast_close), 2),
+                            },
+                        },
+                    },
+                    "note": "比較對稱絕對殘差與非對稱有符號殘差兩種區間；兩者只使用已成熟的同期限 OOS 殘差，須依覆蓋率、寬度及 interval score 決定是否採用。",
+                },
+            }
         sessions.append({
             "horizon_sessions": horizon,
             "label": f"D+{horizon}",
@@ -1234,6 +1310,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 }
             ),
             "historical_magnitude_profile": magnitude_profile,
+            **({"dynamic_interval_research": dynamic_interval_research} if dynamic_interval_research is not None else {}),
             "note": (
                 "此為研究候選；分流依未來區間最大單日絕對漲跌幅，點位預測另為基準至 D+N 收盤的累積報酬。專家僅在成熟先前 OOS MAE 優於全域 Ridge 時參與點位與幅度輸出，否則自動回退或收縮至全域模型。"
                 "分流機率使用先前可得的樣本外預測逐段校準；校準樣本不足時保留原始分流分數。"
