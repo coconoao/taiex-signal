@@ -55,3 +55,17 @@ def test_invalid_inputs_fail_closed():
         rolling_conformal_intervals([1, 2], [1], horizon=1)
     with pytest.raises(ValueError):
         expanding_quantile_regimes([1, 2], min_history=0)
+
+
+
+def test_dynamic_thresholds_exclude_unmatured_horizon_outcomes():
+    values = np.arange(1.0, 21.0)
+    positions = np.arange(20)
+    baseline = expanding_quantile_regimes(values, min_history=5,
+                                          origin_positions=positions, horizon=3)
+    changed = values.copy()
+    changed[8] = 1000.0
+    revised = expanding_quantile_regimes(changed, min_history=5,
+                                          origin_positions=positions, horizon=3)
+    # At origin 10, row 8 has not matured yet (8 + 3 > 10).
+    np.testing.assert_allclose(baseline["thresholds"][10], revised["thresholds"][10])
