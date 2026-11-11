@@ -70,6 +70,31 @@ def _coverage(frame):
     }
 
 
+def _validate_taiwan_calendar(observed_index):
+    observed = pd.DatetimeIndex(observed_index).tz_localize(None).normalize()
+    expected, source = pipeline._expected_twse_trading_days(observed.min(), observed.max())
+    expected = pd.DatetimeIndex(expected).tz_localize(None).normalize()
+    missing = expected.difference(observed)
+    unexpected = observed.difference(expected)
+    passed = bool(
+        source == "twse_official_holiday_schedule"
+        and len(expected) > 0
+        and len(missing) == 0
+        and len(unexpected) == 0
+    )
+    return {
+        "status": "passed" if passed else "failed_or_unavailable",
+        "passed": passed,
+        "source": source,
+        "expected_sessions": int(len(expected)),
+        "observed_sessions": int(len(observed)),
+        "missing_count": int(len(missing)),
+        "unexpected_count": int(len(unexpected)),
+        "missing_dates": [str(x.date()) for x in missing[:20]],
+        "unexpected_dates": [str(x.date()) for x in unexpected[:20]],
+    }
+
+
 def main() -> int:
     cache_dir = Path("/tmp/taiex-regime-router-cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -80,6 +105,22 @@ def main() -> int:
     market = pipeline.load_live(years=10, cache_path=cache_path)
     market = market.sort_index()
     close = market["TAIEX"].dropna()
+    calendar_validation = _validate_taiwan_calendar(close.index)
+    if not calendar_validation["passed"]:
+        failure_artifact = {
+            "status": "failed",
+            "real_data_audit": {
+                "calendar_validation": calendar_validation,
+                "note": "官方台灣交易日曆未通過完整性驗證；停止模型回測，禁止以觀測行情日期代替官方交易日分母。",
+            },
+        }
+        Path("regime-router-real-data.json").write_text(
+            json.dumps(failure_artifact, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        raise RuntimeError(
+            "官方台灣交易日曆驗證未通過，已停止回測：" +
+            json.dumps(calendar_validation, ensure_ascii=False)
+        )
     if len(close) < 800:
         raise RuntimeError(
             f"真實台股歷史資料不足：{len(close)} 個交易日，至少需要 800 日"
@@ -243,6 +284,7 @@ def main() -> int:
 
     result["real_data_audit"] = {
         "source": "Yahoo Finance daily close with TWSE recent official TAIEX refresh",
+        "calendar_validation": calendar_validation,
         "start_date": str(close.index.min().date()),
         "end_date": str(close.index.max().date()),
         "taiwan_sessions": int(len(close)),
