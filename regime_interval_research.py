@@ -14,18 +14,26 @@ REGIME_NAMES = ("low", "normal", "high", "extreme")
 
 
 def expanding_quantile_regimes(outcomes: Iterable[float], *, min_history: int = 252,
-                               quantiles: tuple[float, float, float] = (0.25, 0.75, 0.95)) -> dict:
+                               quantiles: tuple[float, float, float] = (0.25, 0.75, 0.95),
+                               origin_positions: Iterable[int] | None = None,
+                               horizon: int = 1) -> dict:
     """Label each outcome using quantiles from strictly earlier outcomes only."""
     values = np.asarray(list(outcomes), dtype=float)
     if min_history < 1:
         raise ValueError("min_history must be positive")
     if len(quantiles) != 3 or not (0 < quantiles[0] < quantiles[1] < quantiles[2] < 1):
         raise ValueError("quantiles must be three strictly increasing values in (0, 1)")
+    if horizon < 1:
+        raise ValueError("horizon must be positive")
+    positions = np.arange(len(values), dtype=int) if origin_positions is None else np.asarray(list(origin_positions), dtype=int)
+    if positions.shape != values.shape or (len(positions) > 1 and np.any(np.diff(positions) <= 0)):
+        raise ValueError("origin_positions must be strictly increasing and match outcomes")
     labels = np.full(len(values), -1, dtype=int)
     thresholds = np.full((len(values), 3), np.nan, dtype=float)
     history_counts = np.zeros(len(values), dtype=int)
     for i, value in enumerate(values):
-        history = np.abs(values[:i])
+        eligible = (np.arange(len(values)) < i) & (positions + int(horizon) <= positions[i])
+        history = np.abs(values[eligible])
         history = history[np.isfinite(history)]
         history_counts[i] = len(history)
         if len(history) < min_history or not np.isfinite(value):
