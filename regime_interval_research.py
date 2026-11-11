@@ -36,10 +36,15 @@ def expanding_quantile_regimes(outcomes: Iterable[float], *, min_history: int = 
         history = np.abs(values[eligible])
         history = history[np.isfinite(history)]
         history_counts[i] = len(history)
-        if len(history) < min_history or not np.isfinite(value):
+        if len(history) < min_history:
             continue
         q25, q75, q95 = np.quantile(history, quantiles, method="higher")
         thresholds[i] = (q25, q75, q95)
+        # Thresholds are knowable at the forecast origin even when the
+        # corresponding future outcome has not matured yet. Keep the label
+        # unknown, but expose the latest point-in-time cutoffs for diagnostics.
+        if not np.isfinite(value):
+            continue
         magnitude = abs(float(value))
         labels[i] = 0 if magnitude <= q25 else 1 if magnitude <= q75 else 2 if magnitude <= q95 else 3
     return {
