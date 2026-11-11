@@ -1173,14 +1173,15 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         if include_dynamic_interval_research and oos_forecasts:
             oos_positions = [row["forecast_position"] for row in oos_forecasts]
             dynamic_labels = expanding_quantile_regimes(
-                [row["actual_max_daily_move"] for row in oos_forecasts],
+                [row["actual_max_daily_move"] for row in oos_forecasts] + [np.nan],
                 min_history=252,
-                origin_positions=oos_positions,
+                origin_positions=oos_positions + [latest_position],
                 horizon=horizon,
             )
-            dynamic_valid = dynamic_labels["labels"] >= 0
+            oos_dynamic_classes = dynamic_labels["labels"][:-1]
+            dynamic_valid = oos_dynamic_classes >= 0
             dynamic_counts = {
-                name: int(np.sum(dynamic_labels["labels"] == class_id))
+                name: int(np.sum(oos_dynamic_classes == class_id))
                 for class_id, name in enumerate(REGIME_NAMES)
             }
             interval_predictions = [row["predicted_close"] for row in oos_forecasts] + [forecast_close]
