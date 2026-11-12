@@ -533,12 +533,20 @@ function renderForecastQuality(d) {
     const macroF1 = classification.macro_f1 == null ? "—" : (Number(classification.macro_f1) * 100).toFixed(1) + "%";
     const recall = classification.high_extreme_recall == null ? "—" : (Number(classification.high_extreme_recall) * 100).toFixed(1) + "%";
     const precision = classification.high_extreme_precision == null ? "—" : (Number(classification.high_extreme_precision) * 100).toFixed(1) + "%";
+    const extremeRecall = classification.extreme_recall == null ? "—" : (Number(classification.extreme_recall) * 100).toFixed(1) + "%";
+    const calibrationCoverage = classification.calibration_coverage_pct == null
+      ? "—" : Number(classification.calibration_coverage_pct).toFixed(1) + "%";
+    const calibrationStatus = classification.probabilities_calibrated === true
+      ? "完整" : classification.calibration_coverage_pct == null
+        ? "未知" : "未完整";
     const formatPoints = value => value == null || !Number.isFinite(value) ? "—" : value.toFixed(2) + " 點";
     return "<tr><td data-label=\"期限\">D+" + Number(item.horizon_sessions || 0) +
       "</td><td data-label=\"分類 OOS 筆數\">" + Number(classification.oos_samples || 0).toLocaleString("zh-TW") +
       "</td><td data-label=\"Macro-F1\">" + macroF1 +
       "</td><td data-label=\"高／極高波動召回率\">" + recall +
       "</td><td data-label=\"高／極高波動精確率\">" + precision +
+      "</td><td data-label=\"極高波動召回率\">" + extremeRecall +
+      "</td><td data-label=\"機率校準覆蓋率\">" + calibrationCoverage + "（" + calibrationStatus + "）" +
       "</td><td data-label=\"分流點位 MAE\">" + formatPoints(routedMae) +
       "</td><td data-label=\"全域 Ridge MAE\">" + formatPoints(globalMae) +
       "</td><td data-label=\"MAE 差異\">" + esc(deltaText) + "</td></tr>";
@@ -573,14 +581,14 @@ function renderForecastQuality(d) {
     (sourceRows || '<tr><td colspan="4">沒有來源日期紀錄</td></tr>') +
     '</tbody></table></div>' +
     '<h3>首頁四級分流模型：歷史樣本外驗證</h3>' +
-    '<div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>期限</th><th>分類 OOS 筆數</th><th>Macro-F1</th><th>高／極高波動召回率</th><th>高／極高波動精確率</th><th>分流點位 MAE</th><th>全域 Ridge MAE</th><th>MAE 差異</th></tr></thead><tbody>' +
-    (routerRows || '<tr><td colspan="8">尚無分流模型歷史樣本外驗證紀錄</td></tr>') +
+    '<div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>期限</th><th>分類 OOS 筆數</th><th>Macro-F1</th><th>高／極高波動召回率</th><th>高／極高波動精確率</th><th>極高波動召回率</th><th>機率校準覆蓋率</th><th>分流點位 MAE</th><th>全域 Ridge MAE</th><th>MAE 差異</th></tr></thead><tbody>' +
+    (routerRows || '<tr><td colspan="10">尚無分流模型歷史樣本外驗證紀錄</td></tr>') +
     '</tbody></table></div>' +
     '<h3>參考基準：直接 Ridge 點位模型（不是首頁分流模型）</h3>' +
     '<div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>期限</th><th>OOS 筆數</th><th>MAE</th><th>持平基準 MAE</th><th>差異</th><th>誤差在 ±0.7% 內</th></tr></thead><tbody>' +
     (directRows || '<tr><td colspan="6">尚無直接 Ridge 歷史樣本外驗證紀錄</td></tr>') +
     '</tbody></table></div>' +
-    '<p class="note">Macro-F1 是四級分類的整體平衡指標；召回率與精確率只針對高／極高波動合併類別。點位 MAE 越低越好；MAE 差異為分流模型減全域 Ridge，正值代表誤差較大。直接 Ridge 表是另一個參考模型，不代表首頁實際顯示的分流輸出。以上均為歷史樣本外統計，不保證未來表現。不同市場休市日不同，日期差異不必然代表錯誤；若來源顯示快取或未完整更新，最新預測的輸入可能不夠新。</p>';
+    '<p class="note">Macro-F1 是四級分類的整體平衡指標；高／極高波動召回率與精確率只針對合併類別；極高波動召回率則只計極高波動類別，若為 0 代表測試期間未辨識出該類別。機率校準覆蓋率未達 100% 時，不應把所有分類分數視為已校準。點位 MAE 越低越好；MAE 差異為分流模型減全域 Ridge，正值代表誤差較大。直接 Ridge 表是另一個參考模型，不代表首頁實際顯示的分流輸出。以上均為歷史樣本外統計，不保證未來表現。不同市場休市日不同，日期差異不必然代表錯誤；若來源顯示快取或未完整更新，最新預測的輸入可能不夠新。</p>';
 }
 function renderDaily(d) {
   $("meta").textContent = "台股最近可用交易日：" + d.asof + "。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。";
