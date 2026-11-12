@@ -212,6 +212,12 @@ def _fit_probability_calibrator(probability_history, actual_history):
     features = np.log(np.clip(np.asarray(probability_history, dtype=float), 1e-7, 1.0))
     calibrator = LogisticRegression(C=1.0, max_iter=800, random_state=29)
     calibrator.fit(features, np.asarray(actual_history, dtype=int))
+    # Preserve the fitted model exactly as before, but expose whether sklearn
+    # reached its iteration limit so OOS metrics are not presented without
+    # optimizer-quality context.
+    calibrator._research_converged = bool(
+        np.all(np.asarray(calibrator.n_iter_) < int(calibrator.max_iter))
+    )
     return calibrator
 
 
@@ -941,6 +947,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         oos_actual, oos_predicted, oos_probabilities, oos_prior_probabilities, oos_forecasts = [], [], [], [], []
         calibration_records = []
         calibrated_oos_samples = 0
+        calibration_nonconverged_fits = 0
         first_test = min(max(300, horizon + 30), max(horizon + 30, len(train_idx) // 2))
         # Evaluate the most recent 2,000 labelled origins (or all available
         # origins for shorter histories), while retaining an expanding train set.
@@ -967,6 +974,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 [record[1] for record in eligible_records],
                 [record[3] for record in eligible_records],
             )
+            if calibrator is not None and not getattr(calibrator, "_research_converged", True):
+                calibration_nonconverged_fits += 1
             probs = _apply_probability_calibrator(calibrator, raw_probs)
             calibrated_records = [record for record in eligible_records if record[4]]
             decision_thresholds = _select_risk_thresholds(
@@ -1203,6 +1212,11 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "prequential_calibrated_oos_samples": int(calibrated_oos_samples),
                 "oos_validation_fully_calibrated": bool(oos_actual and calibrated_oos_samples == len(oos_actual)),
                 "oos_validation_calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
+                "final_calibrator_converged": (
+                    bool(getattr(final_calibrator, "_research_converged", True))
+                    if final_calibrator is not None else None
+                ),
+                "oos_calibrator_nonconverged_fits": int(calibration_nonconverged_fits),
             },
             "expert_used": expert_used,
             "point_model_used": "expert_blend" if point_weight > 0 else "global_ridge",
@@ -1224,6 +1238,11 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "prequential_calibrated_oos_samples": int(calibrated_oos_samples),
                 "probabilities_calibrated": bool(oos_actual and calibrated_oos_samples == len(oos_actual)),
                 "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
+                "calibrator_nonconverged_fits": int(calibration_nonconverged_fits),
+                "final_calibrator_converged": (
+                    bool(getattr(final_calibrator, "_research_converged", True))
+                    if final_calibrator is not None else None
+                ),
             },
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
             "gate_policy_sensitivity": (
