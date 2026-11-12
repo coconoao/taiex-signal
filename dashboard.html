@@ -479,6 +479,18 @@ function renderRegimeRouter(router) {
     '<div class="forecast-grid">' + cards + '</div>';
 }
 
+function isTaiwanForecastTargetExpired(targetDate) {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(targetDate || ""))) return false;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date());
+  const current = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const today = current.year + "-" + current.month + "-" + current.day;
+  const hour = Number(current.hour);
+  return targetDate < today || (targetDate === today && hour >= 14);
+}
+
 function renderForecastQuality(d) {
   const root = $("forecastQualityContent");
   if (!root) return;
@@ -553,11 +565,21 @@ function renderDaily(d) {
       const source = String((inputSeries[key] || {}).source || "");
       return !source || source.includes("快取") || source === "無可用資料";
     }).map(([, label]) => label);
-    inputWarning.hidden = Boolean(d.demo) || unavailable.length === 0;
-    inputWarning.textContent = unavailable.length
-      ? "模型輸入提醒：以下跨市場資料未取得本次更新值，可能沿用快取或缺漏：" +
-        unavailable.join("、") + "。本次預測應視為資料不完整的研究輸出。"
-      : "";
+    const expiredHorizons = ((d.forecast || {}).regime_router || {}).sessions || [];
+    const expiredDates = expiredHorizons
+      .filter(item => isTaiwanForecastTargetExpired(item.target_date))
+      .map(item => "D+" + Number(item.horizon_sessions || 0) + "（" + item.target_date + "）");
+    const warnings = [];
+    if (unavailable.length) {
+      warnings.push("模型輸入提醒：以下跨市場資料未取得本次更新值，可能沿用快取或缺漏：" +
+        unavailable.join("、") + "。本次預測應視為資料不完整的研究輸出。");
+    }
+    if (expiredDates.length) {
+      warnings.push("預測期限提醒：" + expiredDates.join("、") +
+        " 的目標交易日已收盤，這些數值已不是尚未發生的預測；請等待下一次資料更新完成結果核對。");
+    }
+    inputWarning.hidden = Boolean(d.demo) || warnings.length === 0;
+    inputWarning.textContent = warnings.join(" ");
   }
   $("regimeRouterSummary").hidden = true;
   const router = forecast.regime_router || {};
