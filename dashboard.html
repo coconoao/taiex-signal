@@ -622,6 +622,7 @@ function renderDaily(d) {
       const validation = item.router_validation || {};
       const gate = validation.accuracy_threshold_gate || {};
       const accuracy = gate.observed_accuracy == null ? NaN : Number(gate.observed_accuracy);
+      const threshold = gate.threshold_exclusive == null ? NaN : Number(gate.threshold_exclusive);
       const macroF1 = validation.macro_f1 == null ? NaN : Number(validation.macro_f1);
       const extreme = validation.per_class && validation.per_class.extreme || {};
       const support = extreme.support == null ? NaN : Number(extreme.support);
@@ -631,6 +632,7 @@ function renderDaily(d) {
       if (!failedGate && !uncalibrated) return null;
       const details = [];
       if (Number.isFinite(accuracy)) details.push("分類準確率 " + (accuracy * 100).toFixed(1) + "%");
+      if (Number.isFinite(threshold) && failedGate) details.push("內部門檻 " + (threshold * 100).toFixed(0) + "%");
       if (Number.isFinite(macroF1)) details.push("Macro-F1 " + (macroF1 * 100).toFixed(1) + "%");
       if (Number.isFinite(support)) details.push("極高波動樣本 " + support + " 筆");
       if (Number.isFinite(recall)) details.push("極高波動召回率 " + (recall * 100).toFixed(1) + "%");
