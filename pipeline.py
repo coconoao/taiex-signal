@@ -481,9 +481,19 @@ def load_live(years=10, cache_path="market_history.csv"):
             }
             continue
         latest = pd.Timestamp(source_frame[column].last_valid_index()).tz_localize(None)
-        if column == "TAIEX" and official_taiex:
+        # Attribute the source to the exact latest non-null observation.
+        # A provider returning any historical value for a column does not mean
+        # that the merged series' newest value came from that provider.
+        official_latest = (
+            column == "TAIEX" and latest in official_taiex
+        )
+        yahoo_latest = (
+            yahoo_available and column in fresh
+            and latest in fresh.index and pd.notna(fresh.at[latest, column])
+        )
+        if official_latest:
             source = "TWSE 官方日收盤資料"
-        elif yahoo_available and column in fresh and fresh[column].notna().any():
+        elif yahoo_latest:
             source = "Yahoo Finance"
         else:
             source = "快取（Yahoo Finance 未更新）"
