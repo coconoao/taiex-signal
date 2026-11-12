@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -41,7 +42,7 @@ class RegimeRouterTests(unittest.TestCase):
 
         features = [[0.7, 0.2, 0.08, 0.02]] * 120
         labels = [index % 2 for index in range(120)]
-        with unittest.mock.patch("regime_router.LogisticRegression", FakeCalibrator):
+        with patch("regime_router.LogisticRegression", FakeCalibrator):
             calibrator = _fit_probability_calibrator(features, labels)
         self.assertIsNotNone(calibrator)
         self.assertFalse(calibrator._research_converged)
