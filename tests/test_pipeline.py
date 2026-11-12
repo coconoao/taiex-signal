@@ -101,6 +101,59 @@ class LoadLiveTests(unittest.TestCase):
                              cached["TAIEX"].iloc[-1])
 
 
+    def test_latest_source_labels_match_the_source_of_the_latest_value(self):
+        import numpy as np
+
+        index = pd.bdate_range(
+            end=pd.Timestamp.today().normalize() - pd.Timedelta(days=1),
+            periods=600,
+        )
+        cached = pd.DataFrame(
+            {name: np.arange(100, 100 + len(index), dtype=float)
+             for name in TICKERS},
+            index=index,
+        )
+        values = np.full((len(index), len(TICKERS)), np.nan)
+        sox_column = list(TICKERS.values()).index(TICKERS["SOX"])
+        # Yahoo returns an older SOX observation, while the merged latest
+        # observation remains from cache.
+        values[-10, sox_column] = 200.0
+        columns = pd.MultiIndex.from_product([["Close"], list(TICKERS.values())])
+        raw = pd.DataFrame(values, index=index, columns=columns)
+        fake_yfinance = types.SimpleNamespace(download=Mock(return_value=raw))
+
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = directory + "/market_history.csv"
+            cached.to_csv(cache_path, index_label="date")
+            with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+                with patch("pipeline._fetch_twse_taiex_recent",
+                           return_value={index[-2]: 999.0}):
+                    with patch("pipeline._fetch_market_reference_data", return_value={}):
+                        with patch("pipeline.time.sleep"):
+                            result = load_live(cache_path=cache_path)
+
+        status = result.attrs["data_status"]
+        self.assertEqual(status["yahoo_status"], "partial")
+        self.assertEqual(
+            status["series"]["SOX"]["source"],
+            "快取（Yahoo Finance 未更新）",
+        )
+        self.assertEqual(
+            status["series"]["SOX"]["latest_date"],
+            str(index[-1].date()),
+        )
+        # An older official TWSE observation must not label a newer cached
+        # TAIEX close as if that latest value came from TWSE.
+        self.assertEqual(
+            status["series"]["TAIEX"]["source"],
+            "快取（Yahoo Finance 未更新）",
+        )
+        self.assertEqual(
+            status["series"]["TAIEX"]["latest_date"],
+            str(index[-1].date()),
+        )
+
+
 class TwseRecentCloseTests(unittest.TestCase):
     def test_checks_newest_trading_day_before_older_fallback_dates(self):
         now = pd.Timestamp("2026-11-09 16:30", tz="Asia/Taipei")
