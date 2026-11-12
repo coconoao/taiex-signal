@@ -25,10 +25,27 @@ from regime_router import (
     _select_risk_thresholds,
     _prior_regime_probabilities,
     _router_metrics,
+    _fit_probability_calibrator,
 )
 
 
 class RegimeRouterTests(unittest.TestCase):
+    def test_probability_calibrator_exposes_iteration_limit_status(self):
+        class FakeCalibrator:
+            def __init__(self, max_iter):
+                self.max_iter = max_iter
+
+            def fit(self, features, labels):
+                self.n_iter_ = np.array([self.max_iter])
+                return self
+
+        features = [[0.7, 0.2, 0.08, 0.02]] * 120
+        labels = [index % 2 for index in range(120)]
+        with unittest.mock.patch("regime_router.LogisticRegression", FakeCalibrator):
+            calibrator = _fit_probability_calibrator(features, labels)
+        self.assertIsNotNone(calibrator)
+        self.assertFalse(calibrator._research_converged)
+
     def test_prior_regime_probabilities_use_smoothed_training_frequencies(self):
         probabilities = _prior_regime_probabilities([0, 0, 1, 2], smoothing=1.0)
         np.testing.assert_allclose(probabilities, [3 / 8, 2 / 8, 2 / 8, 1 / 8])
