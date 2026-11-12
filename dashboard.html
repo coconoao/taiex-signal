@@ -112,6 +112,7 @@ details[open]>summary{margin-bottom:12px}
     <section id="hero" aria-live="polite">
       <h2>四級波動分流模型｜未來三個交易日點位預測</h2>
       <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
+      <div id="forecastInputWarning" class="banner" hidden></div>
       <div id="regimeRouterSummary" aria-live="polite"></div>
       <div id="threeDayForecast" class="forecast-grid"></div>
       <details id="forecastQualityDetails"><summary>模型資料來源與歷史樣本外誤差</summary><div id="forecastQualityContent"><p class="note">讀取資料品質與歷史驗證結果中…</p></div></details>
@@ -541,6 +542,23 @@ function renderDaily(d) {
   renderTrialPointForecasts(forecast);
   renderRegimeRouter(forecast.regime_router);
   renderForecastQuality(d);
+  const inputWarning = $("forecastInputWarning");
+  if (inputWarning) {
+    const inputSeries = (d.data_status || {}).series || {};
+    const sourceLabels = {
+      SOX:"費半", TSM:"台積電 ADR", VIX:"VIX", US10Y:"美國 10 年債",
+      N225:"日經", KOSPI:"韓國股市", USDTWD:"美元／台幣"
+    };
+    const unavailable = Object.entries(sourceLabels).filter(([key]) => {
+      const source = String((inputSeries[key] || {}).source || "");
+      return !source || source.includes("快取") || source === "無可用資料";
+    }).map(([, label]) => label);
+    inputWarning.hidden = Boolean(d.demo) || unavailable.length === 0;
+    inputWarning.textContent = unavailable.length
+      ? "模型輸入提醒：以下跨市場資料未取得本次更新值，可能沿用快取或缺漏：" +
+        unavailable.join("、") + "。本次預測應視為資料不完整的研究輸出。"
+      : "";
+  }
   $("regimeRouterSummary").hidden = true;
   const router = forecast.regime_router || {};
   const routerSessions = Array.isArray(router.sessions) ? router.sessions : [];
