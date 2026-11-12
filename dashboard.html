@@ -114,6 +114,7 @@ details[open]>summary{margin-bottom:12px}
       <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
       <div id="regimeRouterSummary" aria-live="polite"></div>
       <div id="threeDayForecast" class="forecast-grid"></div>
+      <details id="forecastQualityDetails"><summary>模型資料來源與歷史樣本外誤差</summary><div id="forecastQualityContent"><p class="note">讀取資料品質與歷史驗證結果中…</p></div></details>
       <p id="sumline" class="note" hidden></p>
       <p class="note"><span style="color:var(--up);font-weight:700">紅色＝上漲</span>；<span style="color:var(--down);font-weight:700">綠色＝下跌</span>。每日變化與前一交易日（或前一預測日）比較。點位為模型估計，仍在研究驗證中。</p>
     </section>
@@ -477,6 +478,61 @@ function renderRegimeRouter(router) {
     '<div class="forecast-grid">' + cards + '</div>';
 }
 
+function renderForecastQuality(d) {
+  const root = $("forecastQualityContent");
+  if (!root) return;
+  const forecast = d.forecast || {};
+  const status = d.data_status || {};
+  const series = status.series || {};
+  const labels = {
+    TAIEX:"加權指數", SOX:"費半指數", TSM:"台積電 ADR", VIX:"VIX",
+    US10Y:"美國 10 年債殖利率", N225:"日經指數", KOSPI:"韓國綜合指數",
+    USDTWD:"美元／台幣"
+  };
+  const providerStatus = d.demo ? "合成示範資料" :
+    status.yahoo_status === "ok" ? "Yahoo 欄位完整" :
+    status.yahoo_status === "partial" ? "Yahoo 部分欄位未更新" :
+    "Yahoo 資料未完整更新";
+  const sourceRows = Object.entries(labels).map(([key, label]) => {
+    const item = series[key] || {};
+    const source = item.source || "無可用資料";
+    const latest = item.latest_date || "—";
+    const age = item.age_calendar_days == null ? "—" : Number(item.age_calendar_days) + " 日曆日";
+    const cached = source.includes("快取") ? "（快取，非本次更新）" : "";
+    return "<tr><td>" + esc(label) + "</td><td>" + esc(source + cached) +
+      "</td><td>" + esc(latest) + "</td><td>" + esc(age) + "</td></tr>";
+  }).join("");
+  const metricsRows = (forecast.sessions || []).map(item => {
+    const validation = item.validation || {};
+    const mae = validation.mae_points == null ? null : Number(validation.mae_points);
+    const baseline = validation.flat_baseline_mae_points == null ? null : Number(validation.flat_baseline_mae_points);
+    const delta = mae == null || baseline == null ? null : mae - baseline;
+    const comparison = delta == null ? "—" : delta > 0
+      ? "比持平基準多 " + delta.toFixed(2) + " 點"
+      : delta < 0 ? "比持平基準少 " + Math.abs(delta).toFixed(2) + " 點"
+      : "與持平基準相同";
+    const tolerance = validation.within_0_7_pct_pct == null
+      ? "—" : Number(validation.within_0_7_pct_pct).toFixed(1) + "%";
+    return "<tr><td>D+" + Number(item.horizon_sessions || 0) + "</td><td>" +
+      Number(validation.oos_samples || 0).toLocaleString("zh-TW") + "</td><td>" +
+      (mae == null || !Number.isFinite(mae) ? "—" : mae.toFixed(2) + " 點") +
+      "</td><td>" + (baseline == null || !Number.isFinite(baseline) ? "—" : baseline.toFixed(2) + " 點") +
+      "</td><td>" + esc(comparison) + "</td><td>" + tolerance + "</td></tr>";
+  }).join("");
+  root.innerHTML =
+    '<p class="note">資料狀態：' + esc(providerStatus) +
+    '｜資料狀態更新時間：' + esc(status.updated_at || "未提供") +
+    '｜模型收盤基準日：' + esc(forecast.asof || d.asof || "—") + '</p>' +
+    '<div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>輸入資料</th><th>來源</th><th>最新日期</th><th>日曆日差</th></tr></thead><tbody>' +
+    (sourceRows || '<tr><td colspan="4">沒有來源日期紀錄</td></tr>') +
+    '</tbody></table></div>' +
+    '<h3>點位模型歷史樣本外誤差</h3>' +
+    '<div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>期限</th><th>OOS 筆數</th><th>模型 MAE</th><th>持平基準 MAE</th><th>差異</th><th>誤差在 ±0.7% 內</th></tr></thead><tbody>' +
+    (metricsRows || '<tr><td colspan="6">尚無歷史樣本外驗證紀錄</td></tr>') +
+    '</tbody></table></div>' +
+    '<p class="note">MAE 是歷史樣本外平均絕對點位誤差；持平基準是假設未來收盤等於基準收盤。負向差異代表該歷史測試區間模型誤差較低，並不保證未來表現。不同市場休市日不同，日期差異不必然代表錯誤；若來源顯示快取或未完整更新，最新預測的輸入可能不夠新。</p>';
+}
+
 function renderDaily(d) {
   $("meta").textContent = "台股最近可用交易日：" + d.asof + "。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。";
   $("demo").hidden = !d.demo;
@@ -484,6 +540,7 @@ function renderDaily(d) {
   const forecast = d.forecast || {};
   renderTrialPointForecasts(forecast);
   renderRegimeRouter(forecast.regime_router);
+  renderForecastQuality(d);
   $("regimeRouterSummary").hidden = true;
   const router = forecast.regime_router || {};
   const routerSessions = Array.isArray(router.sessions) ? router.sessions : [];
