@@ -621,11 +621,11 @@ function renderDaily(d) {
     const qualityRows = expiredHorizons.map(item => {
       const validation = item.router_validation || {};
       const gate = validation.accuracy_threshold_gate || {};
-      const accuracy = Number(gate.observed_accuracy);
-      const macroF1 = Number(validation.macro_f1);
+      const accuracy = gate.observed_accuracy == null ? NaN : Number(gate.observed_accuracy);
+      const macroF1 = validation.macro_f1 == null ? NaN : Number(validation.macro_f1);
       const extreme = validation.per_class && validation.per_class.extreme || {};
-      const support = Number(extreme.support);
-      const recall = Number(validation.extreme_recall);
+      const support = extreme.support == null ? NaN : Number(extreme.support);
+      const recall = validation.extreme_recall == null ? NaN : Number(validation.extreme_recall);
       const failedGate = gate.status === "not_eligible";
       const uncalibrated = validation.probabilities_calibrated === false;
       if (!failedGate && !uncalibrated) return null;
@@ -634,6 +634,7 @@ function renderDaily(d) {
       if (Number.isFinite(macroF1)) details.push("Macro-F1 " + (macroF1 * 100).toFixed(1) + "%");
       if (Number.isFinite(support)) details.push("極高波動樣本 " + support + " 筆");
       if (Number.isFinite(recall)) details.push("極高波動召回率 " + (recall * 100).toFixed(1) + "%");
+      if (!details.length) return null;
       return "D+" + Number(item.horizon_sessions || 0) + "：" + details.join("、");
     }).filter(Boolean);
     const warnings = [];
