@@ -35,6 +35,7 @@ class RegimeRouterTests(unittest.TestCase):
         class FakeCalibrator:
             def __init__(self, **kwargs):
                 self.max_iter = kwargs["max_iter"]
+                self.options = kwargs
 
             def fit(self, features, labels):
                 self.n_iter_ = np.array([self.max_iter])
