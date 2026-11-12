@@ -112,8 +112,10 @@ details[open]>summary{margin-bottom:12px}
     <section id="hero" aria-live="polite">
       <h2>四級波動分流模型｜未來三個交易日點位預測</h2>
       <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
+      <div id="forecastInputWarning" class="banner" hidden></div>
       <div id="regimeRouterSummary" aria-live="polite"></div>
       <div id="threeDayForecast" class="forecast-grid"></div>
+      <details id="forecastQualityDetails"><summary>模型資料來源與歷史樣本外誤差</summary><div id="forecastQualityContent"><p class="note">讀取資料品質與歷史驗證結果中…</p></div></details>
       <p id="sumline" class="note" hidden></p>
       <p class="note"><span style="color:var(--up);font-weight:700">紅色＝上漲</span>；<span style="color:var(--down);font-weight:700">綠色＝下跌</span>。每日變化與前一交易日（或前一預測日）比較。點位為模型估計，仍在研究驗證中。</p>
     </section>
@@ -477,6 +479,122 @@ function renderRegimeRouter(router) {
     '<div class="forecast-grid">' + cards + '</div>';
 }
 
+function isTaiwanForecastTargetExpired(targetDate) {
+  if (typeof targetDate !== "string" || targetDate.length !== 10 || targetDate[4] !== "-" || targetDate[7] !== "-") return false;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date());
+  const current = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const today = current.year + "-" + current.month + "-" + current.day;
+  const hour = Number(current.hour);
+  return targetDate < today || (targetDate === today && hour >= 14);
+}
+
+function renderForecastQuality(d) {
+  const root = $("forecastQualityContent");
+  if (!root) return;
+  const forecast = d.forecast || {};
+  const status = d.data_status || {};
+  const series = status.series || {};
+  const labels = {
+    TAIEX:"加權指數", SOX:"費半指數", TSM:"台積電 ADR", VIX:"VIX",
+    US10Y:"美國 10 年債殖利率", N225:"日經指數", KOSPI:"韓國綜合指數",
+    USDTWD:"美元／台幣"
+  };
+  const providerStatus = d.demo ? "合成示範資料" :
+    status.yahoo_status === "ok" ? "Yahoo 欄位完整" :
+    status.yahoo_status === "partial" ? "Yahoo 部分欄位未更新" :
+    "Yahoo 資料未完整更新";
+  const sourceRows = Object.entries(labels).map(([key, label]) => {
+    const item = series[key] || {};
+    const source = item.source || "無可用資料";
+    const latest = item.latest_date || "—";
+    const age = item.age_calendar_days == null ? "—" : Number(item.age_calendar_days) + " 日曆日";
+    const cached = source.includes("快取") ? "（快取，非本次更新）" : "";
+    return "<tr><td data-label=\"輸入資料\">" + esc(label) +
+      "</td><td data-label=\"來源\">" + esc(source + cached) +
+      "</td><td data-label=\"最新日期\">" + esc(latest) +
+      "</td><td data-label=\"日曆日差\">" + esc(age) + "</td></tr>";
+  }).join("");
+
+  const routerSessions = Array.isArray((forecast.regime_router || {}).sessions)
+    ? forecast.regime_router.sessions : [];
+  const routerRows = routerSessions.map(item => {
+    const classification = item.router_validation || {};
+    const point = item.routed_forecast_validation || {};
+    const routedMae = point.routed_mae_points == null ? null : Number(point.routed_mae_points);
+    const globalMae = point.global_ridge_mae_points == null ? null : Number(point.global_ridge_mae_points);
+    const delta = routedMae == null || globalMae == null ? null : routedMae - globalMae;
+    const deltaText = delta == null ? "—" : delta > 0
+      ? "較基準多 " + delta.toFixed(2) + " 點"
+      : delta < 0 ? "較基準少 " + Math.abs(delta).toFixed(2) + " 點"
+      : "與基準相同";
+    const macroF1 = classification.macro_f1 == null ? "—" : (Number(classification.macro_f1) * 100).toFixed(1) + "%";
+    const recall = classification.high_extreme_recall == null ? "—" : (Number(classification.high_extreme_recall) * 100).toFixed(1) + "%";
+    const precision = classification.high_extreme_precision == null ? "—" : (Number(classification.high_extreme_precision) * 100).toFixed(1) + "%";
+    const extremeRecall = classification.extreme_recall == null ? "—" : (Number(classification.extreme_recall) * 100).toFixed(1) + "%";
+    const calibrationCoverage = classification.calibration_coverage_pct == null
+      ? "—" : Number(classification.calibration_coverage_pct).toFixed(1) + "%";
+    const calibrationStatus = classification.probabilities_calibrated === true
+      ? "完整" : classification.calibration_coverage_pct == null
+        ? "未知" : "未完整";
+    const convergenceStatus = classification.final_calibrator_converged == null
+      ? "未提供" : classification.final_calibrator_converged ? "最新收斂" : "最新未收斂";
+    const nonconvergedFits = classification.calibrator_nonconverged_fits == null
+      ? "歷史未提供" : "歷史未收斂 " + Number(classification.calibrator_nonconverged_fits) + " 次";
+    const formatPoints = value => value == null || !Number.isFinite(value) ? "—" : value.toFixed(2) + " 點";
+    return "<tr><td data-label=\"期限\">D+" + Number(item.horizon_sessions || 0) +
+      "</td><td data-label=\"分類 OOS 筆數\">" + Number(classification.oos_samples || 0).toLocaleString("zh-TW") +
+      "</td><td data-label=\"Macro-F1\">" + macroF1 +
+      "</td><td data-label=\"高／極高波動召回率\">" + recall +
+      "</td><td data-label=\"高／極高波動精確率\">" + precision +
+      "</td><td data-label=\"極高波動召回率\">" + extremeRecall +
+      "</td><td data-label=\"歷史 OOS 校準覆蓋率\">" + calibrationCoverage + "（" + calibrationStatus + "）" +
+      "</td><td data-label=\"校準器收斂診斷\">" + convergenceStatus + "；" + nonconvergedFits +
+      "</td><td data-label=\"分流點位 MAE\">" + formatPoints(routedMae) +
+      "</td><td data-label=\"全域 Ridge MAE\">" + formatPoints(globalMae) +
+      "</td><td data-label=\"MAE 差異\">" + esc(deltaText) + "</td></tr>";
+  }).join("");
+
+  const directRows = (forecast.sessions || []).map(item => {
+    const validation = item.validation || {};
+    const mae = validation.mae_points == null ? null : Number(validation.mae_points);
+    const baseline = validation.flat_baseline_mae_points == null ? null : Number(validation.flat_baseline_mae_points);
+    const delta = mae == null || baseline == null ? null : mae - baseline;
+    const comparison = delta == null ? "—" : delta > 0
+      ? "比持平基準多 " + delta.toFixed(2) + " 點"
+      : delta < 0 ? "比持平基準少 " + Math.abs(delta).toFixed(2) + " 點"
+      : "與持平基準相同";
+    const tolerance = validation.within_0_7_pct_pct == null
+      ? "—" : Number(validation.within_0_7_pct_pct).toFixed(1) + "%";
+    return "<tr><td data-label=\"期限\">D+" + Number(item.horizon_sessions || 0) +
+      "</td><td data-label=\"OOS 筆數\">" + Number(validation.oos_samples || 0).toLocaleString("zh-TW") +
+      "</td><td data-label=\"MAE\">" +
+      (mae == null || !Number.isFinite(mae) ? "—" : mae.toFixed(2) + " 點") +
+      "</td><td data-label=\"持平基準 MAE\">" +
+      (baseline == null || !Number.isFinite(baseline) ? "—" : baseline.toFixed(2) + " 點") +
+      "</td><td data-label=\"差異\">" + esc(comparison) +
+      "</td><td data-label=\"誤差在 ±0.7% 內\">" + tolerance + "</td></tr>";
+  }).join("");
+
+  root.innerHTML =
+    '<p class="note">資料狀態：' + esc(providerStatus) +
+    '｜資料狀態更新時間：' + esc(status.updated_at || "未提供") +
+    '｜模型收盤基準日：' + esc(forecast.asof || d.asof || "—") + '</p>' +
+    '<div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>輸入資料</th><th>來源</th><th>最新日期</th><th>日曆日差</th></tr></thead><tbody>' +
+    (sourceRows || '<tr><td colspan="4">沒有來源日期紀錄</td></tr>') +
+    '</tbody></table></div>' +
+    '<h3>首頁四級分流模型：歷史樣本外驗證</h3>' +
+    '<div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>期限</th><th>分類 OOS 筆數</th><th>Macro-F1</th><th>高／極高波動召回率</th><th>高／極高波動精確率</th><th>極高波動召回率</th><th>歷史 OOS 校準覆蓋率</th><th>校準器收斂診斷</th><th>分流點位 MAE</th><th>全域 Ridge MAE</th><th>MAE 差異</th></tr></thead><tbody>' +
+    (routerRows || '<tr><td colspan="11">尚無分流模型歷史樣本外驗證紀錄</td></tr>') +
+    '</tbody></table></div>' +
+    '<h3>參考基準：直接 Ridge 點位模型（不是首頁分流模型）</h3>' +
+    '<div class="horizon-table-wrap"><table class="horizon-table"><thead><tr><th>期限</th><th>OOS 筆數</th><th>MAE</th><th>持平基準 MAE</th><th>差異</th><th>誤差在 ±0.7% 內</th></tr></thead><tbody>' +
+    (directRows || '<tr><td colspan="6">尚無直接 Ridge 歷史樣本外驗證紀錄</td></tr>') +
+    '</tbody></table></div>' +
+    '<p class="note">Macro-F1 是四級分類的整體平衡指標；高／極高波動召回率與精確率只針對合併類別；極高波動召回率則只計極高波動類別，若為 0 代表測試期間未辨識出該類別。歷史 OOS 校準覆蓋率未達 100% 時，不應把所有分類分數視為已校準。點位 MAE 越低越好；MAE 差異為分流模型減全域 Ridge，正值代表誤差較大。直接 Ridge 表是另一個參考模型，不代表首頁實際顯示的分流輸出。以上均為歷史樣本外統計，不保證未來表現。此處 OOS 是擴展窗時間序列 walk-forward 的合併結果，不是單一完全未觸碰的最終前瞻留出集；模型或門檻若曾依這些研究結果調整，仍需另設新的前瞻期間重新驗證。不同市場休市日不同，日期差異不必然代表錯誤；若來源顯示快取或未完整更新，最新預測的輸入可能不夠新。</p>';
+}
 function renderDaily(d) {
   $("meta").textContent = "台股最近可用交易日：" + d.asof + "。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。";
   $("demo").hidden = !d.demo;
@@ -484,6 +602,59 @@ function renderDaily(d) {
   const forecast = d.forecast || {};
   renderTrialPointForecasts(forecast);
   renderRegimeRouter(forecast.regime_router);
+  renderForecastQuality(d);
+  const inputWarning = $("forecastInputWarning");
+  if (inputWarning) {
+    const inputSeries = (d.data_status || {}).series || {};
+    const sourceLabels = {
+      SOX:"費半", TSM:"台積電 ADR", VIX:"VIX", US10Y:"美國 10 年債",
+      N225:"日經", KOSPI:"韓國股市", USDTWD:"美元／台幣"
+    };
+    const unavailable = Object.entries(sourceLabels).filter(([key]) => {
+      const source = String((inputSeries[key] || {}).source || "");
+      return !source || source.includes("快取") || source === "無可用資料";
+    }).map(([, label]) => label);
+    const expiredHorizons = ((d.forecast || {}).regime_router || {}).sessions || [];
+    const expiredDates = expiredHorizons
+      .filter(item => isTaiwanForecastTargetExpired(item.target_date))
+      .map(item => "D+" + Number(item.horizon_sessions || 0) + "（" + item.target_date + "）");
+    const qualityRows = expiredHorizons.map(item => {
+      const validation = item.router_validation || {};
+      const gate = validation.accuracy_threshold_gate || {};
+      const accuracy = gate.observed_accuracy == null ? NaN : Number(gate.observed_accuracy);
+      const threshold = gate.threshold_exclusive == null ? NaN : Number(gate.threshold_exclusive);
+      const macroF1 = validation.macro_f1 == null ? NaN : Number(validation.macro_f1);
+      const extreme = validation.per_class && validation.per_class.extreme || {};
+      const support = extreme.support == null ? NaN : Number(extreme.support);
+      const recall = validation.extreme_recall == null ? NaN : Number(validation.extreme_recall);
+      const failedGate = gate.status === "not_eligible";
+      const uncalibrated = validation.probabilities_calibrated === false;
+      if (!failedGate && !uncalibrated) return null;
+      const details = [];
+      if (Number.isFinite(accuracy)) details.push("分類準確率 " + (accuracy * 100).toFixed(1) + "%");
+      if (Number.isFinite(threshold) && failedGate) details.push("內部門檻 " + (threshold * 100).toFixed(0) + "%");
+      if (Number.isFinite(macroF1)) details.push("Macro-F1 " + (macroF1 * 100).toFixed(1) + "%");
+      if (Number.isFinite(support)) details.push("極高波動樣本 " + support + " 筆");
+      if (Number.isFinite(recall)) details.push("極高波動召回率 " + (recall * 100).toFixed(1) + "%");
+      if (!details.length) return null;
+      return "D+" + Number(item.horizon_sessions || 0) + "：" + details.join("、");
+    }).filter(Boolean);
+    const warnings = [];
+    if (qualityRows.length) {
+      warnings.push("模型驗證提醒：四級分類尚未通過內部驗證門檻，且部分歷史機率未完成校準。" +
+        qualityRows.join("；") + "。分類結果仍屬研究資料，不代表可靠的未來機率。");
+    }
+    if (unavailable.length) {
+      warnings.push("模型輸入提醒：以下跨市場資料未取得本次更新值，可能沿用快取或缺漏：" +
+        unavailable.join("、") + "。本次預測應視為資料不完整的研究輸出。");
+    }
+    if (expiredDates.length) {
+      warnings.push("預測期限提醒：" + expiredDates.join("、") +
+        " 的目標交易日已收盤，這些數值已不是尚未發生的預測；請等待下一次資料更新完成結果核對。");
+    }
+    inputWarning.hidden = Boolean(d.demo) || warnings.length === 0;
+    inputWarning.textContent = warnings.join(" ");
+  }
   $("regimeRouterSummary").hidden = true;
   const router = forecast.regime_router || {};
   const routerSessions = Array.isArray(router.sessions) ? router.sessions : [];
