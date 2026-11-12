@@ -618,7 +618,29 @@ function renderDaily(d) {
     const expiredDates = expiredHorizons
       .filter(item => isTaiwanForecastTargetExpired(item.target_date))
       .map(item => "D+" + Number(item.horizon_sessions || 0) + "（" + item.target_date + "）");
+    const qualityRows = expiredHorizons.map(item => {
+      const validation = item.router_validation || {};
+      const gate = validation.accuracy_threshold_gate || {};
+      const accuracy = Number(gate.observed_accuracy);
+      const macroF1 = Number(validation.macro_f1);
+      const extreme = validation.per_class && validation.per_class.extreme || {};
+      const support = Number(extreme.support);
+      const recall = Number(validation.extreme_recall);
+      const failedGate = gate.status === "not_eligible";
+      const uncalibrated = validation.probabilities_calibrated === false;
+      if (!failedGate && !uncalibrated) return null;
+      const details = [];
+      if (Number.isFinite(accuracy)) details.push("分類準確率 " + (accuracy * 100).toFixed(1) + "%");
+      if (Number.isFinite(macroF1)) details.push("Macro-F1 " + (macroF1 * 100).toFixed(1) + "%");
+      if (Number.isFinite(support)) details.push("極高波動樣本 " + support + " 筆");
+      if (Number.isFinite(recall)) details.push("極高波動召回率 " + (recall * 100).toFixed(1) + "%");
+      return "D+" + Number(item.horizon_sessions || 0) + "：" + details.join("、");
+    }).filter(Boolean);
     const warnings = [];
+    if (qualityRows.length) {
+      warnings.push("模型驗證提醒：四級分類尚未通過內部驗證門檻，且部分歷史機率未完成校準。" +
+        qualityRows.join("；") + "。分類結果仍屬研究資料，不代表可靠的未來機率。");
+    }
     if (unavailable.length) {
       warnings.push("模型輸入提醒：以下跨市場資料未取得本次更新值，可能沿用快取或缺漏：" +
         unavailable.join("、") + "。本次預測應視為資料不完整的研究輸出。");
