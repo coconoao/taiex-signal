@@ -33,8 +33,8 @@ from regime_router import (
 class RegimeRouterTests(unittest.TestCase):
     def test_probability_calibrator_exposes_iteration_limit_status(self):
         class FakeCalibrator:
-            def __init__(self, max_iter):
-                self.max_iter = max_iter
+            def __init__(self, **kwargs):
+                self.max_iter = kwargs["max_iter"]
 
             def fit(self, features, labels):
                 self.n_iter_ = np.array([self.max_iter])
