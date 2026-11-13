@@ -393,7 +393,7 @@ function renderTrialPointForecasts(forecast) {
     + "｜資料日期 " + (forecast.asof || "—") + "｜僅供測試，不影響首頁正式模型。";
   root.innerHTML = candidates.map(candidate => {
     const alpha = Number(candidate.ridge_alpha);
-    const title = Number.isFinite(alpha) ? "Ridge α=" + alpha : (candidate.model_version || "研究候選模型");
+    const title = Number.isFinite(alpha) ? "Ridge α=" + alpha + (alpha <= 5 ? "（較積極）" : alpha === 25 ? "（正式基準）" : "") : (candidate.model_version || "研究候選模型");
     const sessions = Array.isArray(candidate.sessions) ? candidate.sessions : [];
     const cards = [1,2,3].map(h => {
       const item = sessions.find(x => Number(x.horizon_sessions) === h) || {};
@@ -414,7 +414,10 @@ function renderTrialPointForecasts(forecast) {
       const mae = validation.mae_points == null ? "樣本不足" : Number(validation.mae_points).toLocaleString("zh-TW") + " 點";
       const baselineMae = validation.flat_baseline_mae_points == null ? "—" : Number(validation.flat_baseline_mae_points).toLocaleString("zh-TW") + " 點";
       const hit = validation.within_0_7_pct_pct == null ? "待更新樣本" : Number(validation.within_0_7_pct_pct).toFixed(1) + "%";
-      return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + changeText + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.7% 命中率 ' + hit + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
+      const largeMove = Number(validation.large_move_samples || 0) > 0
+        ? "｜大幅波動樣本 " + Number(validation.large_move_samples) + " 筆 MAE " + Number(validation.large_move_mae_points).toLocaleString("zh-TW") + " 點"
+        : "｜大幅波動樣本不足";
+      return '<article class="forecast-card"><b>' + label + '</b><div class="forecast-value" style="color:' + color + '">' + Math.round(point).toLocaleString("zh-TW") + ' 點</div><div class="forecast-change" style="color:' + color + '">' + changeText + '</div><div class="forecast-meta">樣本外 MAE ' + mae + '（持平基準 ' + baselineMae + '）｜±0.7% 命中率 ' + hit + largeMove + '｜訓練樣本 ' + Number(item.training_samples || 0).toLocaleString("zh-TW") + '</div></article>';
     }).join("");
     const state = candidate.status === "research" ? "研究候選・尚未核准取代正式模型" : "資料不足";
     return '<section class="trial-model-block"><h3>' + esc(title) + '</h3><p class="note">版本 ' + esc(candidate.model_version || "—") + '｜' + state + '</p><div class="forecast-grid">' + cards + '</div></section>';
