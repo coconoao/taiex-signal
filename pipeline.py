@@ -13,6 +13,11 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from regime_router import build_regime_router_forecasts
+from forecast_monitor import (
+    append_daily_live_snapshot,
+    read_live_snapshot_history,
+    summarize_live_forecast_quality,
+)
 
 TICKERS = {"TAIEX": "^TWII", "SOX": "^SOX", "TSM": "TSM", "VIX": "^VIX", "US10Y": "^TNX",
            "N225": "^N225", "KOSPI": "^KS11", "USDTWD": "TWD=X"}
@@ -1910,6 +1915,32 @@ if __name__ == "__main__":
             "backtest": backtest(prob, fwd),
         },
     }
+    if not demo:
+        try:
+            archive_status = append_daily_live_snapshot(
+                "index_forecast_live_snapshots.jsonl", out
+            )
+            snapshot_history = read_live_snapshot_history(
+                "index_forecast_live_snapshots.jsonl"
+            )
+            out["live_forecast_snapshot_archive"] = {
+                "appended": archive_status.get("appended", False),
+                "reason": archive_status.get("reason", "unknown"),
+                "evaluation": "prospective_live_snapshot",
+            }
+            out["live_forecast_quality"] = summarize_live_forecast_quality(
+                snapshot_history, df["TAIEX"]
+            )
+        except Exception as exc:
+            # Prospective diagnostics must never block the formal forecast refresh.
+            print(
+                f"正式預測快照封存／品質監控暫不可用：{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            out["live_forecast_snapshot_archive"] = {
+                "appended": False,
+                "reason": "diagnostic_unavailable",
+            }
     tmp = "signals.json.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False)
