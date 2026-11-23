@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 
 FILES = (
-    "signals.json", "signals_legacy_v1.json", "index_forecasts_history.jsonl", "market_sessions_v2.jsonl", "weekly.json", "weekly_prob.csv", "market_history.csv",
+    "signals.json", "signals_legacy_v1.json", "index_forecasts_history.jsonl", "index_forecast_live_snapshots.jsonl", "market_sessions_v2.jsonl", "weekly.json", "weekly_prob.csv", "market_history.csv",
     "chips.csv", "margin.csv", "futures.csv", "taiwan_data_status.json",
     "news.json", "news_history.jsonl", "policy_events.jsonl",
     "news_research.json", "news_research_history.jsonl",
