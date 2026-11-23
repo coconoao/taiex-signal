@@ -104,7 +104,7 @@ class LiveForecastMonitorTests(unittest.TestCase):
             "2026-11-22": 9900,
             "2026-11-23": 10300,
         }
-        summary = summarize_live_forecast_quality([record], closes, window_sessions=20, minimum_samples=20)
+        summary = summarize_live_forecast_quality([record], closes, window_sessions=20, minimum_samples=20, as_of=dt.datetime(2026, 11, 23, 16, 5, tzinfo=TZ))
         rows = summary["horizons"]
         self.assertEqual([row["horizon_sessions"] for row in rows], [1, 2, 3])
         self.assertTrue(all(row["sample_count"] == 1 for row in rows))
@@ -114,7 +114,19 @@ class LiveForecastMonitorTests(unittest.TestCase):
         self.assertEqual(rows[1]["model_mae_points"], 300.0)
         self.assertEqual(rows[1]["flat_baseline_mae_points"], 100.0)
 
-    def test_unmatured_targets_are_not_scored(self):
+
+    def test_current_session_is_not_scored_before_post_close_cutoff(self):
+        record = build_live_snapshot_record(snapshot())
+        closes = {
+            "2026-11-21": 10100,
+            "2026-11-22": 9900,
+            "2026-11-23": 10300,
+        }
+        summary = summarize_live_forecast_quality(
+            [record], closes, as_of=dt.datetime(2026, 11, 23, 15, 59, tzinfo=TZ)
+        )
+        self.assertEqual([row["horizon_sessions"] for row in summary["horizons"]], [1, 2])
+\n    def test_unmatured_targets_are_not_scored(self):
         record = build_live_snapshot_record(snapshot())
         summary = summarize_live_forecast_quality([record], {"2026-11-21": 10100})
         self.assertEqual(len(summary["horizons"]), 1)
