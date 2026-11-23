@@ -42,4 +42,5 @@ bash build_mac.sh        # 產生「台股訊號.app」（需 Python 3.10+），
 - TWSE 籌碼／融資券或 TAIFEX 期貨資料缺漏時，Pipeline 會以 FinMind 對應的整體市場資料集補齊缺少日期；官方來源已有的日期不會被備援覆寫。FinMind 是第三方備援，更新時間與統計口徑仍應以交易所公告為準。
 - FinMind 使用免費公開額度即可運作；如自行取得 FinMind Token，可在 Render 環境變數設定 `FINMIND_TOKEN` 提高請求額度。不要把 Token 寫進程式碼、GitHub 或對話。欄位格式若改版，程式會印出警告。
 - 新聞與 AI 分數尚未納入機率與回測，每日紀錄於 `news_history.jsonl`。
+- 預測評估分開保存：`index_forecasts_history.jsonl` 是歷史擴展視窗樣本外回測；`index_forecast_live_snapshots.jsonl` 僅封存正式環境台灣時間 16:00 後、當日完整的 D+1/D+2/D+3 預測快照。兩者不可混為同一種成績；即時快照只在目標收盤資料到齊後計分，樣本不足時標示 provisional。
 - 預測是機率，不是保證；回測不代表未來。
