@@ -102,6 +102,7 @@ def build_live_snapshot_record(snapshot, captured_at=None):
         "record_type": "index_forecast_live_snapshot",
         "instrument": "TAIEX",
         "forecast_asof": asof,
+        "forecast_computed_at": str(snapshot.get("computed_at") or ""),
         "captured_at": timestamp,
         "base_close": round(base_close, 2),
         "model": str(forecast.get("method") or "unknown"),
@@ -125,6 +126,17 @@ def append_daily_live_snapshot(path, snapshot, now=None, cutoff=POST_CLOSE_CUTOF
         return {"appended": False, "reason": "snapshot_incomplete_or_not_production"}
     if record["forecast_asof"] != local_now.date().isoformat():
         return {"appended": False, "reason": "snapshot_asof_is_not_current_taiwan_session"}
+    try:
+        computed_at = dt.datetime.fromisoformat(
+            record["forecast_computed_at"].replace("Z", "+00:00")
+        )
+    except (TypeError, ValueError):
+        return {"appended": False, "reason": "snapshot_computed_at_missing_or_invalid"}
+    if computed_at.tzinfo is None:
+        computed_at = computed_at.replace(tzinfo=dt.timezone.utc)
+    computed_local = computed_at.astimezone(TAIPEI)
+    if computed_local.date() != local_now.date() or computed_local.time().replace(tzinfo=None) < cutoff:
+        return {"appended": False, "reason": "snapshot_was_not_computed_after_post_close_cutoff"}
 
     existing_keys = set()
     if os.path.isfile(path):
