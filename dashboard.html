@@ -112,6 +112,7 @@ details[open]>summary{margin-bottom:12px}
     <section id="hero" aria-live="polite">
       <h2>四級波動分流模型｜未來三個交易日點位預測</h2>
       <p class="note" id="threeDayMeta">正在讀取三日點位模型…</p>
+      <div class="banner" id="liveForecastQuality" hidden></div>
       <div id="forecastInputWarning" class="banner" hidden></div>
       <div id="regimeRouterSummary" aria-live="polite"></div>
       <div id="threeDayForecast" class="forecast-grid"></div>
@@ -595,7 +596,40 @@ function renderForecastQuality(d) {
     '</tbody></table></div>' +
     '<p class="note">Macro-F1 是四級分類的整體平衡指標；高／極高波動召回率與精確率只針對合併類別；極高波動召回率則只計極高波動類別，若為 0 代表測試期間未辨識出該類別。歷史 OOS 校準覆蓋率未達 100% 時，不應把所有分類分數視為已校準。點位 MAE 越低越好；MAE 差異為分流模型減全域 Ridge，正值代表誤差較大。直接 Ridge 表是另一個參考模型，不代表首頁實際顯示的分流輸出。以上均為歷史樣本外統計，不保證未來表現。此處 OOS 是擴展窗時間序列 walk-forward 的合併結果，不是單一完全未觸碰的最終前瞻留出集；模型或門檻若曾依這些研究結果調整，仍需另設新的前瞻期間重新驗證。不同市場休市日不同，日期差異不必然代表錯誤；若來源顯示快取或未完整更新，最新預測的輸入可能不夠新。</p>';
 }
+function renderLiveForecastQuality(monitor) {
+  const el = $("liveForecastQuality");
+  if (!el) return;
+  const rows = Array.isArray(monitor?.horizons) ? monitor.horizons : [];
+  if (!rows.length) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  const labels = rows.map(row => {
+    const horizon = "D+" + Number(row.horizon_sessions || 0);
+    const count = Number(row.sample_count || 0);
+    const mae = Number(row.model_mae_points);
+    const baseline = Number(row.flat_baseline_mae_points);
+    const delta = Number(row.mae_delta_vs_flat_points);
+    const bias = Number(row.mean_return_bias_pp);
+    const direction = Number(row.direction_accuracy_pct);
+    const valid = [mae, baseline, delta, bias, direction].every(Number.isFinite);
+    if (!valid) return horizon + "：指標待累積（" + count + " 筆）";
+    const comparison = delta > 0 ? "較持平基準高 " : delta < 0 ? "較持平基準低 " : "與持平基準相同 ";
+    const provisional = row.status === "provisional" ? "暫定 " : "";
+    return provisional + horizon + "（" + count + " 筆）：MAE " +
+      mae.toLocaleString("zh-TW") + " 點；持平基準 " + baseline.toLocaleString("zh-TW") +
+      " 點；" + comparison + Math.abs(delta).toLocaleString("zh-TW") +
+      " 點；方向一致率 " + direction.toFixed(1) + "%；報酬偏差 " +
+      (bias > 0 ? "+" : "") + bias.toFixed(2) + " 個百分點";
+  });
+  el.textContent = "正式盤後預測追蹤｜" + labels.join("　｜　") +
+    "。僅計算已封存且已成熟的正式預測；樣本不足 " +
+    Number(monitor.minimum_samples || 20) + " 筆時只作暫定觀察，不據此判定模型優劣。";
+  el.hidden = false;
+}
 function renderDaily(d) {
+  renderLiveForecastQuality(d.live_forecast_quality);
   $("meta").textContent = "台股最近可用交易日：" + d.asof + "。休市或尚未取得新收盤資料時，沿用最近完整交易日資料。";
   $("demo").hidden = !d.demo;
   $("miss").hidden = true;
