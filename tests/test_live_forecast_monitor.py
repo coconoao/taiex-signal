@@ -21,6 +21,7 @@ def snapshot(asof="2026-11-20"):
         "record_type": "index_forecast_snapshot",
         "demo": False,
         "asof": asof,
+        "computed_at": asof + "T08:05:00+00:00",
         "forecast": {
             "schema_version": 2,
             "record_type": "index_forecast_snapshot",
@@ -85,7 +86,18 @@ class LiveForecastMonitorTests(unittest.TestCase):
             self.assertEqual(result["reason"], "snapshot_asof_is_not_current_taiwan_session")
             self.assertFalse(os.path.exists(path))
 
-    def test_matured_live_snapshots_are_compared_with_flat_baseline(self):
+
+    def test_snapshot_computed_before_close_is_not_archived(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "index_forecast_live_snapshots.jsonl")
+            data = snapshot(asof="2026-11-23")
+            data["computed_at"] = "2026-11-23T07:55:00+00:00"
+            now = dt.datetime(2026, 11, 23, 16, 5, tzinfo=TZ)
+            result = append_daily_live_snapshot(path, data, now=now)
+            self.assertFalse(result["appended"])
+            self.assertEqual(result["reason"], "snapshot_was_not_computed_after_post_close_cutoff")
+            self.assertFalse(os.path.exists(path))
+\n    def test_matured_live_snapshots_are_compared_with_flat_baseline(self):
         record = build_live_snapshot_record(snapshot())
         closes = {
             "2026-11-21": 10100,
