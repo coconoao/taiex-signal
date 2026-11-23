@@ -32,7 +32,7 @@ def snapshot(asof="2026-11-20"):
             "sessions": [
                 {
                     "horizon_sessions": horizon,
-                    "target_date": f"2026-11-{20 + horizon:02d}",
+                    "target_date": (asof_day + dt.timedelta(days=horizon)).isoformat(),
                     "status": "research",
                     "forecast_close": 10000 + horizon * 100,
                     "predicted_return_pct": float(horizon),
@@ -76,7 +76,16 @@ class LiveForecastMonitorTests(unittest.TestCase):
             self.assertEqual(second["reason"], "already_recorded")
             self.assertEqual(len(read_live_snapshot_history(path)), 1)
 
-    def test_matured_live_snapshots_are_compared_with_flat_baseline(self):
+
+    def test_stale_asof_is_not_archived_after_close(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "index_forecast_live_snapshots.jsonl")
+            now = dt.datetime(2026, 11, 23, 16, 5, tzinfo=TZ)
+            result = append_daily_live_snapshot(path, snapshot(asof="2026-11-20"), now=now)
+            self.assertFalse(result["appended"])
+            self.assertEqual(result["reason"], "snapshot_asof_is_not_current_taiwan_session")
+            self.assertFalse(os.path.exists(path))
+\n    def test_matured_live_snapshots_are_compared_with_flat_baseline(self):
         record = build_live_snapshot_record(snapshot())
         closes = {
             "2026-11-21": 10100,
