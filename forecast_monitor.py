@@ -123,6 +123,8 @@ def append_daily_live_snapshot(path, snapshot, now=None, cutoff=POST_CLOSE_CUTOF
     record = build_live_snapshot_record(snapshot, captured_at=local_now)
     if record is None:
         return {"appended": False, "reason": "snapshot_incomplete_or_not_production"}
+    if record["forecast_asof"] != local_now.date().isoformat():
+        return {"appended": False, "reason": "snapshot_asof_is_not_current_taiwan_session"}
 
     existing_keys = set()
     if os.path.isfile(path):
