@@ -1,5 +1,4 @@
 import datetime as dt
-import json
 import os
 import tempfile
 import unittest
@@ -16,6 +15,7 @@ TZ = ZoneInfo("Asia/Taipei")
 
 
 def snapshot(asof="2026-11-20"):
+    asof_day = dt.date.fromisoformat(asof)
     return {
         "schema_version": 2,
         "record_type": "index_forecast_snapshot",
@@ -64,18 +64,17 @@ class LiveForecastMonitorTests(unittest.TestCase):
             before_close = dt.datetime(2026, 11, 23, 15, 59, tzinfo=TZ)
             after_close = dt.datetime(2026, 11, 23, 16, 5, tzinfo=TZ)
 
-            early = append_daily_live_snapshot(path, snapshot(), now=before_close)
+            early = append_daily_live_snapshot(path, snapshot(asof="2026-11-23"), now=before_close)
             self.assertFalse(early["appended"])
             self.assertEqual(early["reason"], "before_post_close_cutoff")
             self.assertFalse(os.path.exists(path))
 
-            first = append_daily_live_snapshot(path, snapshot(), now=after_close)
-            second = append_daily_live_snapshot(path, snapshot(), now=after_close)
+            first = append_daily_live_snapshot(path, snapshot(asof="2026-11-23"), now=after_close)
+            second = append_daily_live_snapshot(path, snapshot(asof="2026-11-23"), now=after_close)
             self.assertTrue(first["appended"])
             self.assertFalse(second["appended"])
             self.assertEqual(second["reason"], "already_recorded")
             self.assertEqual(len(read_live_snapshot_history(path)), 1)
-
 
     def test_stale_asof_is_not_archived_after_close(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -85,7 +84,8 @@ class LiveForecastMonitorTests(unittest.TestCase):
             self.assertFalse(result["appended"])
             self.assertEqual(result["reason"], "snapshot_asof_is_not_current_taiwan_session")
             self.assertFalse(os.path.exists(path))
-\n    def test_matured_live_snapshots_are_compared_with_flat_baseline(self):
+
+    def test_matured_live_snapshots_are_compared_with_flat_baseline(self):
         record = build_live_snapshot_record(snapshot())
         closes = {
             "2026-11-21": 10100,
