@@ -174,13 +174,18 @@ def read_live_snapshot_history(path):
     return records
 
 
-def summarize_live_forecast_quality(records, actual_closes, window_sessions=20, minimum_samples=20):
+def summarize_live_forecast_quality(records, actual_closes, window_sessions=20, minimum_samples=20, as_of=None):
     """Evaluate matured live snapshots against observed closes and a flat baseline.
 
     actual_closes may be a date->close mapping or a pandas Series indexed by date.
     No threshold is used to label a model as good/bad; small samples remain
     explicitly provisional.
     """
+    current = as_of or dt.datetime.now(TAIPEI)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=TAIPEI)
+    current = current.astimezone(TAIPEI)
+
     close_map = {}
     source = actual_closes.items() if hasattr(actual_closes, "items") else []
     for day, value in source:
@@ -209,7 +214,11 @@ def summarize_live_forecast_quality(records, actual_closes, window_sessions=20, 
                 target = dt.date.fromisoformat(str(item.get("target_date")))
             except (TypeError, ValueError):
                 continue
-            actual = close_map.get(target.isoformat())
+            session_complete = (
+                target < current.date()
+                or (target == current.date() and current.time().replace(tzinfo=None) >= POST_CLOSE_CUTOFF)
+            )
+            actual = close_map.get(target.isoformat()) if session_complete else None
             predicted = _positive_finite(item.get("predicted_close"))
             if horizon not in EXPECTED_HORIZONS or base is None or actual is None or predicted is None:
                 continue
