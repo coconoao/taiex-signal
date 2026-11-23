@@ -86,7 +86,6 @@ class LiveForecastMonitorTests(unittest.TestCase):
             self.assertEqual(result["reason"], "snapshot_asof_is_not_current_taiwan_session")
             self.assertFalse(os.path.exists(path))
 
-
     def test_snapshot_computed_before_close_is_not_archived(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "index_forecast_live_snapshots.jsonl")
@@ -97,14 +96,18 @@ class LiveForecastMonitorTests(unittest.TestCase):
             self.assertFalse(result["appended"])
             self.assertEqual(result["reason"], "snapshot_was_not_computed_after_post_close_cutoff")
             self.assertFalse(os.path.exists(path))
-\n    def test_matured_live_snapshots_are_compared_with_flat_baseline(self):
+
+    def test_matured_live_snapshots_are_compared_with_flat_baseline(self):
         record = build_live_snapshot_record(snapshot())
         closes = {
             "2026-11-21": 10100,
             "2026-11-22": 9900,
             "2026-11-23": 10300,
         }
-        summary = summarize_live_forecast_quality([record], closes, window_sessions=20, minimum_samples=20, as_of=dt.datetime(2026, 11, 23, 16, 5, tzinfo=TZ))
+        summary = summarize_live_forecast_quality(
+            [record], closes, window_sessions=20, minimum_samples=20,
+            as_of=dt.datetime(2026, 11, 23, 16, 5, tzinfo=TZ),
+        )
         rows = summary["horizons"]
         self.assertEqual([row["horizon_sessions"] for row in rows], [1, 2, 3])
         self.assertTrue(all(row["sample_count"] == 1 for row in rows))
@@ -113,7 +116,6 @@ class LiveForecastMonitorTests(unittest.TestCase):
         self.assertEqual(rows[0]["flat_baseline_mae_points"], 100.0)
         self.assertEqual(rows[1]["model_mae_points"], 300.0)
         self.assertEqual(rows[1]["flat_baseline_mae_points"], 100.0)
-
 
     def test_current_session_is_not_scored_before_post_close_cutoff(self):
         record = build_live_snapshot_record(snapshot())
@@ -126,7 +128,8 @@ class LiveForecastMonitorTests(unittest.TestCase):
             [record], closes, as_of=dt.datetime(2026, 11, 23, 15, 59, tzinfo=TZ)
         )
         self.assertEqual([row["horizon_sessions"] for row in summary["horizons"]], [1, 2])
-\n    def test_unmatured_targets_are_not_scored(self):
+
+    def test_unmatured_targets_are_not_scored(self):
         record = build_live_snapshot_record(snapshot())
         summary = summarize_live_forecast_quality([record], {"2026-11-21": 10100})
         self.assertEqual(len(summary["horizons"]), 1)
