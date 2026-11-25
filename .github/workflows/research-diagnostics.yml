@@ -35,7 +35,8 @@ jobs:
       - name: Run full test suite
         run: python -m pytest -q
       - name: Run read-only offline diagnostics
-        run: python scripts/run_offline_diagnostics.py --download-sample --period 10y --output-dir artifacts
+        if: always()
+        run: python scripts/run_offline_diagnostics.py --download-sample --period 5y --output-dir artifacts
       - name: Upload diagnostic report
         if: always()
         uses: actions/upload-artifact@v4
