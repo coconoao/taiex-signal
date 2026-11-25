@@ -1,8 +1,9 @@
 name: Hourly three-day forecast refresh
 
 on:
-  # 09:17–17:17 Taiwan time, once per hour on weekdays.
+  # 08:25 Taiwan premarket, then 09:17–17:17 Taiwan time hourly on weekdays.
   schedule:
+    - cron: "25 0 * * 1-5"
     - cron: "17 1-9 * * 1-5"
   workflow_dispatch:
 
