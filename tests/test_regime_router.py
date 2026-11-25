@@ -489,5 +489,12 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertEqual(historical_mode.iloc[-1]["國際:SOX"], expected)
 
 
+    def test_taiwan_premarket_window_includes_exact_start_and_excludes_exact_end(self):
+        self.assertFalse(is_taiwan_premarket("2026-11-23T21:29:00Z"))  # 05:29
+        self.assertTrue(is_taiwan_premarket("2026-11-23T21:30:00Z"))   # 05:30
+        self.assertTrue(is_taiwan_premarket("2026-11-24T00:59:00Z"))   # 08:59
+        self.assertFalse(is_taiwan_premarket("2026-11-24T01:00:00Z")) # 09:00
+
+
 if __name__ == "__main__":
     unittest.main()
