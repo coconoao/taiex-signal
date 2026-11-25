@@ -63,6 +63,23 @@ def _annual_rows(classes, threshold_set, threshold_columns=None):
     return rows
 
 
+def rolling_quantile_thresholds(close: pd.Series, window: int = 252, min_periods: int = 126):
+    """Return trailing quantiles of historical 3-session absolute moves at each origin."""
+    px = pd.to_numeric(close, errors="coerce").sort_index()
+    daily = px.pct_change(fill_method=None).abs()
+    historical = pd.concat(
+        [daily.shift(offset) for offset in range(3)], axis=1
+    ).max(axis=1).where(
+        pd.concat([daily.shift(offset) for offset in range(3)], axis=1).notna().all(axis=1)
+    )
+    rolling = historical.rolling(int(window), min_periods=int(min_periods))
+    return pd.DataFrame({
+        "low": rolling.quantile(0.50),
+        "normal": rolling.quantile(0.75),
+        "extreme": rolling.quantile(0.95),
+    }, index=px.index)
+
+
 def annual_regime_experiments(
     close: pd.Series,
     high: pd.Series | None = None,
@@ -99,16 +116,10 @@ def annual_regime_experiments(
 
     # Compare the future three-session maximum against the trailing distribution
     # of historical three-session maxima. The rolling window ends at the origin.
-    historical_three_day_max = pd.concat(
-        [daily.abs().shift(offset).rename(str(offset)) for offset in range(3)],
-        axis=1,
-    ).max(axis=1).where(
-        pd.concat([daily.abs().shift(offset) for offset in range(3)], axis=1).notna().all(axis=1)
-    )
-    rolling = historical_three_day_max.rolling(252, min_periods=126)
-    q50 = rolling.quantile(0.50)
-    q75 = rolling.quantile(0.75)
-    q95 = rolling.quantile(0.95)
+    quantile_thresholds = rolling_quantile_thresholds(px, window=252, min_periods=126)
+    q50 = quantile_thresholds["low"]
+    q75 = quantile_thresholds["normal"]
+    q95 = quantile_thresholds["extreme"]
     quantile_classes = _classify_with_row_thresholds(future, q50, q75, q95)
     rows.extend(_annual_rows(quantile_classes, "rolling_quantile_252", {
         "low_threshold_pct": q50 * 100,
