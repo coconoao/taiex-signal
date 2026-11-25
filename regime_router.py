@@ -6,6 +6,9 @@ folds purge the final h labelled rows before each test block.
 """
 from __future__ import annotations
 
+import datetime as dt
+from zoneinfo import ZoneInfo
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
@@ -64,8 +67,29 @@ def _future_max_daily_move(close, horizon):
     return future_moves.max(axis=1)
 
 
-def _lag_base_cross_market_features(X):
-    """Shift pre-existing international/regional returns to Taiwan-close availability.
+def _taiwan_timestamp(value):
+    """Convert a datetime-like value to an aware Asia/Taipei timestamp.
+
+    Naive timestamps are interpreted as Taiwan local time; aware timestamps
+    are converted without changing the represented instant.
+    """
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is None:
+        return stamp.tz_localize(ZoneInfo("Asia/Taipei"))
+    return stamp.tz_convert(ZoneInfo("Asia/Taipei"))
+
+
+def is_taiwan_premarket(value):
+    """Return True for 05:30 <= Taiwan local time < 09:00."""
+    if value is None:
+        return False
+    local = _taiwan_timestamp(value)
+    minute = local.hour * 60 + local.minute
+    return 5 * 60 + 30 <= minute < 9 * 60
+
+
+def _lag_base_cross_market_features(X, inference_time=None):
+    """Shift historical cross-market returns; optionally retain known US close on the latest premarket row.
 
     pipeline.build() is shared with an overnight forecast path where same-date
     US closes are valid for the next Taiwan session. The router's forecast
@@ -78,7 +102,39 @@ def _lag_base_cross_market_features(X):
         if str(column).startswith(("國際:", "區域:"))
     ]
     if columns:
-        features.loc[:, columns] = features.loc[:, columns].shift(1)
+        original = features.loc[:, columns].copy()
+        features.loc[:, columns] = original.shift(1)
+        # Only the latest inference row may use the just-completed US session.
+        # Every earlier row remains strictly lagged for historical OOS evaluation.
+        if is_taiwan_premarket(inference_time) and len(features.index):
+            us_columns = [c for c in columns if str(c).startswith("國際:")]
+            if us_columns:
+                features.loc[features.index[-1], us_columns] = original.iloc[-1][us_columns]
+    return features
+
+
+def _lag_base_cross_market_features(X, inference_time=None):
+    """Shift historical cross-market returns; optionally retain known US close on the latest premarket row.
+
+    pipeline.build() is shared with an overnight forecast path where same-date
+    US closes are valid for the next Taiwan session. The router's forecast
+    origin is instead the Taiwan cash close, so those same-date values are not
+    yet observable and must be lagged here.
+    """
+    features = X.copy()
+    columns = [
+        column for column in features.columns
+        if str(column).startswith(("國際:", "區域:"))
+    ]
+    if columns:
+        original = features.loc[:, columns].copy()
+        features.loc[:, columns] = original.shift(1)
+        # Only the latest inference row may use the just-completed US session.
+        # Every earlier row remains strictly lagged for historical OOS evaluation.
+        if is_taiwan_premarket(inference_time) and len(features.index):
+            us_columns = [c for c in columns if str(c).startswith("國際:")]
+            if us_columns:
+                features.loc[features.index[-1], us_columns] = original.iloc[-1][us_columns]
     return features
 
 
@@ -110,7 +166,7 @@ def _lag_post_close_features(X):
     return features
 
 
-def _augment_router_features(X, market_data):
+def _augment_router_features(X, market_data, inference_time=None):
     """Add point-in-time volatility and cross-market level/momentum features."""
     if market_data is None:
         return X
@@ -129,9 +185,15 @@ def _augment_router_features(X, market_data):
         ("KOSPI", "區域:KOSPI"),
         ("USDTWD", "區域:USDTWD"),
     )
+    us_tickers = {"SOX", "TSM", "VIX", "US10Y"}
+    premarket = is_taiwan_premarket(inference_time)
     for ticker, feature_name in cross_market:
         if ticker in market:
-            features[feature_name] = market[ticker].pct_change().shift(1)
+            daily_return = market[ticker].pct_change()
+            aligned = daily_return.shift(1)
+            if premarket and ticker in us_tickers and len(aligned):
+                aligned.iloc[-1] = daily_return.iloc[-1]
+            features[feature_name] = aligned
     if "TAIEX" in market:
         close = market["TAIEX"]
         daily = close.pct_change()
@@ -142,15 +204,25 @@ def _augment_router_features(X, market_data):
         features["router:TAIEX_drawdown_20d"] = close / close.rolling(20, min_periods=15).max() - 1.0
     for ticker in ("SOX", "TSM", "N225", "KOSPI", "USDTWD"):
         if ticker in market:
-            features[f"router:{ticker}_momentum_5d"] = market[ticker].pct_change(5).shift(1)
+            momentum = market[ticker].pct_change(5)
+            aligned = momentum.shift(1)
+            if premarket and ticker in us_tickers and len(aligned):
+                aligned.iloc[-1] = momentum.iloc[-1]
+            features[f"router:{ticker}_momentum_5d"] = aligned
     if "VIX" in market:
         vix = market["VIX"]
-        features["router:VIX_level_vs_60d_mean"] = (
-            vix / vix.rolling(60, min_periods=20).mean() - 1.0
-        ).shift(1)
-        features["router:VIX_change_5d"] = vix.pct_change(5).shift(1)
+        vix_level = vix / vix.rolling(60, min_periods=20).mean() - 1.0
+        vix_change = vix.pct_change(5)
+        features["router:VIX_level_vs_60d_mean"] = vix_level.shift(1)
+        features["router:VIX_change_5d"] = vix_change.shift(1)
+        if premarket and len(features.index):
+            features.loc[features.index[-1], "router:VIX_level_vs_60d_mean"] = vix_level.iloc[-1]
+            features.loc[features.index[-1], "router:VIX_change_5d"] = vix_change.iloc[-1]
     if "US10Y" in market:
-        features["router:US10Y_change_5d"] = market["US10Y"].diff(5).shift(1)
+        yield_change = market["US10Y"].diff(5)
+        features["router:US10Y_change_5d"] = yield_change.shift(1)
+        if premarket and len(features.index):
+            features.loc[features.index[-1], "router:US10Y_change_5d"] = yield_change.iloc[-1]
     return features
 
 
@@ -883,7 +955,7 @@ def _forecast_metrics(rows):
     }
 
 
-def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True):
+def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True, inference_time=None):
     """Train and evaluate an independent router + four specialists per horizon.
 
     features_by_horizon maps horizon -> (feature_frame, cumulative forward-return series).
@@ -902,10 +974,10 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             })
             continue
         X, forward_returns = features_by_horizon[horizon]
-        X = _lag_base_cross_market_features(X)
+        X = _lag_base_cross_market_features(X, inference_time=inference_time)
         if not post_close_features_lagged:
             X = _lag_post_close_features(X)
-        X = _augment_router_features(X, market_data)
+        X = _augment_router_features(X, market_data, inference_time=inference_time)
         forward_returns = pd.to_numeric(forward_returns, errors="coerce").reindex(X.index)
         numeric_features = X.apply(pd.to_numeric, errors="coerce")
         valid_features = pd.Series(
