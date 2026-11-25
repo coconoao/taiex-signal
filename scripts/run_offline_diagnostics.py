@@ -15,7 +15,7 @@ from regime_router import (
     build_regime_router_forecasts,
 )
 from stock_model_research import HORIZONS, _one_horizon, build_features
-from scripts.research_experiments import (annual_regime_experiments, probability_calibration_experiment)
+from research_experiments import (annual_regime_experiments, probability_calibration_experiment)
 
 CURRENT = (LOW_MAX_RETURN, NORMAL_MAX_RETURN, EXTREME_MIN_RETURN)
 CANDIDATE = (0.005, 0.012, 0.025)
