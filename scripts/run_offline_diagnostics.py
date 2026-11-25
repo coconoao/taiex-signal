@@ -262,7 +262,9 @@ def main() -> int:
             aligned = pd.concat([stock.rename("stock"), benchmark.rename("market")], axis=1).dropna()
             if len(aligned) > 800:
                 report["stock_ticker"] = args.ticker
-                report["stock_oos"], report["probability_calibration"] = stock_oos(\n                    aligned["stock"], aligned["market"]\n                )
+                report["stock_oos"], report["probability_calibration"] = stock_oos(
+                    aligned["stock"], aligned["market"]
+                )
             else:
                 report["warnings"].append("Stock/benchmark history is shorter than 800 aligned sessions.")
         except Exception as exc:
