@@ -226,7 +226,8 @@ def main() -> int:
             "current": {"low_max": CURRENT[0], "normal_max": CURRENT[1], "extreme_min": CURRENT[2]},
             "candidate": {"low_max": CANDIDATE[0], "normal_max": CANDIDATE[1], "extreme_min": CANDIDATE[2]},
         },
-        "regime_distribution": [], "router_oos": [], "stock_oos": {},\n        "probability_calibration": {}, "warnings": [],
+        "regime_distribution": [], "router_oos": [], "stock_oos": {},
+        "probability_calibration": {}, "warnings": [],
     }
     if not args.download_sample:
         report["warnings"].append("Pass --download-sample to fetch a public historical sample for CI diagnostics.")
