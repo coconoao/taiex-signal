@@ -43,6 +43,18 @@ def build_features(stock_close, market_close, volume=None):
             out[f"stock_return_{window}"] - out[f"market_return_{window}"]
         )
 
+    stock_returns = ret["stock"]
+    market_returns = ret["market"]
+    for window in (20, 60):
+        min_periods = max(10, window // 2)
+        covariance = stock_returns.rolling(window, min_periods=min_periods).cov(market_returns)
+        market_variance = market_returns.rolling(window, min_periods=min_periods).var()
+        beta = covariance / market_variance.replace(0, np.nan)
+        out[f"rolling_beta_{window}"] = beta
+        stock_mean = stock_returns.rolling(window, min_periods=min_periods).mean()
+        market_mean = market_returns.rolling(window, min_periods=min_periods).mean()
+        out[f"rolling_alpha_{window}"] = (stock_mean - beta * market_mean) * 252.0
+
     for window in (21, 63, 126):
         out[f"stock_volatility_{window}"] = ret["stock"].rolling(
             window, min_periods=max(10, window // 2)
@@ -159,6 +171,25 @@ def _calibrate(calibrator, raw):
     return calibrator.predict_proba(logits)[:, 1]
 
 
+def _matured_training_dates(feature_index, valid_mask, latest_date, horizon):
+    """Return training origins whose full forward label matured by latest_date."""
+    index = pd.DatetimeIndex(feature_index)
+    latest_pos = index.get_loc(pd.Timestamp(latest_date))
+    valid = pd.Series(np.asarray(valid_mask, dtype=bool), index=index)
+    positions = np.arange(len(index))
+    return index[valid.to_numpy() & (positions <= int(latest_pos) - int(horizon))]
+
+
+def _development_calibration_dates(walk_forward, positions, latest_position, horizon):
+    """Restrict calibration to matured development OOS rows, never final holdout."""
+    development = set(walk_forward["development_index"])
+    return [
+        day for day in walk_forward["raw"].index
+        if day in development
+        and int(positions.loc[day]) + int(horizon) <= int(latest_position)
+    ]
+
+
 def _walk_forward(X, y, horizon, factory):
     y = y.reindex(X.index)
     valid = X.notna().all(axis=1) & y.notna()
@@ -238,8 +269,9 @@ def _one_horizon(features, close, horizon):
     latest_date = features.dropna().index.max() if features.notna().any(axis=1).any() else None
     if latest_date is None:
         return {"status": "insufficient", "note": "缺少完整的最新特徵列。"}
-    matured_train = valid & (features.index < latest_date)
-    train_index = features.index[matured_train]
+    train_index = _matured_training_dates(
+        features.index, valid.to_numpy(), latest_date, horizon
+    )
     if len(train_index) < MIN_TRAIN or labels.loc[train_index].nunique() < 2:
         return {
             "status": "insufficient", "asof": str(latest_date.date()),
@@ -253,10 +285,9 @@ def _one_horizon(features, close, horizon):
     # Calibrate only with prior OOS predictions whose forward labels matured by latest_date.
     positions = pd.Series(np.arange(len(features.index)), index=features.index)
     latest_pos = int(positions.loc[latest_date])
-    matured_dates = [
-        day for day in selected_wf["raw"].index
-        if int(positions.loc[day]) + horizon <= latest_pos
-    ]
+    matured_dates = _development_calibration_dates(
+        selected_wf, positions, latest_pos, horizon
+    )
     calibrator = None
     if matured_dates:
         calibrator = _fit_calibrator(

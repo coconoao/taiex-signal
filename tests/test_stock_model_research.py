@@ -100,8 +100,66 @@ class StockModelResearchTests(unittest.TestCase):
         features = research.build_features(stock, market, volume)
         self.assertIn("volume_ratio_20", features)
         self.assertIn("relative_return_126", features)
+        self.assertIn("rolling_alpha_20", features)
+        self.assertIn("rolling_alpha_60", features)
+        self.assertIn("rolling_beta_20", features)
+        self.assertIn("rolling_beta_60", features)
         self.assertIn("stock_volatility_126", features)
         self.assertGreater(int(features.notna().any(axis=1).sum()), 500)
+
+
+    def test_rolling_alpha_beta_features_are_trailing_only(self):
+        stock, market, volume = synthetic_data()
+        cutoff = stock.index[650]
+        original = research.build_features(stock, market, volume)
+        self.assertIn("rolling_beta_20", original)
+        self.assertIn("rolling_beta_60", original)
+        self.assertIn("rolling_alpha_20", original)
+        self.assertIn("rolling_alpha_60", original)
+
+        changed_stock = stock.copy()
+        changed_market = market.copy()
+        changed_stock.loc[changed_stock.index > cutoff] *= 1.8
+        changed_market.loc[changed_market.index > cutoff] *= 0.7
+        changed = research.build_features(changed_stock, changed_market, volume)
+        pd.testing.assert_series_equal(
+            original.loc[cutoff], changed.loc[cutoff], check_names=False
+        )
+
+    def test_missing_market_observation_does_not_compress_beta_calendar(self):
+        stock, market, volume = synthetic_data(180)
+        missing_date = stock.index[90]
+        market = market.drop(index=missing_date)
+        features = research.build_features(stock, market, volume)
+        self.assertTrue(features.index.equals(stock.index))
+        self.assertTrue(pd.isna(features.loc[missing_date, "market_return_1"]))
+        self.assertEqual(len(features), len(stock))
+
+    def test_matured_training_dates_purge_unfinished_forward_labels(self):
+        index = pd.bdate_range("2024-01-01", periods=20)
+        valid = np.ones(len(index), dtype=bool)
+        latest = index[-1]
+        selected = research._matured_training_dates(index, valid, latest, horizon=5)
+        self.assertEqual(selected[-1], index[-6])
+        self.assertNotIn(index[-5], selected)
+        self.assertNotIn(index[-1], selected)
+
+    def test_holdout_rows_are_never_used_for_calibration(self):
+        index = pd.bdate_range("2024-01-01", periods=8)
+        wf = {
+            "raw": pd.Series([0.4, 0.5, 0.6, 0.7, 0.8], index=index[:5]),
+            "development_index": index[:3],
+            "holdout_index": index[3:5],
+        }
+        positions = pd.Series(np.arange(len(index)), index=index)
+        eligible = research._development_calibration_dates(
+            wf, positions, latest_position=7, horizon=2
+        )
+        self.assertEqual(eligible, list(index[:3]))
+        eligible = research._development_calibration_dates(
+            wf, positions, latest_position=3, horizon=2
+        )
+        self.assertEqual(eligible, list(index[:2]))
 
 
 if __name__ == "__main__":
