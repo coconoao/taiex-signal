@@ -15,6 +15,7 @@ from regime_router import (
     build_regime_router_forecasts,
 )
 from stock_model_research import HORIZONS, _one_horizon, build_features
+from scripts.research_experiments import (annual_regime_experiments, probability_calibration_experiment)
 
 CURRENT = (LOW_MAX_RETURN, NORMAL_MAX_RETURN, EXTREME_MIN_RETURN)
 CANDIDATE = (0.005, 0.012, 0.025)
@@ -37,6 +38,26 @@ def download_close(ticker: str, period: str) -> pd.Series:
     close.index = pd.to_datetime(close.index).tz_localize(None).normalize()
     return close[~close.index.duplicated(keep="last")].sort_index()
 
+def download_ohlc(ticker: str, period: str) -> pd.DataFrame:
+    """Download adjusted OHLC needed for a true-range ATR diagnostic."""
+    import yfinance as yf
+    frame = yf.download(ticker, period=period, auto_adjust=True,
+                        progress=False, threads=False)
+    if frame is None or frame.empty:
+        raise RuntimeError(f"no OHLC rows returned for {ticker}")
+
+    def column(name):
+        values = frame[name]
+        if isinstance(values, pd.DataFrame):
+            values = values.iloc[:, 0]
+        return pd.to_numeric(values, errors="coerce")
+
+    out = pd.DataFrame({"high": column("High"), "low": column("Low"),
+                        "close": column("Close")}).dropna(subset=["high", "low", "close"])
+    out.index = pd.to_datetime(out.index).tz_localize(None).normalize()
+    return out[~out.index.duplicated(keep="last")].sort_index()
+
+
 
 def classify_custom(moves: pd.Series, limits: tuple[float, float, float]) -> pd.Series:
     low, normal, extreme = limits
@@ -50,29 +71,11 @@ def classify_custom(moves: pd.Series, limits: tuple[float, float, float]) -> pd.
     return labels
 
 
-def annual_regime_distribution(close: pd.Series) -> list[dict]:
-    daily = close.pct_change(fill_method=None)
-    future_rows = pd.concat(
-        [daily.shift(-step).abs().rename(f"D+{step}") for step in (1, 2, 3)],
-        axis=1,
+def annual_regime_distribution(close, high=None, low=None):
+    """Compare fixed and volatility-adaptive annual regime distributions."""
+    return annual_regime_experiments(
+        close, high=high, low=low, current=CURRENT, candidate=CANDIDATE
     )
-    # Exclude origins without all three future sessions; do not score partial horizons.
-    future = future_rows.max(axis=1).where(future_rows.notna().all(axis=1))
-    rows = []
-    for label, limits in (("current", CURRENT), ("candidate", CANDIDATE)):
-        classes = classify_custom(future, limits)
-        frame = pd.DataFrame({"year": classes.index.year, "regime": classes}).dropna()
-        for year, group in frame.groupby("year"):
-            counts = group.regime.astype(int).value_counts()
-            n = len(group)
-            rows.append({
-                "threshold_set": label, "year": int(year), "samples": int(n),
-                **{f"{name}_n": int(counts.get(i, 0)) for i, name in enumerate(
-                    ("low", "normal", "high", "extreme"))},
-                **{f"{name}_pct": round(100 * counts.get(i, 0) / n, 2)
-                   for i, name in enumerate(("low", "normal", "high", "extreme"))},
-            })
-    return rows
 
 
 def make_router_features(market: pd.DataFrame) -> pd.DataFrame:
@@ -125,9 +128,9 @@ def router_oos(market: pd.DataFrame) -> list[dict]:
     return rows
 
 
-def stock_oos(stock: pd.Series, benchmark: pd.Series) -> dict:
+def stock_oos(stock: pd.Series, benchmark: pd.Series) -> tuple[dict, dict]:
     features = build_features(stock, benchmark)
-    rows = {}
+    rows, calibration = {}, {}
     for label, horizon in HORIZONS.items():
         result = _one_horizon(features, stock, horizon)
         rows[label] = {
@@ -141,7 +144,8 @@ def stock_oos(stock: pd.Series, benchmark: pd.Series) -> dict:
             "candidate_comparison": result.get("candidate_comparison", {}),
             "note": result.get("note"),
         }
-    return rows
+        calibration[label] = probability_calibration_experiment(features, stock, horizon)
+    return rows, calibration
 
 
 def render(report: dict) -> str:
@@ -151,8 +155,9 @@ def render(report: dict) -> str:
         f"- Data source: {report['data_source']}",
         "- Scope: read-only historical research; no production DB writes.",
         "",
-        "## Annual regime distribution (next 3 sessions' maximum absolute daily move)",
-        "| Set | Year | N | Low % | Normal % | High % | Extreme % |",
+        "## Annual regime distribution",
+        "Future target: maximum absolute daily move over the next three sessions.",
+        "| Method | Year | N | Low % | Normal % | High % | Extreme % |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for r in report["regime_distribution"]:
@@ -161,6 +166,10 @@ def render(report: dict) -> str:
             f"{r['low_pct']} | {r['normal_pct']} | {r['high_pct']} | {r['extreme_pct']} |"
         )
     lines += [
+        "", "Methods: fixed current/candidate thresholds; trailing 252-session quantiles "
+        "(50th/75th/95th percentile of historical three-session maxima); 20-session "
+        "realized-volatility standardization; and 20-session true-range ATR standardization "
+        "when OHLC data is available.",
         "", "## Router walk-forward OOS",
         "| Horizon | Status | N | MAE pts | Direction % | Bias pp | Large N | Large MAE |",
         "|---|---|---:|---:|---:|---:|---:|---:|",
@@ -179,6 +188,25 @@ def render(report: dict) -> str:
             f"- Holdout: {json.dumps(r.get('untouched_holdout'), ensure_ascii=False)}",
             f"- Annual OOS: {json.dumps(r.get('annual_holdout_metrics', {}), ensure_ascii=False)}",
         ]
+    lines += [
+        "", "## Probability calibration and regularization experiments",
+        "All rows use the untouched chronological holdout. Platt and isotonic calibrators "
+        "are fitted only on matured development OOS predictions. Holdout data is never used "
+        "to select regularization, scaling, or calibration settings.",
+        "| Horizon | Scaling | C | Method | N | Brier | Brier Skill | Log Loss | Direction % |",
+        "|---|---|---:|---|---:|---:|---:|---:|---:|",
+    ]
+    for horizon, experiment in report["probability_calibration"].items():
+        for config in experiment.get("experiments", []):
+            for method, result in config.get("methods", {}).items():
+                metrics = result.get("holdout_metrics")
+                if result.get("status") != "available" or not metrics:
+                    continue
+                lines.append(
+                    f"| {horizon} | {config['scaling']} | {config['C']} | {method} | "
+                    f"{metrics['samples']} | {metrics['brier_score']} | {metrics['brier_skill']} | "
+                    f"{metrics['log_loss']} | {metrics['direction_accuracy_pct']} |"
+                )
     if report["warnings"]:
         lines += ["", "## Warnings"] + [f"- {warning}" for warning in report["warnings"]]
     return "\n".join(lines) + "\n"
@@ -198,7 +226,7 @@ def main() -> int:
             "current": {"low_max": CURRENT[0], "normal_max": CURRENT[1], "extreme_min": CURRENT[2]},
             "candidate": {"low_max": CANDIDATE[0], "normal_max": CANDIDATE[1], "extreme_min": CANDIDATE[2]},
         },
-        "regime_distribution": [], "router_oos": [], "stock_oos": {}, "warnings": [],
+        "regime_distribution": [], "router_oos": [], "stock_oos": {},\n        "probability_calibration": {}, "warnings": [],
     }
     if not args.download_sample:
         report["warnings"].append("Pass --download-sample to fetch a public historical sample for CI diagnostics.")
@@ -211,7 +239,16 @@ def main() -> int:
                 report["warnings"].append(f"{ticker}: {type(exc).__name__}: {exc}")
         market = pd.DataFrame(downloaded).sort_index() if "TAIEX" in downloaded else pd.DataFrame()
         if len(market) and market["TAIEX"].notna().sum() > 500:
-            report["regime_distribution"] = annual_regime_distribution(market["TAIEX"].dropna())
+            taiwan_ohlc = None
+            try:
+                taiwan_ohlc = download_ohlc("^TWII", args.period)
+            except Exception as exc:
+                report["warnings"].append(f"TAIEX OHLC/ATR unavailable: {type(exc).__name__}: {exc}")
+            report["regime_distribution"] = annual_regime_distribution(
+                market["TAIEX"].dropna(),
+                high=taiwan_ohlc["high"] if taiwan_ohlc is not None else None,
+                low=taiwan_ohlc["low"] if taiwan_ohlc is not None else None,
+            )
             try:
                 report["router_oos"] = router_oos(market)
             except Exception as exc:
@@ -224,7 +261,7 @@ def main() -> int:
             aligned = pd.concat([stock.rename("stock"), benchmark.rename("market")], axis=1).dropna()
             if len(aligned) > 800:
                 report["stock_ticker"] = args.ticker
-                report["stock_oos"] = stock_oos(aligned["stock"], aligned["market"])
+                report["stock_oos"], report["probability_calibration"] = stock_oos(\n                    aligned["stock"], aligned["market"]\n                )
             else:
                 report["warnings"].append("Stock/benchmark history is shorter than 800 aligned sessions.")
         except Exception as exc:
