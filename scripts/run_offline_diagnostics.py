@@ -14,7 +14,8 @@ from regime_router import (
     EXTREME_MIN_RETURN, LOW_MAX_RETURN, NORMAL_MAX_RETURN,
     build_regime_router_forecasts,
 )
-from stock_model_research import HORIZONS, _one_horizon, build_features
+from stock_model_research import HORIZONS, _one_horizon, build_features, prequential_platt_candidates
+from scripts.final_oos_methods import atr_percent
 from research_experiments import (annual_regime_experiments, probability_calibration_experiment)
 
 CURRENT = (LOW_MAX_RETURN, NORMAL_MAX_RETURN, EXTREME_MIN_RETURN)
@@ -95,40 +96,84 @@ def make_router_features(market: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
-def router_oos(market: pd.DataFrame) -> list[dict]:
+def router_oos(market: pd.DataFrame, ohlc: pd.DataFrame | None = None) -> dict:
+    """Run fixed and ATR router refits on identical features and OOS origins."""
     close = market["TAIEX"].dropna()
-    market = market.reindex(close.index)
-    x = make_router_features(market)
+    aligned_market = market.reindex(close.index)
+    x = make_router_features(aligned_market)
     inputs = {h: (x, close.shift(-h) / close - 1) for h in (1, 2, 3)}
-    result = build_regime_router_forecasts(
-        inputs, close, market_data=market, include_gate_sensitivity=False
-    )  # No inference timestamp: strict historical lag policy.
-    rows = []
-    for item in result.get("sessions", []):
-        m = item.get("routed_forecast_validation", {})
-        rows.append({
-            "horizon": f"D+{item.get('horizon_sessions')}",
-            "status": item.get("status"),
-            "samples": m.get("oos_samples", 0),
-            "mae_points": m.get("routed_mae_points"),
-            "direction_accuracy_pct": (
-                round(100 * m["routed_direction_accuracy"], 2)
-                if m.get("routed_direction_accuracy") is not None else None
+    atr = None
+    if ohlc is not None:
+        atr = atr_percent(
+            ohlc["high"].reindex(close.index),
+            ohlc["low"].reindex(close.index),
+            ohlc["close"].reindex(close.index),
+            window=20,
+        )
+    results = {}
+    for mode in ("fixed", "atr"):
+        if mode == "atr" and atr is None:
+            results[mode] = {"status": "unavailable", "reason": "OHLC data unavailable"}
+            continue
+        result = build_regime_router_forecasts(
+            inputs, close, market_data=aligned_market,
+            include_gate_sensitivity=False,
+            regime_threshold_mode=mode, atr_pct=atr,
+        )
+        rows = []
+        for item in result.get("sessions", []):
+            metrics = item.get("routed_forecast_validation", {})
+            annual = item.get("annual_oos_metrics", {})
+            rows.append({
+                "horizon": f"D+{item.get('horizon_sessions')}",
+                "status": item.get("status"),
+                "samples": metrics.get("oos_samples", 0),
+                "oos_start": metrics.get("oos_start_date"),
+                "oos_end": metrics.get("oos_end_date"),
+                "mae_points": metrics.get("routed_mae_points"),
+                "direction_accuracy_pct": (
+                    round(100 * metrics["routed_direction_accuracy"], 2)
+                    if metrics.get("routed_direction_accuracy") is not None else None
+                ),
+                "bias_pp": metrics.get("mean_return_bias_pp"),
+                "non_normal_regime_pct": (
+                    round(100.0 * sum(v.get("samples", 0) for k, v in metrics.get("by_actual_regime", {}).items() if k != "normal") / metrics["oos_samples"], 4)
+                    if metrics.get("oos_samples") else None
+                ),
+                "atr_warmup_fallback_samples": item.get("atr_warmup_fallback_samples", 0),
+                "annual": annual,
+            })
+        results[mode] = {"status": result.get("status"), "horizons": rows}
+    comparison = []
+    fixed_rows = {x["horizon"]: x for x in results.get("fixed", {}).get("horizons", [])}
+    atr_rows = {x["horizon"]: x for x in results.get("atr", {}).get("horizons", [])}
+    for horizon in sorted(set(fixed_rows) & set(atr_rows)):
+        f, a = fixed_rows[horizon], atr_rows[horizon]
+        comparison.append({
+            "horizon": horizon,
+            "same_oos_dates": f.get("oos_start") == a.get("oos_start") and f.get("oos_end") == a.get("oos_end"),
+            "fixed_samples": f.get("samples"), "atr_samples": a.get("samples"),
+            "fixed_start": f.get("oos_start"), "fixed_end": f.get("oos_end"),
+            "atr_start": a.get("oos_start"), "atr_end": a.get("oos_end"),
+            "mae_delta_atr_minus_fixed": (
+                a["mae_points"] - f["mae_points"]
+                if a.get("mae_points") is not None and f.get("mae_points") is not None else None
             ),
-            "bias_pp": m.get("mean_return_bias_pp"),
-            "large_move_samples": m.get("large_move_samples", 0),
-            "large_move_mae_points": m.get("large_move_routed_mae_points"),
-            "large_move_direction_accuracy_pct": (
-                round(100 * m["large_move_direction_accuracy"], 2)
-                if m.get("large_move_direction_accuracy") is not None else None
+            "direction_delta_pp_atr_minus_fixed": (
+                a["direction_accuracy_pct"] - f["direction_accuracy_pct"]
+                if a.get("direction_accuracy_pct") is not None and f.get("direction_accuracy_pct") is not None else None
             ),
-            "large_move_bias_pp": m.get("large_move_mean_return_bias_pp"),
-            "oos_start": m.get("oos_start_date"), "oos_end": m.get("oos_end_date"),
         })
-    return rows
+    return {
+        "data_start": str(close.index.min().date()) if len(close) else None,
+        "data_end": str(close.index.max().date()) if len(close) else None,
+        "atr_warmup_sessions": 20,
+        "atr_threshold_ratios": [0.5, 1.0, 2.0],
+        "by_mode": results,
+        "paired_comparison": comparison,
+    }
 
-
-def stock_oos(stock: pd.Series, benchmark: pd.Series) -> tuple[dict, dict]:
+def stock_oos(stock: pd.Series, benchmark: pd.Series) -> tuple[dict, dict, dict]:
     features = build_features(stock, benchmark)
     rows, calibration = {}, {}
     for label, horizon in HORIZONS.items():
@@ -145,7 +190,8 @@ def stock_oos(stock: pd.Series, benchmark: pd.Series) -> tuple[dict, dict]:
             "note": result.get("note"),
         }
         calibration[label] = probability_calibration_experiment(features, stock, horizon)
-    return rows, calibration
+    prequential = prequential_platt_candidates(features, stock, horizon=21, oos_start="2024-01-01")
+    return rows, calibration, prequential
 
 
 def render(report: dict) -> str:
@@ -226,8 +272,8 @@ def main() -> int:
             "current": {"low_max": CURRENT[0], "normal_max": CURRENT[1], "extreme_min": CURRENT[2]},
             "candidate": {"low_max": CANDIDATE[0], "normal_max": CANDIDATE[1], "extreme_min": CANDIDATE[2]},
         },
-        "regime_distribution": [], "router_oos": [], "stock_oos": {},
-        "probability_calibration": {}, "warnings": [],
+        "regime_distribution": [], "router_oos": {}, "stock_oos": {},
+        "probability_calibration": {}, "prequential_platt": {}, "warnings": [],
     }
     if not args.download_sample:
         report["warnings"].append("Pass --download-sample to fetch a public historical sample for CI diagnostics.")
@@ -251,7 +297,7 @@ def main() -> int:
                 low=taiwan_ohlc["low"] if taiwan_ohlc is not None else None,
             )
             try:
-                report["router_oos"] = router_oos(market)
+                report["router_oos"] = router_oos(market, taiwan_ohlc)
             except Exception as exc:
                 report["warnings"].append(f"Router OOS failed: {type(exc).__name__}: {exc}")
         else:
@@ -262,7 +308,7 @@ def main() -> int:
             aligned = pd.concat([stock.rename("stock"), benchmark.rename("market")], axis=1).dropna()
             if len(aligned) > 800:
                 report["stock_ticker"] = args.ticker
-                report["stock_oos"], report["probability_calibration"] = stock_oos(
+                report["stock_oos"], report["probability_calibration"], report["prequential_platt"] = stock_oos(
                     aligned["stock"], aligned["market"]
                 )
             else:
