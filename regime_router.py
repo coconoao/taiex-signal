@@ -1332,6 +1332,12 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         "routing_priority": "router_first",
         "regime_threshold_mode": regime_threshold_mode,
         "atr_warmup_policy": "fixed-threshold fallback when trailing 20-session ATR% unavailable" if regime_threshold_mode == "atr" else None,
+        "regime_threshold_parameters": {
+            "mode": regime_threshold_mode,
+            "fixed_return_limits": [LOW_MAX_RETURN, NORMAL_MAX_RETURN, EXTREME_MIN_RETURN],
+            "atr_ratio_limits": [0.5, 1.0, 2.0],
+            "atr_ratio_definition": "future maximum absolute daily close-to-close return divided by trailing 20-session ATR% known at the forecast origin",
+        },
         "regime_definitions": {
             "low": {"max_future_max_daily_move_pct": 0.5},
             "normal": {"min_future_max_daily_move_pct_exclusive": 0.5, "max_future_max_daily_move_pct": 1.0},
