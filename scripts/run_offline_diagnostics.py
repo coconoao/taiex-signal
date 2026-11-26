@@ -119,6 +119,7 @@ def router_oos(market: pd.DataFrame, ohlc: pd.DataFrame | None = None) -> dict:
             inputs, close, market_data=aligned_market,
             include_gate_sensitivity=False,
             regime_threshold_mode=mode, atr_pct=atr,
+            evaluation_start_date="2024-01-01",
         )
         rows = []
         for item in result.get("sessions", []):
