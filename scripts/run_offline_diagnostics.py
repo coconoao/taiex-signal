@@ -144,6 +144,7 @@ def router_oos(market: pd.DataFrame, ohlc: pd.DataFrame | None = None) -> dict:
                 ),
                 "signal_non_normal_regime_pct": item.get("signal_non_normal_regime_pct"),
                 "atr_warmup_fallback_samples": item.get("atr_warmup_fallback_samples", 0),
+                "router_validation": item.get("router_validation", {}),
                 "annual": annual,
             })
         results[mode] = {"status": result.get("status"), "horizons": rows}
