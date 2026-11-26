@@ -383,7 +383,7 @@ def main() -> int:
         try:
             stock = download_close(args.ticker, args.period)
             benchmark = download_close("^TWII", args.period)
-            aligned = pd.concat([stock.rename("stock"), benchmark.rename("market")], axis=1).dropna()
+            aligned = pd.concat([stock.rename("stock"), benchmark.rename("market")], axis=1, sort=False).dropna()
             if len(aligned) > 800:
                 report["stock_ticker"] = args.ticker
                 report["stock_oos"], report["probability_calibration"], report["prequential_platt"] = stock_oos(
