@@ -1290,6 +1290,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
+            "signal_non_normal_regime_pct": round(100.0 * sum(row.get("requested_regime_id", 1) != 1 for row in oos_forecasts) / len(oos_forecasts), 4) if oos_forecasts else None,
             "annual_oos_metrics": {
                 str(year): {
                     **_forecast_metrics([row for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year]),
