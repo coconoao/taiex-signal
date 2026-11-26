@@ -487,6 +487,38 @@ def prequential_platt_candidates(features, close, horizon=21, oos_start="2024-01
             baseline = np.clip(frame["baseline_probability"].to_numpy(dtype=float), 1e-8, 1 - 1e-8)
             brier = float(np.mean((p - y) ** 2))
             base_brier = float(np.mean((baseline - y) ** 2))
+            logits = np.log(p / (1.0 - p)).reshape(-1, 1)
+            if len(np.unique(y)) == 2 and len(y) >= 20:
+                calibration_model = LogisticRegression(C=1e6, max_iter=500)
+                calibration_model.fit(logits, y)
+                calibration_slope = float(calibration_model.coef_[0, 0])
+                calibration_intercept = float(calibration_model.intercept_[0])
+            else:
+                calibration_slope, calibration_intercept = None, None
+            bins = np.array_split(np.argsort(p), min(10, max(1, len(p))))
+            ece = float(sum(
+                len(ix) / len(p) * abs(float(p[ix].mean()) - float(y[ix].mean()))
+                for ix in bins if len(ix)
+            ))
+            brier_skill_ci = None
+            log_loss_delta_ci = None
+            if len(y) >= 84:
+                rng_ci = np.random.default_rng(20261126)
+                block = 21
+                starts = np.arange(0, len(y) - block + 1)
+                draws = np.empty((500, 2), dtype=float)
+                blocks_needed = int(np.ceil(len(y) / block))
+                for draw in range(len(draws)):
+                    chosen = rng_ci.choice(starts, size=blocks_needed, replace=True)
+                    ix = np.concatenate([np.arange(s, s + block) for s in chosen])[:len(y)]
+                    pb, bb, yy = p[ix], baseline[ix], y[ix]
+                    b0 = float(np.mean((bb - yy) ** 2))
+                    draws[draw, 0] = 1.0 - float(np.mean((pb - yy) ** 2)) / b0 if b0 > 0 else np.nan
+                    llp = -(yy * np.log(pb) + (1 - yy) * np.log(1 - pb))
+                    llb = -(yy * np.log(bb) + (1 - yy) * np.log(1 - bb))
+                    draws[draw, 1] = float(np.mean(llp - llb))
+                brier_skill_ci = [float(x) for x in np.nanquantile(draws[:, 0], [0.025, 0.975])]
+                log_loss_delta_ci = [float(x) for x in np.nanquantile(draws[:, 1], [0.025, 0.975])]
             return {
                 "samples": int(len(frame)),
                 "start_date": str(frame.index.min().date()),
@@ -495,6 +527,11 @@ def prequential_platt_candidates(features, close, horizon=21, oos_start="2024-01
                 "baseline_brier_score": base_brier,
                 "brier_skill": float(1.0 - brier / base_brier) if base_brier > 0 else None,
                 "log_loss": float(log_loss(y, p, labels=[0, 1])),
+                "calibration_slope": calibration_slope,
+                "calibration_intercept": calibration_intercept,
+                "ece_10_bins": ece,
+                "brier_skill_95pct_block_bootstrap_ci": brier_skill_ci,
+                "log_loss_delta_95pct_block_bootstrap_ci": log_loss_delta_ci,
                 "raw_brier_score": float(np.mean((raw_p - y) ** 2)),
                 "raw_log_loss": float(log_loss(y, raw_p, labels=[0, 1])),
                 "direction_accuracy_pct": float(np.mean((p >= 0.5) == (y == 1)) * 100.0),
