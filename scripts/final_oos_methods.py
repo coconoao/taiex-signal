@@ -24,7 +24,7 @@ def atr_percent(high: pd.Series, low: pd.Series, close: pd.Series, window: int =
     tr = pd.concat(
         [(h - l).abs(), (h - previous).abs(), (l - previous).abs()],
         axis=1,
-    ).max(axis=1, skipna=False)
+    ).max(axis=1, skipna=True)
     return tr.rolling(int(window), min_periods=int(window)).mean().div(c.where(c > 0))
 
 
