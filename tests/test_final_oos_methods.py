@@ -53,7 +53,7 @@ def test_expanding_platt_never_uses_unmatured_or_same_block_labels():
     )
     for date, row in result.iterrows():
         fit_end = row["calibration_fit_end"]
-        if fit_end is not None:
+        if pd.notna(fit_end):
             assert pd.Timestamp(fit_end) < date
             fit_pos = calendar.get_loc(pd.Timestamp(fit_end))
             test_pos = calendar.get_loc(date)
