@@ -88,13 +88,39 @@ def is_taiwan_premarket(value):
     return 5 * 60 + 30 <= minute < 9 * 60
 
 
-def _lag_base_cross_market_features(X, inference_time=None):
-    """Shift historical cross-market returns; optionally retain known US close on the latest premarket row.
+def _us_close_timestamp_utc(session_date):
+    """Return the 16:00 America/New_York close for a daily US-market bar as UTC."""
+    stamp = pd.Timestamp(session_date)
+    if stamp.tzinfo is not None:
+        session_day = stamp.tz_convert(ZoneInfo("America/New_York")).date()
+    else:
+        session_day = stamp.date()
+    close_local = pd.Timestamp(
+        dt.datetime.combine(session_day, dt.time(16, 0))
+    ).tz_localize(ZoneInfo("America/New_York"))
+    return close_local.tz_convert("UTC")
 
-    pipeline.build() is shared with an overnight forecast path where same-date
-    US closes are valid for the next Taiwan session. The router's forecast
-    origin is instead the Taiwan cash close, so those same-date values are not
-    yet observable and must be lagged here.
+
+def _us_close_observable(session_date, inference_time):
+    """Require an aware inference timestamp and a US session close no later than it."""
+    if session_date is None or inference_time is None:
+        return False
+    try:
+        inference = pd.Timestamp(inference_time)
+        if inference.tzinfo is None:
+            return False
+        return _us_close_timestamp_utc(session_date) <= inference.tz_convert("UTC")
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _lag_base_cross_market_features(X, inference_time=None):
+    """Lag cross-market features except a proven-complete latest US session row.
+
+    Historical rows are always shifted. The latest row is released only during
+    Taiwan premarket and only when its indexed US session close has occurred
+    by the aware UTC inference timestamp. Unknown or naive inference times fail
+    closed to the historical one-session lag.
     """
     features = X.copy()
     columns = [
@@ -104,34 +130,11 @@ def _lag_base_cross_market_features(X, inference_time=None):
     if columns:
         original = features.loc[:, columns].copy()
         features.loc[:, columns] = original.shift(1)
-        # Only the latest inference row may use the just-completed US session.
-        # Every earlier row remains strictly lagged for historical OOS evaluation.
-        if is_taiwan_premarket(inference_time) and len(features.index):
-            us_columns = [c for c in columns if str(c).startswith("國際:")]
-            if us_columns:
-                features.loc[features.index[-1], us_columns] = original.iloc[-1][us_columns]
-    return features
-
-
-def _lag_base_cross_market_features(X, inference_time=None):
-    """Shift historical cross-market returns; optionally retain known US close on the latest premarket row.
-
-    pipeline.build() is shared with an overnight forecast path where same-date
-    US closes are valid for the next Taiwan session. The router's forecast
-    origin is instead the Taiwan cash close, so those same-date values are not
-    yet observable and must be lagged here.
-    """
-    features = X.copy()
-    columns = [
-        column for column in features.columns
-        if str(column).startswith(("國際:", "區域:"))
-    ]
-    if columns:
-        original = features.loc[:, columns].copy()
-        features.loc[:, columns] = original.shift(1)
-        # Only the latest inference row may use the just-completed US session.
-        # Every earlier row remains strictly lagged for historical OOS evaluation.
-        if is_taiwan_premarket(inference_time) and len(features.index):
+        if (
+            is_taiwan_premarket(inference_time)
+            and len(features.index)
+            and _us_close_observable(features.index[-1], inference_time)
+        ):
             us_columns = [c for c in columns if str(c).startswith("國際:")]
             if us_columns:
                 features.loc[features.index[-1], us_columns] = original.iloc[-1][us_columns]
@@ -187,12 +190,21 @@ def _augment_router_features(X, market_data, inference_time=None):
     )
     us_tickers = {"SOX", "TSM", "VIX", "US10Y"}
     premarket = is_taiwan_premarket(inference_time)
+    latest_row = X.index[-1] if len(X.index) else None
     for ticker, feature_name in cross_market:
         if ticker in market:
             daily_return = market[ticker].pct_change()
             aligned = daily_return.shift(1)
-            if premarket and ticker in us_tickers and len(aligned):
-                aligned.iloc[-1] = daily_return.iloc[-1]
+            can_release_latest = (
+                premarket
+                and ticker in us_tickers
+                and latest_row is not None
+                and latest_row in market.index
+                and pd.notna(market.at[latest_row, ticker])
+                and _us_close_observable(latest_row, inference_time)
+            )
+            if can_release_latest:
+                aligned.loc[latest_row] = daily_return.loc[latest_row]
             features[feature_name] = aligned
     if "TAIEX" in market:
         close = market["TAIEX"]
@@ -215,13 +227,23 @@ def _augment_router_features(X, market_data, inference_time=None):
         vix_change = vix.pct_change(5)
         features["router:VIX_level_vs_60d_mean"] = vix_level.shift(1)
         features["router:VIX_change_5d"] = vix_change.shift(1)
-        if premarket and len(features.index):
+        if (
+            premarket
+            and len(features.index)
+            and _us_close_observable(features.index[-1], inference_time)
+            and pd.notna(market.at[features.index[-1], "VIX"])
+        ):
             features.loc[features.index[-1], "router:VIX_level_vs_60d_mean"] = vix_level.iloc[-1]
             features.loc[features.index[-1], "router:VIX_change_5d"] = vix_change.iloc[-1]
     if "US10Y" in market:
         yield_change = market["US10Y"].diff(5)
         features["router:US10Y_change_5d"] = yield_change.shift(1)
-        if premarket and len(features.index):
+        if (
+            premarket
+            and len(features.index)
+            and _us_close_observable(features.index[-1], inference_time)
+            and pd.notna(market.at[features.index[-1], "US10Y"])
+        ):
             features.loc[features.index[-1], "router:US10Y_change_5d"] = yield_change.iloc[-1]
     return features
 
