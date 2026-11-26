@@ -449,14 +449,14 @@ class RegimeRouterTests(unittest.TestCase):
     def test_premarket_augment_uses_latest_us_close_but_not_regional_close(self):
         dates = pd.bdate_range("2026-08-03", periods=50)
         market = pd.DataFrame({
-            "SOX": np.linspace(100.0, 170.0, 70),
-            "TSM": np.linspace(50.0, 85.0, 70),
-            "VIX": np.linspace(10.0, 25.0, 70),
-            "US10Y": np.linspace(3.0, 4.0, 70),
-            "N225": np.linspace(30000.0, 37000.0, 70),
-            "KOSPI": np.linspace(2500.0, 3200.0, 70),
-            "USDTWD": np.linspace(31.0, 32.0, 70),
-            "TAIEX": np.linspace(17000.0, 20500.0, 70),
+            "SOX": np.linspace(100.0, 150.0, 50),
+            "TSM": np.linspace(50.0, 85.0, 50),
+            "VIX": np.linspace(10.0, 25.0, 50),
+            "US10Y": np.linspace(3.0, 4.0, 50),
+            "N225": np.linspace(30000.0, 35000.0, 50),
+            "KOSPI": np.linspace(2500.0, 3200.0, 50),
+            "USDTWD": np.linspace(31.0, 32.0, 50),
+            "TAIEX": np.linspace(15000.0, 20500.0, 50),
         }, index=dates)
         from regime_router import _us_close_observable
         self.assertTrue(is_taiwan_premarket("2026-10-10T00:25:00Z"))
