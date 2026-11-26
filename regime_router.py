@@ -1300,6 +1300,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 } for year in sorted({pd.Timestamp(row["forecast_asof"]).year for row in oos_forecasts})
             },
             "atr_warmup_fallback_samples": int(sum(row.get("atr_warmup_fallback", False) for row in oos_forecasts)),
+            "oos_forecast_dates": [row["forecast_asof"] for row in oos_forecasts],
             "regime_threshold_mode": regime_threshold_mode,
             "gate_policy_sensitivity": (
                 _gate_policy_sensitivity(oos_forecasts, horizon)
