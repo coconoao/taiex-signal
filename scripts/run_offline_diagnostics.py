@@ -255,6 +255,7 @@ def render(report: dict) -> str:
             multiple = round(ap / fp, 4) if fp not in (None, 0) and ap is not None else None
             lines.append(
                 f"| {year} | {horizon} | {f.get('oos_samples')} | {a.get('oos_samples')} | "
+                f"{f.get('oos_start_date')}–{f.get('oos_end_date')} | {a.get('oos_start_date')}–{a.get('oos_end_date')} | "
                 f"{f.get('routed_mae_points')} | {a.get('routed_mae_points')} | "
                 f"{(100*f.get('routed_direction_accuracy')) if f.get('routed_direction_accuracy') is not None else None} | "
                 f"{(100*a.get('routed_direction_accuracy')) if a.get('routed_direction_accuracy') is not None else None} | "
