@@ -430,7 +430,7 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertFalse(is_taiwan_premarket("2026-11-23T17:25:00Z"))
 
     def test_premarket_base_features_only_unlag_latest_us_columns(self):
-        dates = pd.bdate_range("2026-11-16", periods=3)
+        dates = pd.bdate_range("2026-11-16", periods=4)
         source = pd.DataFrame({
             "國際:SOX": [0.01, 0.02, 0.03],
             "區域:N225": [0.11, 0.12, 0.13],
@@ -438,7 +438,7 @@ class RegimeRouterTests(unittest.TestCase):
         }, index=dates)
         historical = _lag_base_cross_market_features(source)
         premarket = _lag_base_cross_market_features(
-            source, inference_time="2026-11-19T00:25:00Z"
+            source, inference_time="2026-11-20T00:25:00Z"
         )
         self.assertEqual(historical.loc[dates[-1], "國際:SOX"], 0.03)
         self.assertEqual(premarket.loc[dates[-1], "國際:SOX"], 0.04)
