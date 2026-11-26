@@ -501,6 +501,22 @@ def prequential_platt_candidates(features, close, horizon=21, oos_start="2024-01
                 len(ix) / len(p) * abs(float(p[ix].mean()) - float(y[ix].mean()))
                 for ix in bins if len(ix)
             ))
+            fitted_mask = frame["calibration_status"].to_numpy() == "platt_fitted"
+            fitted_slope, fitted_intercept, fitted_ece = None, None, None
+            fitted_count = int(fitted_mask.sum())
+            if fitted_count >= 20 and len(np.unique(y[fitted_mask])) == 2:
+                fp = p[fitted_mask]
+                fy = y[fitted_mask]
+                fitted_logits = np.log(fp / (1.0 - fp)).reshape(-1, 1)
+                fitted_model = LogisticRegression(C=1e6, max_iter=500)
+                fitted_model.fit(fitted_logits, fy)
+                fitted_slope = float(fitted_model.coef_[0, 0])
+                fitted_intercept = float(fitted_model.intercept_[0])
+                fitted_bins = np.array_split(np.argsort(fp), min(10, len(fp)))
+                fitted_ece = float(sum(
+                    len(ix) / len(fp) * abs(float(fp[ix].mean()) - float(fy[ix].mean()))
+                    for ix in fitted_bins if len(ix)
+                ))
             brier_skill_ci = None
             log_loss_delta_ci = None
             if len(y) >= 84:
@@ -536,8 +552,14 @@ def prequential_platt_candidates(features, close, horizon=21, oos_start="2024-01
                 "raw_brier_score": float(np.mean((raw_p - y) ** 2)),
                 "raw_log_loss": float(log_loss(y, raw_p, labels=[0, 1])),
                 "direction_accuracy_pct": float(np.mean((p >= 0.5) == (y == 1)) * 100.0),
-                "calibrated_blocks": int((frame["calibration_status"] == "platt_fitted").sum()),
-                "calibration_coverage_pct": float((frame["calibration_status"] == "platt_fitted").mean() * 100.0),
+                "baseline_direction_accuracy_pct": float(np.mean((baseline >= 0.5) == (y == 1)) * 100.0),
+                "direction_delta_vs_baseline_pp": float((np.mean((p >= 0.5) == (y == 1)) - np.mean((baseline >= 0.5) == (y == 1))) * 100.0),
+                "fitted_only_samples": fitted_count,
+                "fitted_only_calibration_slope": fitted_slope,
+                "fitted_only_calibration_intercept": fitted_intercept,
+                "fitted_only_ece_10_bins": fitted_ece,
+                "calibrated_blocks": fitted_count,
+                "calibration_coverage_pct": float(fitted_mask.mean() * 100.0),
             }
 
         annual = {}
