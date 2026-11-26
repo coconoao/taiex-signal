@@ -140,6 +140,7 @@ def router_oos(market: pd.DataFrame, ohlc: pd.DataFrame | None = None) -> dict:
                     round(100.0 * sum(v.get("samples", 0) for k, v in metrics.get("by_actual_regime", {}).items() if k != "normal") / metrics["oos_samples"], 4)
                     if metrics.get("oos_samples") else None
                 ),
+                "signal_non_normal_regime_pct": item.get("signal_non_normal_regime_pct"),
                 "atr_warmup_fallback_samples": item.get("atr_warmup_fallback_samples", 0),
                 "annual": annual,
             })
@@ -235,6 +236,27 @@ def render(report: dict) -> str:
         "| Horizon | Same OOS dates | Fixed N | ATR N | MAE delta (ATR-fixed) | Direction delta pp | Signal frequency multiple |",
         "|---|---|---:|---:|---:|---:|---:|",
     ]
+    lines += [
+        "", "### Annual paired OOS metrics",
+        "| Year | Horizon | Fixed N | ATR N | Fixed MAE | ATR MAE | Fixed direction % | ATR direction % | Signal frequency multiple | ATR warmup N |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for horizon in sorted({x["horizon"] for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", [])}):
+        fixed_row = next((x for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", []) if x["horizon"] == horizon), {})
+        atr_row = next((x for x in router.get("by_mode", {}).get("atr", {}).get("horizons", []) if x["horizon"] == horizon), {})
+        years = sorted(set(fixed_row.get("annual", {})) | set(atr_row.get("annual", {})))
+        for year in years:
+            f = fixed_row.get("annual", {}).get(year, {})
+            a = atr_row.get("annual", {}).get(year, {})
+            fp, ap = f.get("non_normal_regime_pct"), a.get("non_normal_regime_pct")
+            multiple = round(ap / fp, 4) if fp not in (None, 0) and ap is not None else None
+            lines.append(
+                f"| {year} | {horizon} | {f.get('oos_samples')} | {a.get('oos_samples')} | "
+                f"{f.get('routed_mae_points')} | {a.get('routed_mae_points')} | "
+                f"{(100*f.get('routed_direction_accuracy')) if f.get('routed_direction_accuracy') is not None else None} | "
+                f"{(100*a.get('routed_direction_accuracy')) if a.get('routed_direction_accuracy') is not None else None} | "
+                f"{multiple} | {a.get('atr_warmup_fallback_samples')} |"
+            )
     for r in router.get("paired_comparison", []):
         fixed_row = next((x for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", []) if x["horizon"] == r["horizon"]), {})
         atr_row = next((x for x in router.get("by_mode", {}).get("atr", {}).get("horizons", []) if x["horizon"] == r["horizon"]), {})
