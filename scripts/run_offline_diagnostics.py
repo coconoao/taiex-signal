@@ -216,15 +216,34 @@ def render(report: dict) -> str:
         "(50th/75th/95th percentile of historical three-session maxima); 20-session "
         "realized-volatility standardization; and 20-session true-range ATR standardization "
         "when OHLC data is available.",
-        "", "## Router walk-forward OOS",
-        "| Horizon | Status | N | MAE pts | Direction % | Bias pp | Large N | Large MAE |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
+        "", "## Paired router OOS: fixed versus 20-session ATR%",
+        f"- Data range: {report.get('router_oos', {}).get('data_start')} to {report.get('router_oos', {}).get('data_end')}",
+        "- ATR: trailing 20-session simple true-range average / close; first 20 sessions use fixed-threshold fallback.",
+        "| Mode | Horizon | N | OOS start | OOS end | MAE pts | Direction % | Signal frequency % | ATR warmup fallback N |",
+        "|---|---|---:|---|---|---:|---:|---:|---:|",
     ]
-    for r in report["router_oos"]:
+    router = report.get("router_oos", {})
+    for mode in ("fixed", "atr"):
+        for r in router.get("by_mode", {}).get(mode, {}).get("horizons", []):
+            lines.append(
+                f"| {mode} | {r['horizon']} | {r['samples']} | {r['oos_start']} | {r['oos_end']} | "
+                f"{r['mae_points']} | {r['direction_accuracy_pct']} | {r.get('signal_non_normal_regime_pct')} | "
+                f"{r.get('atr_warmup_fallback_samples')} |"
+            )
+    lines += [
+        "", "### Paired comparison",
+        "| Horizon | Same OOS dates | Fixed N | ATR N | MAE delta (ATR-fixed) | Direction delta pp | Signal frequency multiple |",
+        "|---|---|---:|---:|---:|---:|---:|",
+    ]
+    for r in router.get("paired_comparison", []):
+        fixed_row = next((x for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", []) if x["horizon"] == r["horizon"]), {})
+        atr_row = next((x for x in router.get("by_mode", {}).get("atr", {}).get("horizons", []) if x["horizon"] == r["horizon"]), {})
+        fp = fixed_row.get("signal_non_normal_regime_pct")
+        ap = atr_row.get("signal_non_normal_regime_pct")
+        multiple = round(ap / fp, 4) if fp not in (None, 0) and ap is not None else None
         lines.append(
-            f"| {r['horizon']} | {r['status']} | {r['samples']} | {r['mae_points']} | "
-            f"{r['direction_accuracy_pct']} | {r['bias_pp']} | "
-            f"{r['large_move_samples']} | {r['large_move_mae_points']} |"
+            f"| {r['horizon']} | {r['same_oos_dates']} | {r['fixed_samples']} | {r['atr_samples']} | "
+            f"{r['mae_delta_atr_minus_fixed']} | {r['direction_delta_pp_atr_minus_fixed']} | {multiple} |"
         )
     lines += ["", "## Stock research holdout"]
     for label, r in report["stock_oos"].items():
@@ -253,6 +272,21 @@ def render(report: dict) -> str:
                     f"{metrics['samples']} | {metrics['brier_score']} | {metrics['brier_skill']} | "
                     f"{metrics['log_loss']} | {metrics['direction_accuracy_pct']} |"
                 )
+    lines += ["", "## Expanding-window prequential Platt (21-session purge)"]
+    preq = report.get("prequential_platt", {})
+    lines.append(f"- Actual OOS range: {preq.get('oos_start_actual')} to {preq.get('oos_end_actual')}")
+    lines.append("| Base model | Base C | Platt C | Year | N | Brier | Brier Skill | Log Loss | Direction % | Calibrated coverage % |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    for candidate, result in preq.get("candidates", {}).items():
+        if result.get("status") != "available":
+            lines.append(f"| Logistic no-scaler | {candidate} | 1.0 | all | 0 | NA | NA | NA | NA | NA |")
+            continue
+        for year, metrics in [("all", result.get("overall", {})), *result.get("annual", {}).items()]:
+            lines.append(
+                f"| Logistic no-scaler | {candidate} | 1.0 | {year} | {metrics.get('samples')} | "
+                f"{metrics.get('brier_score')} | {metrics.get('brier_skill')} | {metrics.get('log_loss')} | "
+                f"{metrics.get('direction_accuracy_pct')} | {metrics.get('calibration_coverage_pct')} |"
+            )
     if report["warnings"]:
         lines += ["", "## Warnings"] + [f"- {warning}" for warning in report["warnings"]]
     return "\n".join(lines) + "\n"
