@@ -933,7 +933,7 @@ def _forecast_metrics(rows):
     }
 
 
-def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True, inference_time=None, regime_threshold_mode="fixed", atr_pct=None):
+def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True, inference_time=None, regime_threshold_mode="fixed", atr_pct=None, evaluation_start_date=None):
     """Train and evaluate an independent router + four specialists per horizon.
 
     features_by_horizon maps horizon -> (feature_frame, cumulative forward-return series).
@@ -1009,7 +1009,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         # Evaluate the most recent 2,000 labelled origins (or all available
         # origins for shorter histories), while retaining an expanding train set.
         # Refit every 60 sessions to keep scheduled refresh cost bounded.
-        oos_start = max(first_test, len(train_idx) - 2000)
+        evaluation_position = int(train_idx.searchsorted(pd.Timestamp(evaluation_start_date))) if evaluation_start_date is not None else 0
+        oos_start = max(first_test, len(train_idx) - 2000, evaluation_position)
         for start in range(oos_start, len(train_idx), 60):
             test_idx = train_idx[start:start + 60]
             if not len(test_idx):
