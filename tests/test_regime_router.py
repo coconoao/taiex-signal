@@ -25,6 +25,7 @@ from regime_router import (
     _select_risk_thresholds,
     _prior_regime_probabilities,
     _router_metrics,
+    is_taiwan_premarket,
 )
 
 
@@ -417,6 +418,130 @@ class RegimeRouterTests(unittest.TestCase):
             self.assertIsInstance(item["probabilities_calibrated"], bool)
             if item["probabilities_calibrated"]:
                 self.assertEqual(item["probability_calibration"]["method"], "prequential_multinomial_logistic")
+
+
+    def test_utc_0025_converts_to_taiwan_0825_across_calendar_date(self):
+        from regime_router import _taiwan_timestamp
+        local = _taiwan_timestamp("2026-11-24T00:25:00Z")
+        self.assertEqual(str(local), "2026-11-24 08:25:00+08:00")
+        self.assertTrue(is_taiwan_premarket("2026-11-24T00:25:00Z"))
+        cross_date = _taiwan_timestamp("2026-11-23T17:25:00Z")
+        self.assertEqual(str(cross_date.date()), "2026-11-24")
+        self.assertFalse(is_taiwan_premarket("2026-11-23T17:25:00Z"))
+
+    def test_premarket_base_features_only_unlag_latest_us_columns(self):
+        dates = pd.bdate_range("2026-11-16", periods=4)
+        source = pd.DataFrame({
+            "國際:SOX": [0.01, 0.02, 0.03, 0.04],
+            "區域:N225": [0.11, 0.12, 0.13, 0.14],
+            "本地:當日漲跌": [1, 2, 3, 4],
+        }, index=dates)
+        historical = _lag_base_cross_market_features(source)
+        premarket = _lag_base_cross_market_features(
+            source, inference_time="2026-11-20T00:25:00Z"
+        )
+        self.assertEqual(historical.loc[dates[-1], "國際:SOX"], 0.03)
+        self.assertEqual(premarket.loc[dates[-1], "國際:SOX"], 0.04)
+        self.assertEqual(premarket.loc[dates[-1], "區域:N225"], 0.13)
+        self.assertEqual(premarket.loc[dates[-1], "本地:當日漲跌"], 4)
+        self.assertEqual(premarket.loc[dates[-2], "國際:SOX"], 0.02)
+
+    def test_premarket_augment_uses_latest_us_close_but_not_regional_close(self):
+        dates = pd.bdate_range("2026-08-03", periods=50)
+        market = pd.DataFrame({
+            "SOX": np.linspace(100.0, 150.0, 50),
+            "TSM": np.linspace(50.0, 85.0, 50),
+            "VIX": np.linspace(10.0, 25.0, 50),
+            "US10Y": np.linspace(3.0, 4.0, 50),
+            "N225": np.linspace(30000.0, 35000.0, 50),
+            "KOSPI": np.linspace(2500.0, 3200.0, 50),
+            "USDTWD": np.linspace(31.0, 32.0, 50),
+            "TAIEX": np.linspace(15000.0, 20500.0, 50),
+        }, index=dates)
+        from regime_router import _us_close_observable
+        self.assertTrue(is_taiwan_premarket("2026-10-10T00:25:00Z"))
+        self.assertTrue(_us_close_observable(dates[-1], "2026-10-10T00:25:00Z"))
+        premarket = _augment_router_features(
+            pd.DataFrame(index=dates), market, inference_time="2026-10-10T00:25:00Z"
+        )
+        self.assertAlmostEqual(
+            premarket.iloc[-1]["國際:SOX"], market["SOX"].pct_change().iloc[-1]
+        )
+        self.assertAlmostEqual(
+            premarket.iloc[-1]["區域:N225"], market["N225"].pct_change().shift(1).iloc[-1]
+        )
+        self.assertAlmostEqual(
+            premarket.iloc[-2]["國際:SOX"], market["SOX"].pct_change().shift(1).iloc[-2]
+        )
+
+    def test_non_premarket_and_historical_mode_keep_strict_one_session_lag(self):
+        dates = pd.bdate_range("2026-08-03", periods=70)
+        market = pd.DataFrame({
+            "SOX": np.linspace(100.0, 170.0, 70),
+            "TSM": np.linspace(50.0, 85.0, 70),
+            "VIX": np.linspace(10.0, 25.0, 70),
+            "US10Y": np.linspace(3.0, 4.0, 70),
+            "TAIEX": np.linspace(17000.0, 20500.0, 70),
+        }, index=dates)
+        close_mode = _augment_router_features(
+            pd.DataFrame(index=dates), market, inference_time="2026-10-09T08:59:00Z"
+        )
+        historical_mode = _augment_router_features(pd.DataFrame(index=dates), market)
+        expected = market["SOX"].pct_change().shift(1).iloc[-1]
+        self.assertEqual(close_mode.iloc[-1]["國際:SOX"], expected)
+        self.assertEqual(historical_mode.iloc[-1]["國際:SOX"], expected)
+
+
+    def test_taiwan_premarket_window_includes_exact_start_and_excludes_exact_end(self):
+        self.assertFalse(is_taiwan_premarket("2026-11-23T21:29:00Z"))  # 05:29
+        self.assertTrue(is_taiwan_premarket("2026-11-23T21:30:00Z"))   # 05:30
+        self.assertTrue(is_taiwan_premarket("2026-11-24T00:59:00Z"))   # 08:59
+        self.assertFalse(is_taiwan_premarket("2026-11-24T01:00:00Z")) # 09:00
+
+
+    def test_premarket_future_us_session_close_is_rejected(self):
+        from regime_router import _us_close_observable
+
+        inference = "2026-11-19T00:25:00Z"  # 08:25 Taiwan; Nov 19 US close is still future.
+        self.assertFalse(_us_close_observable(pd.Timestamp("2026-11-19"), inference))
+        self.assertTrue(_us_close_observable(pd.Timestamp("2026-11-18"), inference))
+        self.assertFalse(_us_close_observable(pd.Timestamp("2026-11-18"), "2026-11-19T00:25:00"))
+
+        dates = pd.bdate_range("2026-11-16", periods=4)
+        source = pd.DataFrame({
+            "國際:SOX": [0.01, 0.02, 0.03, 0.04],
+            "區域:N225": [0.11, 0.12, 0.13, 0.14],
+        }, index=dates)
+        rejected = _lag_base_cross_market_features(source, inference_time=inference)
+        self.assertEqual(rejected.loc[dates[-1], "國際:SOX"], 0.03)
+        self.assertEqual(rejected.loc[dates[-1], "區域:N225"], 0.13)
+
+    def test_premarket_augment_rejects_latest_us_bar_if_close_is_future(self):
+        dates = pd.bdate_range("2026-08-03", periods=70)
+        market = pd.DataFrame({
+            "SOX": np.linspace(100.0, 170.0, 70),
+            "TSM": np.linspace(50.0, 85.0, 70),
+            "VIX": np.linspace(10.0, 25.0, 70),
+            "US10Y": np.linspace(3.0, 4.0, 70),
+            "N225": np.linspace(30000.0, 37000.0, 70),
+            "KOSPI": np.linspace(2500.0, 3200.0, 70),
+            "USDTWD": np.linspace(31.0, 32.0, 70),
+            "TAIEX": np.linspace(17000.0, 20500.0, 70),
+        }, index=dates)
+        # At 08:25 Taiwan on Oct 9, the Oct 9 US cash close has not occurred.
+        rejected = _augment_router_features(
+            pd.DataFrame(index=dates), market, inference_time="2026-10-09T00:25:00Z"
+        )
+        expected = market["SOX"].pct_change().shift(1).iloc[-1]
+        self.assertEqual(rejected.iloc[-1]["國際:SOX"], expected)
+        self.assertEqual(
+            rejected.iloc[-1]["router:VIX_change_5d"],
+            market["VIX"].pct_change(5).shift(1).iloc[-1],
+        )
+        self.assertEqual(
+            rejected.iloc[-1]["router:US10Y_change_5d"],
+            market["US10Y"].diff(5).shift(1).iloc[-1],
+        )
 
 
 if __name__ == "__main__":
