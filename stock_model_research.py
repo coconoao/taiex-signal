@@ -416,3 +416,115 @@ def analyze(stock_close, market_close, volume=None):
         },
         "disclaimer": "研究用途；歷史樣本外結果不代表未來表現，不構成投資建議或交易指示。",
     }
+
+
+
+def prequential_platt_candidates(features, close, horizon=21, oos_start="2024-01-01"):
+    """Compare unscaled logistic C=.1/.01 with expanding, matured-OOS Platt.
+
+    Walk-forward training and calibration purges use positions on the complete
+    feature/trading calendar, never the compressed valid-row index.
+    """
+    from scripts.final_oos_methods import fit_expanding_platt, binary_metrics
+
+    px = pd.to_numeric(close, errors="coerce").reindex(features.index)
+    forward_return = px.shift(-int(horizon)) / px - 1.0
+    labels = (forward_return > 0).where(forward_return.notna()).astype("float")
+    full_index = pd.DatetimeIndex(features.index)
+    positions = pd.Series(np.arange(len(full_index)), index=full_index)
+    valid = features.notna().all(axis=1) & labels.notna()
+    eligible_dates = full_index[valid.to_numpy()]
+    start_date = pd.Timestamp(oos_start)
+    oos_dates = eligible_dates[eligible_dates >= start_date]
+    raw_results = {}
+
+    for base_c in (0.1, 0.01):
+        raw_rows = []
+        for offset in range(0, len(oos_dates), STEP):
+            test_dates = oos_dates[offset:offset + STEP]
+            if not len(test_dates):
+                continue
+            first_pos = int(positions.loc[test_dates[0]])
+            candidate_train = eligible_dates[
+                (positions.reindex(eligible_dates).to_numpy() + int(horizon)) <= first_pos
+            ]
+            if len(candidate_train) < MIN_TRAIN or labels.loc[candidate_train].nunique() < 2:
+                continue
+            model = LogisticRegression(C=float(base_c), max_iter=700, random_state=RANDOM_STATE)
+            model.fit(features.loc[candidate_train], labels.loc[candidate_train].astype(int))
+            raw_prob = model.predict_proba(features.loc[test_dates])[:, 1]
+            train_prior = float(labels.loc[candidate_train].mean())
+            for date, probability in zip(test_dates, raw_prob):
+                raw_rows.append({
+                    "date": date,
+                    "raw_probability": float(probability),
+                    "actual": int(labels.loc[date]),
+                    "baseline_probability": train_prior,
+                    "training_samples": int(len(candidate_train)),
+                    "training_end": str(candidate_train.max().date()),
+                })
+        if not raw_rows:
+            raw_results[str(base_c)] = {"status": "insufficient", "samples": 0}
+            continue
+
+        raw_frame = pd.DataFrame(raw_rows).set_index("date").sort_index()
+        raw_series = raw_frame["raw_probability"]
+        actual_series = raw_frame["actual"]
+        calibrated = fit_expanding_platt(
+            raw_series, actual_series, full_index,
+            horizon_sessions=21, block_size=21,
+            min_samples=300, min_per_class=50, platt_c=1.0,
+        )
+        joined = calibrated.join(raw_frame[["baseline_probability"]], how="inner")
+        if joined.empty:
+            raw_results[str(base_c)] = {"status": "insufficient", "samples": 0}
+            continue
+
+        def summarize(frame):
+            y = frame["actual"].to_numpy(dtype=int)
+            p = np.clip(frame["probability"].to_numpy(dtype=float), 1e-8, 1 - 1e-8)
+            raw_p = np.clip(frame["raw_probability"].to_numpy(dtype=float), 1e-8, 1 - 1e-8)
+            baseline = np.clip(frame["baseline_probability"].to_numpy(dtype=float), 1e-8, 1 - 1e-8)
+            brier = float(np.mean((p - y) ** 2))
+            base_brier = float(np.mean((baseline - y) ** 2))
+            return {
+                "samples": int(len(frame)),
+                "start_date": str(frame.index.min().date()),
+                "end_date": str(frame.index.max().date()),
+                "brier_score": brier,
+                "baseline_brier_score": base_brier,
+                "brier_skill": float(1.0 - brier / base_brier) if base_brier > 0 else None,
+                "log_loss": float(log_loss(y, p, labels=[0, 1])),
+                "raw_brier_score": float(np.mean((raw_p - y) ** 2)),
+                "raw_log_loss": float(log_loss(y, raw_p, labels=[0, 1])),
+                "direction_accuracy_pct": float(np.mean((p >= 0.5) == (y == 1)) * 100.0),
+                "calibrated_blocks": int((frame["calibration_status"] == "platt_fitted").sum()),
+                "calibration_coverage_pct": float((frame["calibration_status"] == "platt_fitted").mean() * 100.0),
+            }
+
+        annual = {}
+        for year, group in joined.groupby(joined.index.year):
+            annual[str(year)] = summarize(group)
+        raw_results[str(base_c)] = {
+            "status": "available",
+            "base_model": "LogisticRegression_no_scaling",
+            "base_model_c": float(base_c),
+            "platt_regularization_c": 1.0,
+            "purge_sessions": 21,
+            "full_calendar_sessions": int(len(full_index)),
+            "minimum_calibration_samples": 300,
+            "minimum_each_class": 50,
+            "overall": summarize(joined),
+            "annual": annual,
+            "calibration_status_counts": {
+                str(k): int(v) for k, v in joined["calibration_status"].value_counts().items()
+            },
+        }
+    return {
+        "status": "available" if any(x.get("status") == "available" for x in raw_results.values()) else "insufficient",
+        "target_horizon_sessions": int(horizon),
+        "oos_start_requested": str(start_date.date()),
+        "oos_start_actual": min((v.get("overall", {}).get("start_date") for v in raw_results.values() if v.get("overall")), default=None),
+        "oos_end_actual": max((v.get("overall", {}).get("end_date") for v in raw_results.values() if v.get("overall")), default=None),
+        "candidates": raw_results,
+    }
