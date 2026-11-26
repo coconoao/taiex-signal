@@ -430,7 +430,7 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertFalse(is_taiwan_premarket("2026-11-23T17:25:00Z"))
 
     def test_premarket_base_features_only_unlag_latest_us_columns(self):
-        dates = pd.bdate_range("2026-11-16", periods=4)
+        dates = pd.bdate_range("2026-11-16", periods=3)
         source = pd.DataFrame({
             "國際:SOX": [0.01, 0.02, 0.03, 0.04],
             "區域:N225": [0.11, 0.12, 0.13, 0.14],
@@ -459,7 +459,7 @@ class RegimeRouterTests(unittest.TestCase):
             "TAIEX": np.linspace(17000.0, 20500.0, 70),
         }, index=dates)
         premarket = _augment_router_features(
-            pd.DataFrame(index=dates), market, inference_time="2026-10-09T00:25:00Z"
+            pd.DataFrame(index=dates), market, inference_time="2026-10-10T00:25:00Z"
         )
         self.assertAlmostEqual(
             premarket.iloc[-1]["國際:SOX"], market["SOX"].pct_change().iloc[-1]
@@ -494,6 +494,51 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertTrue(is_taiwan_premarket("2026-11-23T21:30:00Z"))   # 05:30
         self.assertTrue(is_taiwan_premarket("2026-11-24T00:59:00Z"))   # 08:59
         self.assertFalse(is_taiwan_premarket("2026-11-24T01:00:00Z")) # 09:00
+
+
+    def test_premarket_future_us_session_close_is_rejected(self):
+        from regime_router import _us_close_observable
+
+        inference = "2026-11-19T00:25:00Z"  # 08:25 Taiwan; Nov 19 US close is still future.
+        self.assertFalse(_us_close_observable(pd.Timestamp("2026-11-19"), inference))
+        self.assertTrue(_us_close_observable(pd.Timestamp("2026-11-18"), inference))
+        self.assertFalse(_us_close_observable(pd.Timestamp("2026-11-18"), "2026-11-19T00:25:00"))
+
+        dates = pd.bdate_range("2026-11-16", periods=4)
+        source = pd.DataFrame({
+            "國際:SOX": [0.01, 0.02, 0.03, 0.04],
+            "區域:N225": [0.11, 0.12, 0.13, 0.14],
+        }, index=dates)
+        rejected = _lag_base_cross_market_features(source, inference_time=inference)
+        self.assertEqual(rejected.loc[dates[-1], "國際:SOX"], 0.03)
+        self.assertEqual(rejected.loc[dates[-1], "區域:N225"], 0.13)
+
+    def test_premarket_augment_rejects_latest_us_bar_if_close_is_future(self):
+        dates = pd.bdate_range("2026-08-03", periods=70)
+        market = pd.DataFrame({
+            "SOX": np.linspace(100.0, 170.0, 70),
+            "TSM": np.linspace(50.0, 85.0, 70),
+            "VIX": np.linspace(10.0, 25.0, 70),
+            "US10Y": np.linspace(3.0, 4.0, 70),
+            "N225": np.linspace(30000.0, 37000.0, 70),
+            "KOSPI": np.linspace(2500.0, 3200.0, 70),
+            "USDTWD": np.linspace(31.0, 32.0, 70),
+            "TAIEX": np.linspace(17000.0, 20500.0, 70),
+        }, index=dates)
+        # At 08:25 Taiwan on Oct 9, the Oct 9 US cash close has not occurred.
+        rejected = _augment_router_features(
+            pd.DataFrame(index=dates), market, inference_time="2026-10-09T00:25:00Z"
+        )
+        expected = market["SOX"].pct_change().shift(1).iloc[-1]
+        self.assertEqual(rejected.iloc[-1]["國際:SOX"], expected)
+        self.assertEqual(
+            rejected.iloc[-1]["router:VIX_change_5d"],
+            market["VIX"].pct_change(5).shift(1).iloc[-1],
+        )
+        self.assertEqual(
+            rejected.iloc[-1]["router:US10Y_change_5d"],
+            market["US10Y"].diff(5).shift(1).iloc[-1],
+        )
 
 
 if __name__ == "__main__":
