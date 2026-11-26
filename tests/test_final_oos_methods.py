@@ -49,7 +49,7 @@ def test_expanding_platt_never_uses_unmatured_or_same_block_labels():
     actual = pd.Series((np.arange(len(dates)) % 2), index=dates)
     result = fit_expanding_platt(
         raw, actual, calendar, horizon_sessions=21, block_size=10,
-        min_samples=20, min_per_class=5, c_value=0.1,
+        min_samples=20, min_per_class=5, platt_c=1.0,
     )
     for date, row in result.iterrows():
         fit_end = row["calibration_fit_end"]
