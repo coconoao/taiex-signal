@@ -131,6 +131,7 @@ def router_oos(market: pd.DataFrame, ohlc: pd.DataFrame | None = None) -> dict:
                 "samples": metrics.get("oos_samples", 0),
                 "oos_start": metrics.get("oos_start_date"),
                 "oos_end": metrics.get("oos_end_date"),
+                "oos_dates": item.get("oos_forecast_dates", []),
                 "mae_points": metrics.get("routed_mae_points"),
                 "direction_accuracy_pct": (
                     round(100 * metrics["routed_direction_accuracy"], 2)
@@ -153,7 +154,7 @@ def router_oos(market: pd.DataFrame, ohlc: pd.DataFrame | None = None) -> dict:
         f, a = fixed_rows[horizon], atr_rows[horizon]
         comparison.append({
             "horizon": horizon,
-            "same_oos_dates": f.get("oos_start") == a.get("oos_start") and f.get("oos_end") == a.get("oos_end"),
+            "same_oos_dates": f.get("oos_dates") == a.get("oos_dates"),
             "fixed_samples": f.get("samples"), "atr_samples": a.get("samples"),
             "fixed_start": f.get("oos_start"), "fixed_end": f.get("oos_end"),
             "atr_start": a.get("oos_start"), "atr_end": a.get("oos_end"),
@@ -170,6 +171,7 @@ def router_oos(market: pd.DataFrame, ohlc: pd.DataFrame | None = None) -> dict:
         "data_start": str(close.index.min().date()) if len(close) else None,
         "data_end": str(close.index.max().date()) if len(close) else None,
         "atr_warmup_sessions": 20,
+        "atr_warmup_fallback_total_sessions": int(atr.isna().sum()) if atr is not None else None,
         "atr_threshold_ratios": [0.5, 1.0, 2.0],
         "by_mode": results,
         "paired_comparison": comparison,
@@ -239,8 +241,8 @@ def render(report: dict) -> str:
     ]
     lines += [
         "", "### Annual paired OOS metrics",
-        "| Year | Horizon | Fixed N | ATR N | Fixed MAE | ATR MAE | Fixed direction % | ATR direction % | Signal frequency multiple | ATR warmup N |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Year | Horizon | Fixed N | ATR N | Fixed dates | ATR dates | Fixed MAE | ATR MAE | Fixed direction % | ATR direction % | Signal frequency multiple | ATR warmup N |",
+        "|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|
     ]
     for horizon in sorted({x["horizon"] for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", [])}):
         fixed_row = next((x for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", []) if x["horizon"] == horizon), {})
