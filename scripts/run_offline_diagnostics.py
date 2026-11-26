@@ -312,8 +312,8 @@ def render(report: dict) -> str:
         f"- Actual OOS range: {preq.get('oos_start_actual')} to {preq.get('oos_end_actual')}",
         "- Base models: unscaled LogisticRegression C=0.1 and C=0.01; Platt C=1.0.",
         "- Calibration fit uses only prior matured OOS labels, purged against the complete trading-session index.",
-        "| Base C | Year | N | Brier | Brier Skill | Brier Skill 95% CI | Log Loss | LogLoss delta 95% CI | Direction % | Slope | Intercept | ECE | Calibrated coverage % |",
-        "|---:|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|",
+        "| Base C | Year | N | Brier | Brier Skill | Brier Skill 95% CI | Log Loss | LogLoss delta 95% CI | Direction % | Baseline direction % | Delta pp | All slope | All intercept | All ECE | Fitted N | Fitted slope | Fitted intercept | Fitted ECE | Coverage % |",
+        "|---:|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for candidate, result in preq.get("candidates", {}).items():
         if result.get("status") != "available":
@@ -324,8 +324,11 @@ def render(report: dict) -> str:
                 f"| {candidate} | {year} | {metrics.get('samples')} | {metrics.get('brier_score')} | "
                 f"{metrics.get('brier_skill')} | {metrics.get('brier_skill_95pct_block_bootstrap_ci')} | "
                 f"{metrics.get('log_loss')} | {metrics.get('log_loss_delta_95pct_block_bootstrap_ci')} | "
-                f"{metrics.get('direction_accuracy_pct')} | {metrics.get('calibration_slope')} | "
+                f"{metrics.get('direction_accuracy_pct')} | {metrics.get('baseline_direction_accuracy_pct')} | "
+                f"{metrics.get('direction_delta_vs_baseline_pp')} | {metrics.get('calibration_slope')} | "
                 f"{metrics.get('calibration_intercept')} | {metrics.get('ece_10_bins')} | "
+                f"{metrics.get('fitted_only_samples')} | {metrics.get('fitted_only_calibration_slope')} | "
+                f"{metrics.get('fitted_only_calibration_intercept')} | {metrics.get('fitted_only_ece_10_bins')} | "
                 f"{metrics.get('calibration_coverage_pct')} |"
             )
     if report.get("warnings"):
