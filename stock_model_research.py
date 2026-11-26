@@ -88,7 +88,7 @@ def build_features(stock_close, market_close, volume=None):
 def _factories():
     return {
         "regularized_logistic": lambda: make_pipeline(
-            StandardScaler(), LogisticRegression(C=0.1, max_iter=700)
+            StandardScaler(), LogisticRegression(C=0.1, max_iter=2000)
         ),
         "hist_gradient_boosting": lambda: HistGradientBoostingClassifier(
             max_iter=100, max_leaf_nodes=7, min_samples_leaf=30,
@@ -451,7 +451,7 @@ def prequential_platt_candidates(features, close, horizon=21, oos_start="2024-01
             ]
             if len(candidate_train) < MIN_TRAIN or labels.loc[candidate_train].nunique() < 2:
                 continue
-            model = LogisticRegression(C=float(base_c), max_iter=700, random_state=RANDOM_STATE)
+            model = LogisticRegression(C=float(base_c), max_iter=2000, random_state=RANDOM_STATE)
             model.fit(features.loc[candidate_train], labels.loc[candidate_train].astype(int))
             raw_prob = model.predict_proba(features.loc[test_dates])[:, 1]
             train_prior = float(labels.loc[candidate_train].mean())
