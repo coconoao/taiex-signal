@@ -432,9 +432,9 @@ class RegimeRouterTests(unittest.TestCase):
     def test_premarket_base_features_only_unlag_latest_us_columns(self):
         dates = pd.bdate_range("2026-11-16", periods=4)
         source = pd.DataFrame({
-            "國際:SOX": [0.01, 0.02, 0.03],
-            "區域:N225": [0.11, 0.12, 0.13],
-            "本地:當日漲跌": [1, 2, 3],
+            "國際:SOX": [0.01, 0.02, 0.03, 0.04],
+            "區域:N225": [0.11, 0.12, 0.13, 0.14],
+            "本地:當日漲跌": [1, 2, 3, 4],
         }, index=dates)
         historical = _lag_base_cross_market_features(source)
         premarket = _lag_base_cross_market_features(
@@ -447,7 +447,7 @@ class RegimeRouterTests(unittest.TestCase):
         self.assertEqual(premarket.loc[dates[-2], "國際:SOX"], 0.02)
 
     def test_premarket_augment_uses_latest_us_close_but_not_regional_close(self):
-        dates = pd.bdate_range("2026-08-03", periods=70)
+        dates = pd.bdate_range("2026-08-03", periods=50)
         market = pd.DataFrame({
             "SOX": np.linspace(100.0, 170.0, 70),
             "TSM": np.linspace(50.0, 85.0, 70),
