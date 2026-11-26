@@ -207,114 +207,128 @@ def render(report: dict) -> str:
         "- Scope: read-only historical research; no production DB writes.",
         "",
         "## Annual regime distribution",
-        "Future target: maximum absolute daily move over the next three sessions.",
         "| Method | Year | N | Low % | Normal % | High % | Extreme % |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
-    for r in report["regime_distribution"]:
+    for r in report.get("regime_distribution", []):
         lines.append(
             f"| {r['threshold_set']} | {r['year']} | {r['samples']} | "
             f"{r['low_pct']} | {r['normal_pct']} | {r['high_pct']} | {r['extreme_pct']} |"
         )
-    lines += [
-        "", "Methods: fixed current/candidate thresholds; trailing 252-session quantiles "
-        "(50th/75th/95th percentile of historical three-session maxima); 20-session "
-        "realized-volatility standardization; and 20-session true-range ATR standardization "
-        "when OHLC data is available.",
-        "", "## Paired router OOS: fixed versus 20-session ATR%",
-        f"- Data range: {report.get('router_oos', {}).get('data_start')} to {report.get('router_oos', {}).get('data_end')}",
-        "- ATR: trailing 20-session simple true-range average / close; first 20 sessions use fixed-threshold fallback.",
-        "| Mode | Horizon | N | OOS start | OOS end | MAE pts | Direction % | Signal frequency % | ATR warmup fallback N |",
-        "|---|---|---:|---|---|---:|---:|---:|---:|",
-    ]
+
     router = report.get("router_oos", {})
-    for mode in ("fixed", "atr"):
-        for r in router.get("by_mode", {}).get(mode, {}).get("horizons", []):
-            lines.append(
-                f"| {mode} | {r['horizon']} | {r['samples']} | {r['oos_start']} | {r['oos_end']} | "
-                f"{r['mae_points']} | {r['direction_accuracy_pct']} | {r.get('signal_non_normal_regime_pct')} | "
-                f"{r.get('atr_warmup_fallback_samples')} |"
-            )
     lines += [
-        "", "### Paired comparison",
-        "| Horizon | Same OOS dates | Fixed N | ATR N | MAE delta (ATR-fixed) | Direction delta pp | Signal frequency multiple |",
-        "|---|---|---:|---:|---:|---:|---:|",
+        "", "## Paired router OOS: fixed versus 20-session ATR%",
+        f"- Full price data range: {router.get('data_start')} to {router.get('data_end')}",
+        "- OOS evaluation starts 2024-01-01; both variants use the same features, training origins, and test origins.",
+        "- ATR: trailing 20-session simple true-range average / close; missing or warmup ATR falls back to fixed thresholds.",
+        "- Signal frequency means the share of OOS forecasts routed to a non-normal regime.",
+        f"- ATR unavailable/warmup rows in full input history: {router.get('atr_warmup_fallback_total_sessions')}",
+        "| Mode | Horizon | N | OOS start | OOS end | MAE pts | Direction % | Multiclass Brier | Log Loss | Signal frequency % | OOS warmup fallback N |",
+        "|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|",
     ]
+    for mode in ("fixed", "atr"):
+        for row in router.get("by_mode", {}).get(mode, {}).get("horizons", []):
+            rv = row.get("router_validation", {})
+            lines.append(
+                f"| {mode} | {row['horizon']} | {row['samples']} | {row['oos_start']} | {row['oos_end']} | "
+                f"{row['mae_points']} | {row['direction_accuracy_pct']} | {rv.get('multiclass_brier')} | "
+                f"{rv.get('log_loss')} | {row.get('signal_non_normal_regime_pct')} | "
+                f"{row.get('atr_warmup_fallback_samples')} |"
+            )
+
+    lines += [
+        "", "### Overall paired comparison",
+        "| Horizon | Exact same OOS dates | Fixed N | ATR N | MAE delta (ATR-fixed) | Direction delta pp | Multiclass Brier delta | Log Loss delta | Signal frequency multiple |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for pair in router.get("paired_comparison", []):
+        fixed_row = next((x for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", []) if x["horizon"] == pair["horizon"]), {})
+        atr_row = next((x for x in router.get("by_mode", {}).get("atr", {}).get("horizons", []) if x["horizon"] == pair["horizon"]), {})
+        fval, aval = fixed_row.get("router_validation", {}), atr_row.get("router_validation", {})
+        fp, ap = fixed_row.get("signal_non_normal_regime_pct"), atr_row.get("signal_non_normal_regime_pct")
+        multiple = round(ap / fp, 4) if fp not in (None, 0) and ap is not None else None
+        lines.append(
+            f"| {pair['horizon']} | {pair['same_oos_dates']} | {pair['fixed_samples']} | {pair['atr_samples']} | "
+            f"{pair['mae_delta_atr_minus_fixed']} | {pair['direction_delta_pp_atr_minus_fixed']} | "
+            f"{(aval.get('multiclass_brier') - fval.get('multiclass_brier')) if aval.get('multiclass_brier') is not None and fval.get('multiclass_brier') is not None else None} | "
+            f"{(aval.get('log_loss') - fval.get('log_loss')) if aval.get('log_loss') is not None and fval.get('log_loss') is not None else None} | {multiple} |"
+        )
+
     lines += [
         "", "### Annual paired OOS metrics",
-        "| Year | Horizon | Fixed N | ATR N | Fixed dates | ATR dates | Fixed MAE | ATR MAE | Fixed direction % | ATR direction % | Signal frequency multiple | ATR warmup N |",
-        "|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|
+        "| Year | Horizon | Fixed N | ATR N | Fixed dates | ATR dates | Fixed MAE | ATR MAE | Fixed direction % | ATR direction % | Fixed Brier | ATR Brier | Fixed LogLoss | ATR LogLoss | Signal frequency multiple | ATR warmup N |",
+        "|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for horizon in sorted({x["horizon"] for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", [])}):
         fixed_row = next((x for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", []) if x["horizon"] == horizon), {})
         atr_row = next((x for x in router.get("by_mode", {}).get("atr", {}).get("horizons", []) if x["horizon"] == horizon), {})
         years = sorted(set(fixed_row.get("annual", {})) | set(atr_row.get("annual", {})))
         for year in years:
-            f = fixed_row.get("annual", {}).get(year, {})
-            a = atr_row.get("annual", {}).get(year, {})
+            f, a = fixed_row.get("annual", {}).get(year, {}), atr_row.get("annual", {}).get(year, {})
+            fv, av = f.get("router_validation", {}), a.get("router_validation", {})
             fp, ap = f.get("non_normal_regime_pct"), a.get("non_normal_regime_pct")
             multiple = round(ap / fp, 4) if fp not in (None, 0) and ap is not None else None
+            fd = f"{f.get('oos_start_date')}–{f.get('oos_end_date')}"
+            ad = f"{a.get('oos_start_date')}–{a.get('oos_end_date')}"
             lines.append(
-                f"| {year} | {horizon} | {f.get('oos_samples')} | {a.get('oos_samples')} | "
-                f"{f.get('oos_start_date')}–{f.get('oos_end_date')} | {a.get('oos_start_date')}–{a.get('oos_end_date')} | "
+                f"| {year} | {horizon} | {f.get('oos_samples')} | {a.get('oos_samples')} | {fd} | {ad} | "
                 f"{f.get('routed_mae_points')} | {a.get('routed_mae_points')} | "
-                f"{(100*f.get('routed_direction_accuracy')) if f.get('routed_direction_accuracy') is not None else None} | "
-                f"{(100*a.get('routed_direction_accuracy')) if a.get('routed_direction_accuracy') is not None else None} | "
+                f"{100 * f.get('routed_direction_accuracy') if f.get('routed_direction_accuracy') is not None else None} | "
+                f"{100 * a.get('routed_direction_accuracy') if a.get('routed_direction_accuracy') is not None else None} | "
+                f"{fv.get('multiclass_brier')} | {av.get('multiclass_brier')} | {fv.get('log_loss')} | {av.get('log_loss')} | "
                 f"{multiple} | {a.get('atr_warmup_fallback_samples')} |"
             )
-    for r in router.get("paired_comparison", []):
-        fixed_row = next((x for x in router.get("by_mode", {}).get("fixed", {}).get("horizons", []) if x["horizon"] == r["horizon"]), {})
-        atr_row = next((x for x in router.get("by_mode", {}).get("atr", {}).get("horizons", []) if x["horizon"] == r["horizon"]), {})
-        fp = fixed_row.get("signal_non_normal_regime_pct")
-        ap = atr_row.get("signal_non_normal_regime_pct")
-        multiple = round(ap / fp, 4) if fp not in (None, 0) and ap is not None else None
-        lines.append(
-            f"| {r['horizon']} | {r['same_oos_dates']} | {r['fixed_samples']} | {r['atr_samples']} | "
-            f"{r['mae_delta_atr_minus_fixed']} | {r['direction_delta_pp_atr_minus_fixed']} | {multiple} |"
-        )
+
     lines += ["", "## Stock research holdout"]
-    for label, r in report["stock_oos"].items():
+    for label, row in report.get("stock_oos", {}).items():
         lines += [
             "", f"### {label}",
-            f"- Status/model: {r.get('status')} / {r.get('selected_research_model')}",
-            f"- Holdout: {json.dumps(r.get('untouched_holdout'), ensure_ascii=False)}",
-            f"- Annual OOS: {json.dumps(r.get('annual_holdout_metrics', {}), ensure_ascii=False)}",
+            f"- Status/model: {row.get('status')} / {row.get('selected_research_model')}",
+            f"- Holdout: {json.dumps(row.get('untouched_holdout'), ensure_ascii=False)}",
+            f"- Annual OOS: {json.dumps(row.get('annual_holdout_metrics', {}), ensure_ascii=False)}",
         ]
+
     lines += [
         "", "## Probability calibration and regularization experiments",
-        "All rows use the untouched chronological holdout. Platt and isotonic calibrators "
-        "are fitted only on matured development OOS predictions. Holdout data is never used "
-        "to select regularization, scaling, or calibration settings.",
+        "Existing chronological holdout experiments; calibrators use matured development OOS only.",
         "| Horizon | Scaling | C | Method | N | Brier | Brier Skill | Log Loss | Direction % |",
         "|---|---|---:|---|---:|---:|---:|---:|---:|",
     ]
-    for horizon, experiment in report["probability_calibration"].items():
+    for horizon, experiment in report.get("probability_calibration", {}).items():
         for config in experiment.get("experiments", []):
             for method, result in config.get("methods", {}).items():
                 metrics = result.get("holdout_metrics")
-                if result.get("status") != "available" or not metrics:
-                    continue
-                lines.append(
-                    f"| {horizon} | {config['scaling']} | {config['C']} | {method} | "
-                    f"{metrics['samples']} | {metrics['brier_score']} | {metrics['brier_skill']} | "
-                    f"{metrics['log_loss']} | {metrics['direction_accuracy_pct']} |"
-                )
-    lines += ["", "## Expanding-window prequential Platt (21-session purge)"]
+                if result.get("status") == "available" and metrics:
+                    lines.append(
+                        f"| {horizon} | {config['scaling']} | {config['C']} | {method} | "
+                        f"{metrics['samples']} | {metrics['brier_score']} | {metrics['brier_skill']} | "
+                        f"{metrics['log_loss']} | {metrics['direction_accuracy_pct']} |"
+                    )
+
     preq = report.get("prequential_platt", {})
-    lines.append(f"- Actual OOS range: {preq.get('oos_start_actual')} to {preq.get('oos_end_actual')}")
-    lines.append("| Base model | Base C | Platt C | Year | N | Brier | Brier Skill | Log Loss | Direction % | Calibrated coverage % |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    lines += [
+        "", "## Expanding-window prequential Platt (21-session purge)",
+        f"- Actual OOS range: {preq.get('oos_start_actual')} to {preq.get('oos_end_actual')}",
+        "- Base models: unscaled LogisticRegression C=0.1 and C=0.01; Platt C=1.0.",
+        "- Calibration fit uses only prior matured OOS labels, purged against the complete trading-session index.",
+        "| Base C | Year | N | Brier | Brier Skill | Brier Skill 95% CI | Log Loss | LogLoss delta 95% CI | Direction % | Slope | Intercept | ECE | Calibrated coverage % |",
+        "|---:|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|",
+    ]
     for candidate, result in preq.get("candidates", {}).items():
         if result.get("status") != "available":
-            lines.append(f"| Logistic no-scaler | {candidate} | 1.0 | all | 0 | NA | NA | NA | NA | NA |")
+            lines.append(f"| {candidate} | all | 0 | NA | NA | NA | NA | NA | NA | NA | NA | NA | 0 |")
             continue
         for year, metrics in [("all", result.get("overall", {})), *result.get("annual", {}).items()]:
             lines.append(
-                f"| Logistic no-scaler | {candidate} | 1.0 | {year} | {metrics.get('samples')} | "
-                f"{metrics.get('brier_score')} | {metrics.get('brier_skill')} | {metrics.get('log_loss')} | "
-                f"{metrics.get('direction_accuracy_pct')} | {metrics.get('calibration_coverage_pct')} |"
+                f"| {candidate} | {year} | {metrics.get('samples')} | {metrics.get('brier_score')} | "
+                f"{metrics.get('brier_skill')} | {metrics.get('brier_skill_95pct_block_bootstrap_ci')} | "
+                f"{metrics.get('log_loss')} | {metrics.get('log_loss_delta_95pct_block_bootstrap_ci')} | "
+                f"{metrics.get('direction_accuracy_pct')} | {metrics.get('calibration_slope')} | "
+                f"{metrics.get('calibration_intercept')} | {metrics.get('ece_10_bins')} | "
+                f"{metrics.get('calibration_coverage_pct')} |"
             )
-    if report["warnings"]:
+    if report.get("warnings"):
         lines += ["", "## Warnings"] + [f"- {warning}" for warning in report["warnings"]]
     return "\n".join(lines) + "\n"
 
