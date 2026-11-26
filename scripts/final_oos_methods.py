@@ -89,7 +89,7 @@ def fit_expanding_platt(
     block_size: int = 21,
     min_samples: int = 300,
     min_per_class: int = 50,
-    c_value: float = 1.0,
+    platt_c: float = 1.0,
 ) -> pd.DataFrame:
     """Prequential Platt probabilities using only matured earlier OOS records.
 
@@ -126,7 +126,7 @@ def fit_expanding_platt(
         if enough:
             safe = np.clip(train_x.to_numpy(dtype=float), 1e-8, 1 - 1e-8)
             logits = np.log(safe / (1 - safe)).reshape(-1, 1)
-            model = LogisticRegression(C=float(c_value), max_iter=500, random_state=37)
+            model = LogisticRegression(C=float(platt_c), max_iter=500, random_state=37)
             model.fit(logits, train_y.to_numpy(dtype=int))
             test_safe = np.clip(raw.loc[test_dates].to_numpy(dtype=float), 1e-8, 1 - 1e-8)
             test_logits = np.log(test_safe / (1 - test_safe)).reshape(-1, 1)
@@ -145,7 +145,7 @@ def fit_expanding_platt(
                 "calibration_status": status,
                 "calibration_samples": int(len(train_y)),
                 "calibration_fit_end": str(eligible.max().date()) if enough and len(eligible) else None,
-                "calibrator_c": float(c_value) if enough else None,
+                "platt_regularization_c": float(platt_c) if enough else None,
             })
     return pd.DataFrame(output).set_index("date")
 
