@@ -432,9 +432,9 @@ class RegimeRouterTests(unittest.TestCase):
     def test_premarket_base_features_only_unlag_latest_us_columns(self):
         dates = pd.bdate_range("2026-11-16", periods=3)
         source = pd.DataFrame({
-            "國際:SOX": [0.01, 0.02, 0.03, 0.04],
-            "區域:N225": [0.11, 0.12, 0.13, 0.14],
-            "本地:當日漲跌": [1, 2, 3, 4],
+            "國際:SOX": [0.01, 0.02, 0.03],
+            "區域:N225": [0.11, 0.12, 0.13],
+            "本地:當日漲跌": [1, 2, 3],
         }, index=dates)
         historical = _lag_base_cross_market_features(source)
         premarket = _lag_base_cross_market_features(
@@ -458,6 +458,9 @@ class RegimeRouterTests(unittest.TestCase):
             "USDTWD": np.linspace(31.0, 32.0, 70),
             "TAIEX": np.linspace(17000.0, 20500.0, 70),
         }, index=dates)
+        from regime_router import _us_close_observable
+        self.assertTrue(is_taiwan_premarket("2026-10-10T00:25:00Z"))
+        self.assertTrue(_us_close_observable(dates[-1], "2026-10-10T00:25:00Z"))
         premarket = _augment_router_features(
             pd.DataFrame(index=dates), market, inference_time="2026-10-10T00:25:00Z"
         )
