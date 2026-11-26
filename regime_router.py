@@ -218,8 +218,14 @@ def _augment_router_features(X, market_data, inference_time=None):
         if ticker in market:
             momentum = market[ticker].pct_change(5)
             aligned = momentum.shift(1)
-            if premarket and ticker in us_tickers and len(aligned):
-                aligned.iloc[-1] = momentum.iloc[-1]
+            if (
+                premarket
+                and ticker in us_tickers
+                and len(features.index)
+                and _us_close_observable(features.index[-1], inference_time)
+                and pd.notna(market.at[features.index[-1], ticker])
+            ):
+                aligned.loc[features.index[-1]] = momentum.loc[features.index[-1]]
             features[f"router:{ticker}_momentum_5d"] = aligned
     if "VIX" in market:
         vix = market["VIX"]
