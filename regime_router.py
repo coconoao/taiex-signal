@@ -933,7 +933,7 @@ def _forecast_metrics(rows):
     }
 
 
-def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True, inference_time=None):
+def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, market_data=None, post_close_features_lagged=False, allowed_sample_index_by_horizon=None, include_gate_sensitivity=True, inference_time=None, regime_threshold_mode="fixed", atr_pct=None):
     """Train and evaluate an independent router + four specialists per horizon.
 
     features_by_horizon maps horizon -> (feature_frame, cumulative forward-return series).
@@ -943,6 +943,10 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
     """
     close = pd.to_numeric(close, errors="coerce").dropna().sort_index()
     target_meta = target_meta or {}
+    if regime_threshold_mode not in ("fixed", "atr"):
+        raise ValueError("regime_threshold_mode must be fixed or atr")
+    if regime_threshold_mode == "atr" and atr_pct is None:
+        raise ValueError("atr_pct is required when regime_threshold_mode=atr")
     sessions = []
     for horizon in (1, 2, 3):
         if horizon not in features_by_horizon:
@@ -975,6 +979,16 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             continue
         latest = latest_candidates[-1]
         future_max_daily_move = _future_max_daily_move(close, horizon).reindex(X.index)
+        if regime_threshold_mode == "atr":
+            from scripts.final_oos_methods import classify_fixed_and_atr
+            regime_targets = classify_fixed_and_atr(
+                future_max_daily_move, atr_pct.reindex(X.index)
+            )
+            regime_labels = regime_targets["atr"]
+            atr_warmup = regime_targets["atr_warmup_fallback"]
+        else:
+            regime_labels = classify_regimes(future_max_daily_move)
+            atr_warmup = pd.Series(False, index=X.index)
         train_idx = X.index[
             valid_features & forward_returns.notna() & future_max_daily_move.notna() & (X.index < latest)
         ]
@@ -1005,7 +1019,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             )
             if len(fit_idx) < MIN_TRAIN_SAMPLES:
                 continue
-            fit_regimes = classify_regimes(future_max_daily_move.loc[fit_idx]).astype(int)
+            fit_regimes = regime_labels.loc[fit_idx].astype(int)
             prior_regime_probs = _prior_regime_probabilities(fit_regimes, smoothing=1.0)
             router = _fit_router(X.loc[fit_idx], fit_regimes)
             fallback_class = int(pd.Series(fit_regimes).mode().iloc[0])
@@ -1093,7 +1107,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                     continue
                 if calibrator is not None:
                     calibrated_oos_samples += 1
-                actual_class = int(classify_regimes([actual_max_move])[0])
+                actual_class = int(regime_labels.loc[asof_date])
                 oos_actual.append(actual_class)
                 oos_predicted.append(requested)
                 oos_probabilities.append(probs[offset].tolist())
@@ -1104,6 +1118,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 ))
                 oos_forecasts.append({
                     "forecast_asof": str(asof_date.date()),
+                    "atr_warmup_fallback": bool(atr_warmup.loc[asof_date]),
+                    "requested_regime_id": int(requested),
                     "forecast_position": int(X.index.get_loc(asof_date)),
                     "oos_block_start_position": int(batch_position),
                     "requested_expert": expert_used,
@@ -1136,9 +1152,7 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         final_train_idx = _purged_training_indices(
             X.index, train_idx, latest, horizon
         )
-        final_regimes = classify_regimes(
-            future_max_daily_move.loc[final_train_idx]
-        ).astype(int)
+        final_regimes = regime_labels.loc[final_train_idx].astype(int)
         router = _fit_router(X.loc[final_train_idx], final_regimes)
         fallback_class = int(pd.Series(final_regimes).mode().iloc[0])
         latest_raw_probs = _router_probabilities(router, X.loc[[latest]], fallback_class=fallback_class)
@@ -1276,6 +1290,15 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                 "calibration_coverage_pct": round(100.0 * calibrated_oos_samples / len(oos_actual), 2) if oos_actual else 0.0,
             },
             "routed_forecast_validation": _forecast_metrics(oos_forecasts),
+            "annual_oos_metrics": {
+                str(year): {
+                    **_forecast_metrics([row for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year]),
+                    "atr_warmup_fallback_samples": int(sum(row.get("atr_warmup_fallback", False) for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year)),
+                    "non_normal_regime_pct": round(100.0 * sum(row.get("requested_regime_id", 1) != 1 for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year) / max(1, sum(pd.Timestamp(row["forecast_asof"]).year == year for row in oos_forecasts)), 4),
+                } for year in sorted({pd.Timestamp(row["forecast_asof"]).year for row in oos_forecasts})
+            },
+            "atr_warmup_fallback_samples": int(sum(row.get("atr_warmup_fallback", False) for row in oos_forecasts)),
+            "regime_threshold_mode": regime_threshold_mode,
             "gate_policy_sensitivity": (
                 _gate_policy_sensitivity(oos_forecasts, horizon)
                 if include_gate_sensitivity else {
@@ -1295,6 +1318,8 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
         "status": "research" if any(x.get("status") == "research" for x in sessions) else "insufficient",
         "model_version": "four-regime-router-moE-performance-gated-research-v2",
         "routing_priority": "router_first",
+        "regime_threshold_mode": regime_threshold_mode,
+        "atr_warmup_policy": "fixed-threshold fallback when trailing 20-session ATR% unavailable" if regime_threshold_mode == "atr" else None,
         "regime_definitions": {
             "low": {"max_future_max_daily_move_pct": 0.5},
             "normal": {"min_future_max_daily_move_pct_exclusive": 0.5, "max_future_max_daily_move_pct": 1.0},
