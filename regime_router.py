@@ -1140,7 +1140,10 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
                     "actual_max_daily_move": actual_max_move,
                     "global_predicted_max_daily_move": global_max_move,
                     "actual_regime": actual_class,
+                    "actual_regime_id": int(actual_class),
                     "requested_regime": REGIME_NAMES[requested],
+                    "regime_probabilities": probs[offset].tolist(),
+                    "prior_regime_probabilities": prior_regime_probs.tolist(),
                     "expert_used": expert_used,
                 })
             # Outcomes from this block are retained with target timing; later
@@ -1295,6 +1298,12 @@ def build_regime_router_forecasts(features_by_horizon, close, target_meta=None, 
             "annual_oos_metrics": {
                 str(year): {
                     **_forecast_metrics([row for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year]),
+                    "router_validation": _router_metrics(
+                        [row["actual_regime_id"] for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year],
+                        [row["requested_regime_id"] for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year],
+                        [row["regime_probabilities"] for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year],
+                        [row["prior_regime_probabilities"] for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year],
+                    ),
                     "atr_warmup_fallback_samples": int(sum(row.get("atr_warmup_fallback", False) for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year)),
                     "non_normal_regime_pct": round(100.0 * sum(row.get("requested_regime_id", 1) != 1 for row in oos_forecasts if pd.Timestamp(row["forecast_asof"]).year == year) / max(1, sum(pd.Timestamp(row["forecast_asof"]).year == year for row in oos_forecasts)), 4),
                 } for year in sorted({pd.Timestamp(row["forecast_asof"]).year for row in oos_forecasts})
